@@ -14,6 +14,7 @@ const suffix = process.env.TEST_RUN_ID ?? "thread-writer-spec";
 const domain = `threads-${suffix}.test`;
 const userId = `user-${suffix}`;
 const mailbox = `rep-${suffix}@example.test`;
+const mailboxId = `mailbox-${suffix}`;
 const person = `buyer@${domain}`;
 const rootId = `<root-${suffix}@mail.test>`;
 const movedRoot = `outlook-conversation:${suffix}`;
@@ -63,8 +64,17 @@ beforeAll(async () => {
 	await db.user.create({
 		data: { id: userId, name: "Test Rep", email: mailbox },
 	});
+	await db.mailbox.create({
+		data: {
+			id: mailboxId,
+			ownerUserId: userId,
+			address: mailbox,
+			normalizedAddress: mailbox.toLowerCase(),
+			status: "UNVERIFIED",
+		},
+	});
 	row = await db.mailboxSync.create({
-		data: { userId, source: "gmail", autoCreate: false },
+		data: { userId, mailboxId, source: "gmail", autoCreate: false },
 	});
 
 	const company = await db.company.create({
@@ -95,7 +105,7 @@ describe("storing a synced email", () => {
 		expect(stored).toBe(true);
 
 		const thread = await db.emailThread.findUnique({
-			where: { rootMessageId: rootId },
+			where: { mailboxId_rootMessageId: { mailboxId, rootMessageId: rootId } },
 			select: {
 				id: true,
 				messageCount: true,
@@ -109,7 +119,7 @@ describe("storing a synced email", () => {
 
 	it("repairs a thread whose projection was lost rather than skipping it forever", async () => {
 		const thread = await db.emailThread.findUnique({
-			where: { rootMessageId: rootId },
+			where: { mailboxId_rootMessageId: { mailboxId, rootMessageId: rootId } },
 			select: { id: true },
 		});
 		if (!thread) throw new Error("the first message was not stored");
@@ -158,7 +168,7 @@ describe("storing a synced email", () => {
 		).toBe(1);
 
 		const thread = await db.emailThread.findUnique({
-			where: { rootMessageId: rootId },
+			where: { mailboxId_rootMessageId: { mailboxId, rootMessageId: rootId } },
 			select: { messageCount: true, activity: { select: { id: true } } },
 		});
 
@@ -168,7 +178,7 @@ describe("storing a synced email", () => {
 
 	it("repairs the thread the message is already on when the root id has moved", async () => {
 		const thread = await db.emailThread.findUnique({
-			where: { rootMessageId: rootId },
+			where: { mailboxId_rootMessageId: { mailboxId, rootMessageId: rootId } },
 			select: { id: true },
 		});
 		if (!thread) throw new Error("the first message was not stored");

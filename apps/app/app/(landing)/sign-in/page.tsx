@@ -6,6 +6,7 @@ import { AuthHeading, AuthShell } from "@/components/auth-shell";
 import { getSession } from "@/lib/session";
 import { getServerQueryClient, getServerTrpc } from "@/lib/trpc/server";
 import { SocialSignIn } from "./social-sign-in";
+import { EmailSignIn } from "./email-sign-in";
 import { type SsoProvider, SsoSignIn } from "./sso-sign-in";
 
 export const metadata: Metadata = {
@@ -30,7 +31,7 @@ async function signInOptions(): Promise<SignInOptions | null> {
 	}
 }
 
-export default function SignInPage({ searchParams }: PageProps<"/sign-in">) {
+export default function SignInPage() {
 	return (
 		<AuthShell>
 			<Suspense
@@ -41,7 +42,7 @@ export default function SignInPage({ searchParams }: PageProps<"/sign-in">) {
 					/>
 				}
 			>
-				<SignIn searchParams={searchParams} />
+				<EmailSignIn />
 			</Suspense>
 		</AuthShell>
 	);

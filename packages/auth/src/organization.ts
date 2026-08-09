@@ -3,9 +3,9 @@ import { WORKSPACE_ID, workspaceSlug } from "@crm/db/workspace";
 
 export { WORKSPACE_ID };
 
-export const DEFAULT_WORKSPACE_NAME = "CRM";
+export const DEFAULT_WORKSPACE_NAME = "IBL Media Consultancy";
 
-export const WORKSPACE_ROLES = ["owner", "admin", "member"] as const;
+export const WORKSPACE_ROLES = ["admin", "team", "contributor"] as const;
 
 export type WorkspaceRole = (typeof WORKSPACE_ROLES)[number];
 
@@ -14,7 +14,7 @@ export function isWorkspaceRole(value: string): value is WorkspaceRole {
 }
 
 export function isWorkspaceAdmin(role: WorkspaceRole | null): boolean {
-	return role === "owner" || role === "admin";
+	return role === "admin";
 }
 
 export function canRenameWorkspace(role: WorkspaceRole | null): boolean {
@@ -70,7 +70,7 @@ export async function ensureWorkspaceMembership(
 						id: crypto.randomUUID(),
 						organizationId: workspace.id,
 						userId: user.id,
-						role: index === 0 ? "owner" : "member",
+						role: index === 0 ? "admin" : "contributor",
 						createdAt: new Date(),
 					})),
 					skipDuplicates: true,
@@ -85,8 +85,20 @@ export async function ensureWorkspaceMembership(
 					id: crypto.randomUUID(),
 					organizationId: workspace.id,
 					userId,
-					role: "member",
+					role: "contributor",
 					createdAt: new Date(),
+				},
+				update: {},
+			});
+			await tx.userProfile.upsert({
+				where: { userId },
+				create: {
+					userId,
+					status: "ACTIVE",
+					preferredLanguage: "English",
+					locale: "en",
+					timeZone: "Europe/Amsterdam",
+					workingPreferences: {},
 				},
 				update: {},
 			});

@@ -63,6 +63,7 @@ async function thread(
 
 	await db.emailThread.create({
 		data: {
+			mailboxId: `mailbox-${first.syncedByUserId}`,
 			rootMessageId,
 			subject: first.subject,
 			companyId,
@@ -188,7 +189,7 @@ async function messagesOn(rootMessageId: string): Promise<string[]> {
 }
 
 async function threadState(rootMessageId: string) {
-	return db.emailThread.findUnique({
+	return db.emailThread.findFirst({
 		where: { rootMessageId },
 		select: {
 			subject: true,
@@ -211,6 +212,15 @@ beforeEach(async () => {
 		})),
 	});
 
+	await db.mailbox.createMany({
+		data: userIds.map((id) => ({
+			id: `mailbox-${id}`,
+			ownerUserId: id,
+			address: `${id}@${domain}`,
+			normalizedAddress: `${id}@${domain}`,
+			status: "UNVERIFIED",
+		})),
+	});
 	await seed();
 });
 

@@ -23,10 +23,12 @@ import { dashboardSummaryInput } from "../dashboard/dashboard.contracts";
 import { dealListInput, dealIdInput, dealCreateInput, dealUpdateArgs, setStageInput, dealContactsInput, dealAttachContactInput, dealDetachContactInput, dealContactRoleInput, dealBulkOwnerInput, dealBulkStageInput, dealBulkInput } from "../deals/deals.contracts";
 import { fieldListInput, fieldByKeyInput, fieldIdInput, fieldCreateInput, fieldUpdateArgs, fieldReorderInput } from "../fields/fields.contracts";
 import { setAutoCreateInput, suppressDomainInput, threadInput, calendarEventInput } from "../google/google.contracts";
+import { mailboxIdInput, updateOwnedMailboxIdentityInput } from "../mailbox/mailbox.contracts";
 import { setOutlookAutoCreateInput } from "../microsoft/microsoft.contracts";
+import { updateOwnProfileInput } from "../profile/profile.contracts";
 import { setAgentModelInput, setResearchKeyInput } from "../settings/settings.contracts";
 import { ssoProviderListInput, registerSsoProviderInput, deleteSsoProviderInput } from "../sso/sso.contracts";
-import { memberListInput, updateWorkspaceInput, setMemberRoleInput } from "../workspace/workspace.contracts";
+import { memberListInput, updateWorkspaceInput, setMemberRoleInput, setMemberStatusInput } from "../workspace/workspace.contracts";
 import type { ActivitiesRouter } from "../activities/activities.router";
 import type { AgentsRouter } from "../agent/agents.router";
 import type { CompaniesRouter } from "../companies/companies.router";
@@ -37,7 +39,10 @@ import type { DashboardRouter } from "../dashboard/dashboard.router";
 import type { DealsRouter } from "../deals/deals.router";
 import type { FieldsRouter } from "../fields/fields.router";
 import type { GoogleRouter } from "../google/google.router";
+import type { MailboxRouter } from "../mailbox/mailbox.router";
 import type { MicrosoftRouter } from "../microsoft/microsoft.router";
+import type { ProfileRouter } from "../profile/profile.router";
+import type { ProviderCapabilitiesRouter } from "../provider-capabilities/provider-capabilities.router";
 import type { SearchRouter } from "../search/search.router";
 import type { SettingsRouter } from "../settings/settings.router";
 import type { SsoRouter } from "../sso/sso.router";
@@ -336,6 +341,16 @@ const appRouter = t.router({
       .input(calendarEventInput)
       .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<GoogleRouter["event"]>>)
     }),
+  mailbox: t.router({
+    listAccessible: publicProcedure
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<MailboxRouter["listAccessible"]>>),
+    get: publicProcedure
+      .input(mailboxIdInput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<MailboxRouter["get"]>>),
+    updateOwnedIdentity: publicProcedure
+      .input(updateOwnedMailboxIdentityInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<MailboxRouter["updateOwnedIdentity"]>>)
+    }),
   microsoft: t.router({
     status: publicProcedure
       .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<MicrosoftRouter["status"]>>),
@@ -348,6 +363,17 @@ const appRouter = t.router({
     setAutoCreate: publicProcedure
       .input(setOutlookAutoCreateInput)
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<MicrosoftRouter["setAutoCreate"]>>)
+    }),
+  profile: t.router({
+    get: publicProcedure
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<ProfileRouter["get"]>>),
+    updateOwn: publicProcedure
+      .input(updateOwnProfileInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<ProfileRouter["updateOwn"]>>)
+    }),
+  providerCapabilities: t.router({
+    get: publicProcedure
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<ProviderCapabilitiesRouter["get"]>>)
     }),
   search: t.router({
     quick: publicProcedure
@@ -400,7 +426,10 @@ const appRouter = t.router({
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<WorkspaceRouter["update"]>>),
     setMemberRole: publicProcedure
       .input(setMemberRoleInput)
-      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<WorkspaceRouter["setMemberRole"]>>)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<WorkspaceRouter["setMemberRole"]>>),
+    setMemberStatus: publicProcedure
+      .input(setMemberStatusInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<WorkspaceRouter["setMemberStatus"]>>)
     })
 });
 

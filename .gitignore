@@ -10,6 +10,7 @@ node_modules
 .env
 .env.*
 !.env.example
+.env.phase0.local
 
 # Testing
 coverage

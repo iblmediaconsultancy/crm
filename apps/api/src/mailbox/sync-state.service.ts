@@ -61,22 +61,41 @@ export class SyncStateService {
 		source: SyncSource,
 		options: { autoCreate: boolean },
 	): Promise<MailboxSync> {
-		return this.db.mailboxSync.upsert({
-			where: { userId_source: { userId, source } },
-			create: {
-				userId,
-				source,
-				status: GoogleSyncStatus.IDLE,
-				autoCreate: options.autoCreate,
-			},
-			update: {
-				status: GoogleSyncStatus.IDLE,
-				lastError: null,
-				retryAfter: null,
-			},
+		return this.db.$transaction(async (tx) => {
+			const user = await tx.user.findUniqueOrThrow({
+				where: { id: userId },
+				select: { email: true, name: true },
+			});
+			const address = user.email.trim();
+			const mailbox = await tx.mailbox.upsert({
+				where: { normalizedAddress: address.toLowerCase() },
+				create: {
+					ownerUserId: userId,
+					address,
+					normalizedAddress: address.toLowerCase(),
+					displayName: user.name,
+					status: "UNVERIFIED",
+				},
+				update: {},
+				select: { id: true },
+			});
+			return tx.mailboxSync.upsert({
+				where: { userId_source: { userId, source } },
+				create: {
+					userId,
+					mailboxId: mailbox.id,
+					source,
+					status: GoogleSyncStatus.IDLE,
+					autoCreate: options.autoCreate,
+				},
+				update: {
+					status: GoogleSyncStatus.IDLE,
+					lastError: null,
+					retryAfter: null,
+				},
+			});
 		});
 	}
-
 	async markRunning(id: string): Promise<void> {
 		await this.db.mailboxSync.update({
 			where: { id },

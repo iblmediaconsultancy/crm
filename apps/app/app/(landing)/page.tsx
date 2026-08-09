@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 import { AgentSection } from "@/components/landing/agent-section";
 import { LandingAnalytics } from "@/components/landing/analytics";
 import { CapabilitiesSection } from "@/components/landing/capabilities-section";
@@ -15,6 +16,7 @@ export const metadata: Metadata = {
 };
 
 export default function Home() {
+	redirect("/sign-in");
 	return (
 		<div className="dark flex min-h-svh w-full flex-col items-center overflow-clip bg-background font-sans text-foreground">
 			<LandingNav />

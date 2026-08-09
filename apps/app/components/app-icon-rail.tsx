@@ -41,7 +41,7 @@ type RailItem = {
 const ITEMS: RailItem[] = [
 	{ title: "Overview", href: "/", icon: Dashboard, match: "exact" },
 	{
-		title: "Chat",
+		title: "Research Agent",
 		href: "/chat",
 		icon: Chat,
 		match: "prefix",
@@ -135,7 +135,7 @@ function MobileRailLink({
 				aria-current={active ? "page" : undefined}
 				onClick={onNavigate}
 				transitionTypes={[
-					item.title === "Chat" ? "nav-forward" : "nav-lateral",
+					item.title === "Research Agent" ? "nav-forward" : "nav-lateral",
 				]}
 			>
 				<Icon icon={item.icon} />
@@ -222,7 +222,7 @@ export function AppIconRail() {
 		[workspaceUrl],
 	);
 	const inChat = items.some(
-		(item) => item.title === "Chat" && isActive(item, pathname),
+		(item) => item.title === "Research Agent" && isActive(item, pathname),
 	);
 
 	return (

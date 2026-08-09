@@ -63,7 +63,12 @@ export class ThreadWriterService {
 		context: MatchContext,
 	): Promise<boolean> {
 		const existing = await this.db.emailMessage.findUnique({
-			where: { rfcMessageId: parsed.rfcMessageId },
+			where: {
+				mailboxId_rfcMessageId: {
+					mailboxId: row.mailboxId,
+					rfcMessageId: parsed.rfcMessageId,
+				},
+			},
 			select: {
 				threadId: true,
 				thread: {
@@ -88,7 +93,12 @@ export class ThreadWriterService {
 					contactId: existing.thread.contactId,
 				}
 			: await this.db.emailThread.findUnique({
-					where: { rootMessageId: parsed.rootId },
+					where: {
+						mailboxId_rootMessageId: {
+							mailboxId: row.mailboxId,
+							rootMessageId: parsed.rootId,
+						},
+					},
 					select: { id: true, companyId: true, contactId: true },
 				});
 
@@ -98,7 +108,11 @@ export class ThreadWriterService {
 		if (!thread) {
 			const repliedTo =
 				outbound ||
-				(await this.hasOutboundInThread(parsed.rootId, options.mailbox));
+				(await this.hasOutboundInThread(
+					parsed.rootId,
+					options.mailbox,
+					row.mailboxId,
+				));
 
 			const match = await this.match.resolve(
 				{
@@ -125,8 +139,14 @@ export class ThreadWriterService {
 				const record = existing
 					? { id: existing.threadId }
 					: await tx.emailThread.upsert({
-							where: { rootMessageId: parsed.rootId },
+							where: {
+								mailboxId_rootMessageId: {
+									mailboxId: row.mailboxId,
+									rootMessageId: parsed.rootId,
+								},
+							},
 							create: {
+								mailboxId: row.mailboxId,
 								rootMessageId: parsed.rootId,
 								subject: parsed.subject,
 								companyId,
@@ -143,6 +163,7 @@ export class ThreadWriterService {
 					await tx.emailMessage.create({
 						data: {
 							threadId: record.id,
+							mailboxId: row.mailboxId,
 							rfcMessageId: parsed.rfcMessageId,
 							syncedByUserId: row.userId,
 							gmailMessageId: parsed.gmailMessageId ?? null,
@@ -194,7 +215,8 @@ export class ThreadWriterService {
 				});
 			});
 		} catch (error) {
-			if (await this.storedElsewhere(error, parsed.rfcMessageId)) return false;
+			if (await this.storedElsewhere(error, parsed.rfcMessageId, row.mailboxId))
+				return false;
 			throw error;
 		}
 
@@ -206,6 +228,7 @@ export class ThreadWriterService {
 	private async storedElsewhere(
 		error: unknown,
 		rfcMessageId: string,
+		mailboxId: string,
 	): Promise<boolean> {
 		const duplicate =
 			error instanceof PrismaNamespace.PrismaClientKnownRequestError &&
@@ -213,7 +236,7 @@ export class ThreadWriterService {
 		if (!duplicate) return false;
 
 		const winner = await this.db.emailMessage.findFirst({
-			where: { rfcMessageId, thread: { activity: { isNot: null } } },
+			where: { rfcMessageId, mailboxId, thread: { activity: { isNot: null } } },
 			select: { id: true },
 		});
 
@@ -242,10 +265,11 @@ export class ThreadWriterService {
 	private async hasOutboundInThread(
 		rootMessageId: string,
 		mailbox: string,
+		mailboxId: string,
 	): Promise<boolean> {
 		const found = await this.db.emailMessage.findFirst({
 			where: {
-				thread: { rootMessageId },
+				thread: { rootMessageId, mailboxId },
 				fromEmail: mailbox,
 			},
 			select: { id: true },

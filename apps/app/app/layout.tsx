@@ -21,10 +21,10 @@ const fontMono = Geist_Mono({
 
 export const metadata: Metadata = {
 	title: {
-		default: "Comp AI - CRM",
-		template: "%s · Comp AI CRM",
+		default: "IBL Command Center",
+		template: "%s · IBL Command Center",
 	},
-	description: "Customer Relationship Management for Comp AI",
+	description: "IBL Media Consultancy relationship and research workspace",
 	icons: {
 		icon: [
 			{ url: "/favicon.svg", type: "image/svg+xml" },

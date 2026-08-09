@@ -476,7 +476,7 @@ export class AgentDefinitionsService {
 
 	private async canAdmin(userId: string): Promise<boolean> {
 		const role = await this.access.assertMember(userId);
-		return role === "owner" || role === "admin";
+		return role === "admin";
 	}
 }
 

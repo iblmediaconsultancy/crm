@@ -12,6 +12,7 @@
 	},
 	"scripts": {
 		"auth:generate": "better-auth generate --config src/auth.ts --output ../db/prisma/schema.prisma --y",
+		"bootstrap:admin": "bun scripts/bootstrap-admin.ts",
 		"check-types": "tsc --noEmit",
 		"lint": "biome check .",
 		"test": "bun test",

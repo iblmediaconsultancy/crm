@@ -1,4 +1,5 @@
 export { type Auth, auth, type Session, type SessionUser } from "./auth";
+export { workspaceAccess, workspaceRoles } from "./access";
 export { AUTH_COOKIE_PREFIX } from "./cookies";
 export { isGoogleConfigured, isMicrosoftConfigured } from "./env";
 export {

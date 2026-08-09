@@ -16,7 +16,7 @@ import { membersSearchParams } from "./members-search-params";
 import { MembersTable } from "./members-table";
 
 export const metadata: Metadata = {
-	title: "Members",
+	title: "Team",
 };
 
 export default function MembersSettingsPage({
@@ -26,9 +26,10 @@ export default function MembersSettingsPage({
 		<PageShell className="min-h-0">
 			<PageShellHeader>
 				<PageShellHeading>
-					<PageShellTitle>Members</PageShellTitle>
+					<PageShellTitle>Team</PageShellTitle>
 					<PageShellDescription>
-						Everyone who has access to your CRM.
+						IBL workspace roles and member status. Mailbox access remains
+						separate.
 					</PageShellDescription>
 				</PageShellHeading>
 			</PageShellHeader>

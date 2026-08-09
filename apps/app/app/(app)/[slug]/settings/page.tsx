@@ -12,12 +12,10 @@ import {
 import { requireSession } from "@/lib/session";
 import { HydrateClient } from "@/lib/trpc/hydrate";
 import { getServerQueryClient, getServerTrpc } from "@/lib/trpc/server";
-import { AgentModel } from "./agent-model";
-import { ResearchKey } from "./research-key";
-import { WorkspaceForm } from "./workspace-form";
 
+import { ProfileForm } from "./profile-form";
 export const metadata: Metadata = {
-	title: "General",
+	title: "Profile",
 };
 
 export default function GeneralSettingsPage() {
@@ -25,9 +23,9 @@ export default function GeneralSettingsPage() {
 		<PageShell>
 			<PageShellHeader>
 				<PageShellHeading>
-					<PageShellTitle>General</PageShellTitle>
+					<PageShellTitle>Profile</PageShellTitle>
 					<PageShellDescription>
-						Who you are, and the model the research agent thinks with.
+						Your authenticated identity and Research Agent preferences.
 					</PageShellDescription>
 				</PageShellHeading>
 			</PageShellHeader>
@@ -47,19 +45,12 @@ async function Settings() {
 	const trpc = getServerTrpc();
 	const queryClient = getServerQueryClient();
 
-	await Promise.all([
-		queryClient.prefetchQuery(trpc.workspace.get.queryOptions()),
-		queryClient.prefetchQuery(trpc.settings.agentModel.queryOptions()),
-		queryClient.prefetchQuery(trpc.settings.modelCatalog.queryOptions()),
-		queryClient.prefetchQuery(trpc.settings.researchKey.queryOptions()),
-	]);
+	await queryClient.prefetchQuery(trpc.profile.get.queryOptions());
 
 	return (
 		<HydrateClient>
 			<div className="flex max-w-3xl flex-col gap-6">
-				<WorkspaceForm />
-				<ResearchKey />
-				<AgentModel />
+				<ProfileForm />
 			</div>
 		</HydrateClient>
 	);

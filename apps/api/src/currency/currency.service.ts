@@ -147,7 +147,7 @@ export class CurrencyService {
 
 		if (!member) return null;
 
-		return isWorkspaceRole(member.role) ? member.role : "member";
+		return isWorkspaceRole(member.role) ? member.role : "contributor";
 	}
 
 	private async requireManager(userId: string): Promise<void> {

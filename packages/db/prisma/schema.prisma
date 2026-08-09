@@ -23,14 +23,19 @@ model User {
   sessions      Session[]
   accounts      Account[]
 
-  ownedCompanies Company[]           @relation("CompanyOwner")
-  ownedContacts  Contact[]           @relation("ContactOwner")
-  ownedDeals     Deal[]              @relation("DealOwner")
-  activities     Activity[]          @relation("ActivityAuthor")
-  mailboxSyncs   MailboxSync[]
-  factDecisions  ContactFact[]       @relation("FactDecider")
-  conversations  AgentConversation[] @relation("ConversationOwner")
-  fieldValues    FieldValue[]        @relation("FieldValueUser")
+  ownedCompanies       Company[]            @relation("CompanyOwner")
+  ownedContacts        Contact[]            @relation("ContactOwner")
+  ownedDeals           Deal[]               @relation("DealOwner")
+  activities           Activity[]           @relation("ActivityAuthor")
+  mailboxSyncs         MailboxSync[]
+  profile              UserProfile?
+  ownedMailboxes       Mailbox[]            @relation("MailboxOwner")
+  mailboxGrants        MailboxGrant[]       @relation("MailboxGrantee")
+  grantedMailboxAccess MailboxGrant[]       @relation("MailboxGrantor")
+  securityAuditEvents  SecurityAuditEvent[] @relation("SecurityAuditActor")
+  factDecisions        ContactFact[]        @relation("FactDecider")
+  conversations        AgentConversation[]  @relation("ConversationOwner")
+  fieldValues          FieldValue[]         @relation("FieldValueUser")
 
   createdAgentDefinitions AgentDefinition[]             @relation("AgentDefinitionCreator")
   createdAgentVersions    AgentVersion[]                @relation("AgentVersionCreator")
@@ -1051,11 +1056,127 @@ enum EmailDirection {
   OUTBOUND
 }
 
+enum UserProfileStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum MailboxProvider {
+  MIAB
+}
+
+enum MailboxStatus {
+  DISABLED
+  UNVERIFIED
+  VERIFIED
+  ERROR
+}
+
+enum MailboxGrantPermission {
+  READ
+}
+
+enum ProviderCapabilityKey {
+  MIAB_IMAP
+  RESEND_OUTBOUND
+}
+
+enum ProviderCapabilityStatus {
+  DISABLED
+  UNVERIFIED
+  VERIFIED
+}
+
+model UserProfile {
+  userId             String            @id
+  user               User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status             UserProfileStatus @default(ACTIVE)
+  preferredLanguage  String            @default("English")
+  locale             String            @default("en")
+  timeZone           String            @default("Europe/Amsterdam")
+  workingPreferences Json              @default("{}")
+  activatedAt        DateTime?         @default(now())
+  suspendedAt        DateTime?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  @@map("userProfile")
+}
+
+model Mailbox {
+  id                String          @id @default(cuid())
+  ownerUserId       String
+  owner             User            @relation("MailboxOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  provider          MailboxProvider @default(MIAB)
+  address           String
+  normalizedAddress String          @unique
+  displayName       String?
+  signature         String?
+  status            MailboxStatus   @default(UNVERIFIED)
+  verifiedAt        DateTime?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  grants            MailboxGrant[]
+  syncs             MailboxSync[]
+  threads           EmailThread[]
+  messages          EmailMessage[]
+
+  @@index([ownerUserId])
+  @@index([status])
+  @@map("mailbox")
+}
+
+model MailboxGrant {
+  id              String                 @id @default(cuid())
+  mailboxId       String
+  mailbox         Mailbox                @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
+  granteeUserId   String
+  grantee         User                   @relation("MailboxGrantee", fields: [granteeUserId], references: [id], onDelete: Cascade)
+  grantedByUserId String
+  grantedBy       User                   @relation("MailboxGrantor", fields: [grantedByUserId], references: [id], onDelete: Restrict)
+  permission      MailboxGrantPermission @default(READ)
+  createdAt       DateTime               @default(now())
+  revokedAt       DateTime?
+
+  @@index([mailboxId])
+  @@index([granteeUserId])
+  @@index([mailboxId, granteeUserId, permission])
+  @@map("mailboxGrant")
+}
+
+model ProviderCapability {
+  key               ProviderCapabilityKey    @id
+  status            ProviderCapabilityStatus @default(UNVERIFIED)
+  evidenceReference String?
+  verifiedAt        DateTime?
+  updatedAt         DateTime                 @updatedAt
+
+  @@map("providerCapability")
+}
+
+model SecurityAuditEvent {
+  id           String   @id @default(cuid())
+  actorUserId  String?
+  actor        User?    @relation("SecurityAuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  action       String
+  resourceType String
+  resourceId   String?
+  outcome      String
+  metadata     Json?
+  createdAt    DateTime @default(now())
+
+  @@index([actorUserId, createdAt])
+  @@index([action, createdAt])
+  @@map("securityAuditEvent")
+}
+
 model MailboxSync {
-  id     String @id @default(cuid())
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  source String
+  id        String  @id @default(cuid())
+  userId    String
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  source    String
+  mailboxId String
+  mailbox   Mailbox @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
 
   status       GoogleSyncStatus @default(IDLE)
   cursor       String?
@@ -1068,13 +1189,17 @@ model MailboxSync {
   updatedAt DateTime @updatedAt
 
   @@unique([userId, source])
+  @@unique([mailboxId, source])
+  @@index([mailboxId])
   @@index([status])
   @@map("mailboxSync")
 }
 
 model EmailThread {
   id            String  @id @default(cuid())
-  rootMessageId String  @unique
+  mailboxId     String
+  mailbox       Mailbox @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
+  rootMessageId String
   subject       String?
 
   companyId String?
@@ -1092,17 +1217,21 @@ model EmailThread {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@unique([mailboxId, rootMessageId])
+  @@unique([id, mailboxId])
   @@index([companyId, lastMessageAt])
   @@index([contactId, lastMessageAt])
   @@map("emailThread")
 }
 
 model EmailMessage {
-  id       String      @id @default(cuid())
-  threadId String
-  thread   EmailThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  id        String      @id @default(cuid())
+  threadId  String
+  mailboxId String
+  mailbox   Mailbox     @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
+  thread    EmailThread @relation(fields: [threadId, mailboxId], references: [id, mailboxId], onDelete: Cascade)
 
-  rfcMessageId     String  @unique
+  rfcMessageId     String
   syncedByUserId   String?
   gmailMessageId   String?
   outlookMessageId String?
@@ -1119,7 +1248,9 @@ model EmailMessage {
 
   createdAt DateTime @default(now())
 
+  @@unique([mailboxId, rfcMessageId])
   @@index([threadId, sentAt])
+  @@index([mailboxId, sentAt])
   @@map("emailMessage")
 }
 
