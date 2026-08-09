@@ -59,77 +59,77 @@ Exit gate: fresh migrations pass; schema/RLS tests cover every sensitive table; 
 
 ## Phase D: complete application workflows
 
-- [ ] Deliver overview, operational dashboards, and exact linked-filter counts.
-- [ ] Deliver player, agent, agency, club/company, and contact CRUD and search.
-- [ ] Deliver representation and shared contact-route management.
-- [ ] Deliver lead/deal pipeline, assignments, tasks, reminders, notes, and follow-ups.
-- [ ] Deliver research requests, evidence review, drafting, proposals, proof library, and templates.
-- [ ] Deliver human-controlled outreach approval and outbound status surfaces.
-- [ ] Deliver mailbox identity/delegation, provider status, team, and administration workflows.
-- [ ] Regenerate and verify the committed tRPC client types.
-- [ ] Add unit, service, API, and browser coverage for critical workflows and denials.
+- [x] Deliver overview, operational dashboards, and exact linked-filter counts.
+- [x] Deliver player, agent, agency, club/company, and contact CRUD and search.
+- [x] Deliver representation and shared contact-route management.
+- [x] Deliver lead/deal pipeline, assignments, tasks, reminders, notes, and follow-ups.
+- [x] Deliver research requests, evidence review, drafting, proposals, proof library, and templates.
+- [x] Deliver human-controlled outreach approval and outbound status surfaces.
+- [x] Deliver mailbox identity/delegation, provider status, team, and administration workflows.
+- [x] Regenerate and verify the committed tRPC client types.
+- [x] Add unit, service, API, and browser coverage for critical workflows and denials.
 
 Exit gate: every requested workflow is usable end to end and unauthorized operations fail in UI, service, and database layers.
 
 ## Phase E: complete mailbox and communications
 
-- [ ] Add server-only MIAB credential interfaces with safe storage and redacted errors.
-- [ ] Implement certificate-verified IMAPS, folder discovery, read-only fetch, and incremental cursors.
-- [ ] Implement mailbox-scoped durable leases, retries, recovery, idempotency, normalization, threading, and deduplication.
-- [ ] Implement Resend transport with server-derived sender, idempotency, invitation/reset delivery, and human-approved outreach.
-- [ ] Keep synchronization and transport gated by provider capability state.
-- [ ] Add protocol doubles for TLS, IMAP, Resend, provider errors, retry behavior, and duplicate delivery.
-- [ ] Add health, metrics, structured logging, and durable audit without body or secret leakage.
+- [x] Add server-only MIAB credential interfaces with safe storage and redacted errors.
+- [x] Implement certificate-verified IMAPS, folder discovery, read-only fetch, and incremental cursors.
+- [x] Implement mailbox-scoped durable leases, retries, recovery, idempotency, normalization, threading, and deduplication.
+- [x] Implement Resend transport with server-derived sender, idempotency, invitation/reset delivery, and human-approved outreach.
+- [x] Keep synchronization and transport gated by provider capability state.
+- [x] Add protocol doubles for TLS, IMAP, Resend, provider errors, retry behavior, and duplicate delivery.
+- [x] Add health, metrics, structured logging, and durable audit without body or secret leakage.
 
 Exit gate: protocol-double integration tests pass; unverified providers fail before credential/network work; no automated or agent send bypass exists.
 
 ## Phase F: complete the Research Agent
 
-- [ ] Extend authenticated identity envelopes for profile-only, mailbox-context, and CRM-target research.
-- [ ] Implement evidence/source tracking, research findings, drafts, proposals, and review tools in Eve.
-- [ ] Implement mailbox-scoped scheduled work and durable task settlement.
-- [ ] Keep capability discovery optional and default-deny.
-- [ ] Durably audit every denied capability attempt.
-- [ ] Statically and dynamically prove the agent cannot import or invoke outbound transport.
-- [ ] Add unit, integration, schedule, identity-tamper, data-boundary, and capability tests.
+- [x] Extend authenticated identity envelopes for profile-only, mailbox-context, and CRM-target research.
+- [x] Implement evidence/source tracking, research findings, drafts, proposals, and review tools in Eve.
+- [x] Implement mailbox-scoped scheduled work and durable task settlement.
+- [x] Keep capability discovery optional and default-deny.
+- [x] Durably audit every denied capability attempt.
+- [x] Statically and dynamically prove the agent cannot import or invoke outbound transport.
+- [x] Add unit, integration, schedule, identity-tamper, data-boundary, and capability tests.
 
 Exit gate: research and drafting work end to end with evidence; mailbox scope is enforced; outbound bypass proofs pass.
 
 ## Phase G: complete V1-to-V2 migration
 
-- [ ] Inventory the V1 development Supabase schema, extensions, policies, row counts, and applied migrations without logging sensitive values.
-- [ ] Create versioned read-only exports and manifests with checksums and watermarks.
-- [ ] Build dry-run-first ETL with explicit source-to-target mappings and stable idempotency keys.
-- [ ] Surface duplicate candidates; never silently merge.
-- [ ] Validate ownership and foreign keys before writes.
-- [ ] Support resumable batches, idempotent reruns, reconciliation, rollback manifests, and delta/freeze handling.
-- [ ] Test synthetic fixtures and the authorized development export.
-- [ ] Produce machine-readable and human-readable reconciliation reports with zero unexplained loss.
+- [x] Inventory the V1 development Supabase schema, extensions, policies, row counts, and applied migrations without logging sensitive values.
+- [x] Create versioned read-only exports and manifests with checksums and watermarks.
+- [x] Build dry-run-first ETL with explicit source-to-target mappings and stable idempotency keys.
+- [x] Surface duplicate candidates; never silently merge.
+- [x] Validate ownership and foreign keys before writes.
+- [x] Support resumable batches, idempotent reruns, reconciliation, rollback manifests, and delta/freeze handling.
+- [x] Test synthetic fixtures and the authorized development export.
+- [x] Produce machine-readable and human-readable reconciliation reports with zero unexplained loss.
 
 Exit gate: every source row is accounted for; reruns are stable; rollback is rehearsed; reports contain no sensitive content.
 
 ## Phase H: deployment and operations readiness
 
-- [ ] Provide production-shaped Docker services for app, API, worker, agent, migration, and PostgreSQL/development Supabase dependencies.
-- [ ] Separate migration-owner and least-privilege runtime identities.
-- [ ] Add health/readiness checks, graceful shutdown, rate limiting, security headers, trusted origins, and secure session settings.
-- [ ] Document and configure secret injection without committed secrets.
-- [ ] Add backup automation and complete a restore rehearsal.
-- [ ] Add monitoring, structured logs, alerts, audit retention, and operational dashboards/runbooks.
-- [ ] Produce dependency and license inventories.
-- [ ] Run concurrency, load, and key-query performance tests.
-- [ ] Rehearse development deployment, rollback, and migration cutover.
+- [x] Provide production-shaped Docker services for app, API, worker, agent, migration, and PostgreSQL/development Supabase dependencies.
+- [x] Separate migration-owner and least-privilege runtime identities.
+- [x] Add health/readiness checks, graceful shutdown, rate limiting, security headers, trusted origins, and secure session settings.
+- [x] Document and configure secret injection without committed secrets.
+- [x] Add backup automation and complete a restore rehearsal.
+- [x] Add monitoring, structured logs, alerts, audit retention, and operational dashboards/runbooks.
+- [x] Produce dependency and license inventories.
+- [x] Run concurrency, load, and key-query performance tests.
+- [x] Rehearse development deployment, rollback, and migration cutover.
 
 Exit gate: the development deployment is operational and observable; backup/restore and rollback rehearsals pass.
 
 ## Phase I: final acceptance and handoff
 
-- [ ] Run fresh database setup and the complete migration chain.
-- [ ] Pass builds, typechecks, lint, unit, integration, RLS, concurrency, migration, agent, API, and browser suites.
-- [ ] Pass responsive, keyboard, accessibility, security, dependency, license, and performance gates.
-- [ ] Verify V1 commit/status is unchanged.
-- [ ] Complete architecture, schema, authorization, environment, provider, migration, deployment, rollback, administration, and phase documentation.
-- [ ] Produce the final completion report with evidence, commits, changed files, limitations, risks, and the exact production-readiness verdict.
+- [x] Run fresh database setup and the complete migration chain.
+- [x] Pass builds, typechecks, lint, unit, integration, RLS, concurrency, migration, agent, API, and browser suites.
+- [x] Pass responsive, keyboard, accessibility, security, dependency, license, and performance gates.
+- [x] Verify V1 commit/status is unchanged.
+- [x] Complete architecture, schema, authorization, environment, provider, migration, deployment, rollback, administration, and phase documentation.
+- [x] Produce the final completion report with evidence, commits, changed files, limitations, risks, and the exact production-readiness verdict.
 - [ ] Commit logical changes and push `codex/ibl-v2-completion` without pushing to `main`.
 
 Exit gate: all independent development work is complete, every acceptance gate passes, external provider limitations are accurately marked, and the pushed branch is reviewable and deployment-ready.
