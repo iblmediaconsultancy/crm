@@ -1,0 +1,28 @@
+{
+	"formatVersion": 1,
+	"source": "authorized-v1-development-supabase",
+	"inventory": {
+		"publicTables": 75,
+		"rows": 18,
+		"appliedMigrations": 26,
+		"policies": 144,
+		"extensions": 6
+	},
+	"outcomes": {
+		"total": 18,
+		"mapped": 10,
+		"rejected": 8,
+		"duplicateCandidates": 0,
+		"rejectionReasons": {
+			"UNSUPPORTED_SOURCE_TABLE": 8
+		}
+	},
+	"checks": {
+		"manifestChecksumMatched": true,
+		"idempotentRerunPassed": true,
+		"rollbackRehearsalPassed": true,
+		"reapplyAfterRollbackPassed": true,
+		"zeroUnexplainedLoss": true
+	},
+	"containsSourceValues": false
+}

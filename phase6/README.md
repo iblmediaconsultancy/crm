@@ -1,0 +1,19 @@
+# V1 to V2 migration
+
+The migration is dry-run first and reads V1 through a dedicated read-only
+connection. Raw exports are written under `phase6/artifacts/`, which is ignored
+because those files may contain personal or mailbox data. Only redacted counts,
+checksums, reason codes, and hashed source identifiers are emitted in reports.
+
+Required environment variables:
+
+- `V1_DATABASE_URL`: read-only connection to the authorized V1 development Supabase database.
+- `DATABASE_URL`: migration-owner V2 connection; required only for `apply` and database reconciliation.
+- `V2_OWNER_USER_ID`: an existing V2 user that owns imported CRM rows.
+
+Commands are `bun run migration:v1:inventory`, `export`, `plan`, `apply`, and
+`reconcile`. `apply` refuses to run unless `--confirm-apply` is present. Exports
+use a repeatable-read, read-only transaction and record its transaction
+watermark. The plan is resumable by stable SHA-256 idempotency keys. Duplicate
+candidates are surfaced, never merged. Freeze-and-delta procedure and rollback
+commands are documented in `docs/ibl/migration-runbook.md`.
