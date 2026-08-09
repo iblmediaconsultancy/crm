@@ -40,6 +40,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV HOSTNAME=0.0.0.0
 ENV PORT=3000
 WORKDIR /workspace
+COPY --from=source /workspace/phase7/docker/run-with-secrets.sh ./phase7/docker/run-with-secrets.sh
 COPY --from=app-build /workspace/apps/app/.next/standalone ./
 COPY --from=app-build /workspace/apps/app/.next/static ./apps/app/.next/static
 COPY --from=app-build /workspace/apps/app/public ./apps/app/public
@@ -48,6 +49,7 @@ CMD ["node", "apps/app/server.js"]
 
 FROM source AS api-build
 RUN bun run --cwd apps/api build
+RUN bun build apps/api/src/worker.ts --target=bun --outdir apps/api/dist-worker --packages=external --sourcemap
 
 FROM oven/bun:1.3.12 AS api
 ENV NODE_ENV=production
@@ -56,11 +58,26 @@ COPY --from=api-build /workspace .
 EXPOSE 3001
 CMD ["bun", "apps/api/dist/main.js"]
 
-FROM source AS agent
-ENV NODE_ENV=development
+FROM api AS worker
+CMD ["bun", "apps/api/dist-worker/worker.js"]
+
+FROM source AS agent-build
+ENV NODE_ENV=production
+ENV DATABASE_URL=postgresql://phase1:phase1@127.0.0.1:1/phase1
+ENV CRM_TELEMETRY_DISABLED=1
+WORKDIR /workspace/apps/agent
+COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
+RUN node node_modules/eve/bin/eve.js build
+
+FROM node-runtime AS agent
+ENV NODE_ENV=production
+ENV HOST=0.0.0.0
+ENV PORT=2000
 WORKDIR /workspace
+COPY --from=source /workspace/phase7/docker/run-with-secrets.sh ./phase7/docker/run-with-secrets.sh
+COPY --from=agent-build /workspace/apps/agent/.output ./apps/agent/.output
 EXPOSE 2000
-CMD ["bun", "run", "--cwd", "apps/agent", "dev:headless"]
+CMD ["node", "apps/agent/.output/server/index.mjs"]
 
 FROM source AS migrate
 WORKDIR /workspace

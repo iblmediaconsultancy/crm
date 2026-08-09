@@ -1,0 +1,227 @@
+name: ibl-command-center-v2-production
+
+x-runtime-environment: &runtime-environment
+  NODE_ENV: production
+  API_URL: ${API_URL:?Set the public HTTPS API URL}
+  APP_URL: ${APP_URL:?Set the public HTTPS app URL}
+  BETTER_AUTH_URL: ${API_URL:?Set the public HTTPS API URL}
+  ALLOWED_SIGN_IN: ${ALLOWED_SIGN_IN:?Set the invited email or domain}
+  AUTH_COOKIE_DOMAIN: ${AUTH_COOKIE_DOMAIN:-}
+  AGENT_URL: http://agent:2000
+  API_RATE_LIMIT_MAX: ${API_RATE_LIMIT_MAX:-300}
+  API_RATE_LIMIT_WINDOW_MS: ${API_RATE_LIMIT_WINDOW_MS:-60000}
+  CRM_TELEMETRY_DISABLED: ${CRM_TELEMETRY_DISABLED:-1}
+  NEXT_TELEMETRY_DISABLED: "1"
+  REDIS_URL: redis://redis:6379
+
+x-runtime-secrets: &runtime-secrets
+  - app_db_password
+  - better_auth_secret
+  - cron_secret
+  - agent_bridge_secret
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ibl_v2_root
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_superuser_password
+    secrets:
+      - postgres_superuser_password
+      - migration_db_password
+      - app_db_password
+      - backup_db_password
+    volumes:
+      - ./docker/postgres-init.sh:/docker-entrypoint-initdb.d/00-roles.sh:ro
+      - postgres-data:/var/lib/postgresql/data
+      - backup-data:/backups
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ibl_v2_root -d postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    stop_grace_period: 60s
+    networks: [private]
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "yes"]
+    volumes: [redis-data:/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [private]
+    restart: unless-stopped
+
+  migrate:
+    build:
+      context: ..
+      dockerfile: phase1/docker/Dockerfile
+      target: migrate
+    entrypoint: ["sh", "/workspace/phase7/docker/run-with-secrets.sh"]
+    command: ["bun", "packages/db/node_modules/prisma/build/index.js", "migrate", "deploy", "--config", "packages/db/prisma.config.ts"]
+    environment:
+      IBL_DATABASE_IDENTITY: migration
+    secrets:
+      - migration_db_password
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [private]
+    restart: "no"
+
+  api:
+    build:
+      context: ..
+      dockerfile: phase1/docker/Dockerfile
+      target: api
+    entrypoint: ["sh", "/workspace/phase7/docker/run-with-secrets.sh"]
+    environment: *runtime-environment
+    secrets: *runtime-secrets
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    ports: ["${BIND_ADDRESS:-127.0.0.1}:${API_PORT:-3301}:3001"]
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:3001/health/ready').then(r=>{if(!r.ok)process.exit(1)})"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+    stop_grace_period: 30s
+    networks: [private, edge]
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ..
+      dockerfile: phase1/docker/Dockerfile
+      target: worker
+    entrypoint: ["sh", "/workspace/phase7/docker/run-with-secrets.sh"]
+    environment:
+      <<: *runtime-environment
+      WORKER_INTERVAL_MS: ${WORKER_INTERVAL_MS:-60000}
+    secrets: *runtime-secrets
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/worker-ready"]
+      interval: 10s
+      timeout: 2s
+      retries: 20
+    stop_grace_period: 90s
+    networks: [private, edge]
+    restart: unless-stopped
+
+  agent:
+    build:
+      context: ..
+      dockerfile: phase1/docker/Dockerfile
+      target: agent
+    entrypoint: ["sh", "/workspace/phase7/docker/run-with-secrets.sh"]
+    environment: *runtime-environment
+    secrets: *runtime-secrets
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:2000/').then(r=>{if(!r.ok)process.exit(1)})"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+    stop_grace_period: 90s
+    networks: [private, edge]
+    restart: unless-stopped
+
+  app:
+    build:
+      context: ..
+      dockerfile: phase1/docker/Dockerfile
+      target: app
+    entrypoint: ["sh", "/workspace/phase7/docker/run-with-secrets.sh"]
+    environment: *runtime-environment
+    secrets: *runtime-secrets
+    depends_on:
+      api:
+        condition: service_healthy
+    ports: ["${BIND_ADDRESS:-127.0.0.1}:${APP_PORT:-3300}:3000"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r=>{if(r.status>=500)process.exit(1)})"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+    stop_grace_period: 30s
+    networks: [private, edge]
+    restart: unless-stopped
+
+  backup:
+    image: postgres:17-alpine
+    entrypoint: ["/ops/backup.sh"]
+    environment:
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      BACKUP_DATABASE_USER: ibl_v2_backup
+    secrets:
+      - backup_db_password
+    volumes:
+      - ./ops/backup.sh:/ops/backup.sh:ro
+      - backup-data:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [private]
+    profiles: [ops]
+    restart: "no"
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${METRICS_RETENTION:-30d}
+    secrets:
+      - cron_secret
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      api:
+        condition: service_healthy
+    ports: ["${BIND_ADDRESS:-127.0.0.1}:${PROMETHEUS_PORT:-9090}:9090"]
+    networks: [private, edge]
+    restart: unless-stopped
+
+networks:
+  private:
+    internal: true
+  edge:
+
+volumes:
+  postgres-data:
+  redis-data:
+  backup-data:
+  prometheus-data:
+
+secrets:
+  postgres_superuser_password:
+    file: ${POSTGRES_SUPERUSER_PASSWORD_FILE:?Set a secret file path}
+  migration_db_password:
+    file: ${MIGRATION_DB_PASSWORD_FILE:?Set a secret file path}
+  app_db_password:
+    file: ${APP_DB_PASSWORD_FILE:?Set a secret file path}
+  backup_db_password:
+    file: ${BACKUP_DB_PASSWORD_FILE:?Set a secret file path}
+  better_auth_secret:
+    file: ${BETTER_AUTH_SECRET_FILE:?Set a secret file path}
+  cron_secret:
+    file: ${CRON_SECRET_FILE:?Set a secret file path}
+  agent_bridge_secret:
+    file: ${AGENT_BRIDGE_SECRET_FILE:?Set a secret file path}

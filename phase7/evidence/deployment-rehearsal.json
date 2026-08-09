@@ -1,0 +1,49 @@
+{
+	"formatVersion": 1,
+	"recordedAt": "2026-08-09T09:00:00+02:00",
+	"database": {
+		"engine": "PostgreSQL 17",
+		"freshMigrationsApplied": 42,
+		"backupRestoreRehearsal": "PASS",
+		"backupChecksum": "PASS",
+		"migrationRoleRuntimeLedgerGrants": 0,
+		"backupRoleWriteDenied": true
+	},
+	"tests": {
+		"api": { "passed": 288, "failed": 0, "assertions": 616, "files": 27 },
+		"agent": { "passed": 235, "failed": 0, "assertions": 623, "files": 26 },
+		"phase6": { "passed": 4, "failed": 0, "assertions": 6 },
+		"changedFileLint": "PASS",
+		"apiTypecheck": "PASS",
+		"phase6Typecheck": "PASS"
+	},
+	"builds": {
+		"appNode22": { "status": "PASS", "routes": 27 },
+		"apiBun": { "status": "PASS", "bundleMegabytes": 0.52 },
+		"agentBun": { "status": "PASS", "bundleMegabytes": 22.3 }
+	},
+	"security": {
+		"dependencyAuditVulnerabilities": 0,
+		"dependencyCount": 1151,
+		"unknownLicenses": 0,
+		"composeValidation": "PASS",
+		"shellSyntax": "PASS",
+		"secretScan": "PASS_WITH_DOCUMENTED_LOCAL_EXAMPLES"
+	},
+	"performance": {
+		"requests": 500,
+		"concurrency": 25,
+		"failures": 0,
+		"requestsPerSecond": 157.3,
+		"p50Milliseconds": 134.4,
+		"p95Milliseconds": 331.0,
+		"p99Milliseconds": 436.1,
+		"maxMilliseconds": 517.8,
+		"keyQueriesUsedExpectedIndexes": true
+	},
+	"limitations": [
+		"Live MIAB and Resend calls were not made because production credentials were unavailable.",
+		"Docker Desktop BuildKit deadlocked locally; equivalent source builds and service runtimes passed directly in Linux containers.",
+		"A deliberately unauthenticated AI Gateway attempt failed before provider action and is not live-provider proof."
+	]
+}

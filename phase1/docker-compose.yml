@@ -87,6 +87,11 @@ services:
         condition: service_completed_successfully
     ports:
       - "127.0.0.1:2000:2000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:2000/').then(r=>{if(!r.ok)process.exit(1)})"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
     networks: [private]
 
 networks:
