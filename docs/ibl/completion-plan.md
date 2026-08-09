@@ -28,19 +28,19 @@
 - [x] Pass Phase 1 authorization, RLS, concurrency, and Better Auth proofs.
 - [x] Rehearse the existing 38-migration chain against isolated PostgreSQL 17.
 - [x] Repair clean-cache Docker dependency installation.
-- [ ] Commit the preserved foundation and clean-build repair.
+- [x] Commit the preserved foundation and clean-build repair.
 
 Exit gate: Phase 0/1 evidence is reproducible from the completion branch and preserved in a logical baseline commit.
 
 ## Phase B: finish Phase 1 product validation
 
-- [ ] Start the isolated signed-in application stack with synthetic users.
-- [ ] Exercise all signed-in navigation and settings surfaces.
-- [ ] Validate desktop and mobile widths, zoom, overflow, and touch targets.
-- [ ] Validate keyboard-only navigation, focus visibility/order, dialogs, sheets, and menus.
-- [ ] Run automated accessibility checks and manually review landmarks, headings, labels, names, descriptions, errors, and contrast.
-- [ ] Fix discovered defects without weakening authorization or provider gates.
-- [ ] Record browser, responsive, keyboard, and accessibility evidence.
+- [x] Start the isolated signed-in application stack with synthetic users.
+- [x] Exercise all signed-in navigation and settings surfaces.
+- [x] Validate desktop and mobile widths, zoom, overflow, and touch targets.
+- [x] Validate keyboard-only navigation, focus visibility/order, dialogs, sheets, and menus.
+- [x] Run automated accessibility checks and manually review landmarks, headings, labels, names, descriptions, errors, and contrast.
+- [x] Fix discovered defects without weakening authorization or provider gates.
+- [x] Record browser, responsive, keyboard, and accessibility evidence.
 
 Exit gate: signed-in critical paths pass browser, responsive, keyboard, and accessibility checks with no critical or serious defect.
 

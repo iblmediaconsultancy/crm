@@ -39,6 +39,7 @@ function ListSearchInput({
 				<Search />
 			</InputGroupAddon>
 			<InputGroupInput
+				aria-label={placeholder}
 				placeholder={placeholder}
 				value={value}
 				onChange={(event) => setValue(event.target.value)}

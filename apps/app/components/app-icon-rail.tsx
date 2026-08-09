@@ -208,7 +208,7 @@ export function AppIconRailFallback() {
 export function AppIconRail() {
 	const pathname = usePathname();
 	const workspaceUrl = useWorkspaceUrl();
-	const { open, setOpen } = useMobileNav();
+	const { open, setOpen, triggerRef } = useMobileNav();
 	const prefetchSection = usePrefetchSection();
 
 	const items = useMemo(
@@ -247,6 +247,10 @@ export function AppIconRail() {
 						side="left"
 						showCloseButton={false}
 						className="w-5/6 max-w-sm flex-row gap-0 p-0"
+						onCloseAutoFocus={(event) => {
+							event.preventDefault();
+							triggerRef.current?.focus();
+						}}
 					>
 						<SheetHeader className="sr-only">
 							<SheetTitle>Navigation and agent chats</SheetTitle>
@@ -280,7 +284,14 @@ export function AppIconRail() {
 						/>
 					</SheetContent>
 				) : (
-					<SheetContent side="left" className="w-64 gap-0 p-0">
+					<SheetContent
+						side="left"
+						className="w-64 gap-0 p-0"
+						onCloseAutoFocus={(event) => {
+							event.preventDefault();
+							triggerRef.current?.focus();
+						}}
+					>
 						<SheetHeader>
 							<SheetTitle>Navigation</SheetTitle>
 						</SheetHeader>

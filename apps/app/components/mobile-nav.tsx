@@ -1,17 +1,26 @@
 "use client";
 
-import { createContext, useContext, useMemo, useState } from "react";
+import {
+	createContext,
+	type RefObject,
+	useContext,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
 
 type MobileNavContextValue = {
 	open: boolean;
 	setOpen: (open: boolean) => void;
+	triggerRef: RefObject<HTMLButtonElement | null>;
 };
 
 const MobileNavContext = createContext<MobileNavContextValue | null>(null);
 
 export function MobileNavProvider({ children }: { children: React.ReactNode }) {
 	const [open, setOpen] = useState(false);
-	const value = useMemo(() => ({ open, setOpen }), [open]);
+	const triggerRef = useRef<HTMLButtonElement>(null);
+	const value = useMemo(() => ({ open, setOpen, triggerRef }), [open]);
 	return (
 		<MobileNavContext.Provider value={value}>
 			{children}

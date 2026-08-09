@@ -1,3 +1,5 @@
+FROM node:24.18.0-bookworm-slim AS node-runtime
+
 FROM oven/bun:1.3.12 AS install
 WORKDIR /workspace
 COPY package.json bun.lock ./
@@ -12,23 +14,36 @@ COPY packages/typescript-config/package.json packages/typescript-config/package.
 COPY packages/ui/package.json packages/ui/package.json
 RUN bun install --frozen-lockfile --ignore-scripts
 
+FROM install AS prisma-client
+COPY packages/db/prisma/schema.prisma packages/db/prisma/schema.prisma
+RUN bun run --cwd packages/db db:generate
+
 FROM install AS source
 COPY . .
-RUN node apps/api/scripts/chmod-trpc-binary.mjs && bunx prisma generate --schema packages/db/prisma/schema.prisma
+COPY --from=prisma-client /workspace/packages/db/src/generated /workspace/packages/db/src/generated
+RUN node apps/api/scripts/chmod-trpc-binary.mjs
 
-FROM node:24.18.0-bookworm-slim AS app-build
+FROM source AS app-build
 ENV NEXT_TELEMETRY_DISABLED=1
-WORKDIR /workspace
-COPY --from=source /workspace .
-RUN node node_modules/next/dist/bin/next build apps/app
+ENV DATABASE_URL=postgresql://phase1:phase1@127.0.0.1:1/phase1
+ENV APP_URL=http://localhost:3000
+ENV API_URL=http://localhost:3001
+ENV BETTER_AUTH_SECRET=phase1-build-only-secret-not-production
+ENV ALLOWED_SIGN_IN=local.test
+COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node-real
+RUN node-real apps/app/node_modules/next/dist/bin/next build apps/app
 
-FROM node:24.18.0-bookworm-slim AS app
+FROM node-runtime AS app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV HOSTNAME=0.0.0.0
+ENV PORT=3000
 WORKDIR /workspace
-COPY --from=app-build /workspace .
+COPY --from=app-build /workspace/apps/app/.next/standalone ./
+COPY --from=app-build /workspace/apps/app/.next/static ./apps/app/.next/static
+COPY --from=app-build /workspace/apps/app/public ./apps/app/public
 EXPOSE 3000
-CMD ["node", "node_modules/next/dist/bin/next", "start", "apps/app", "-p", "3000"]
+CMD ["node", "apps/app/server.js"]
 
 FROM source AS api-build
 RUN bun run --cwd apps/api build
@@ -49,3 +64,7 @@ CMD ["bun", "run", "--cwd", "apps/agent", "dev:headless"]
 FROM source AS migrate
 WORKDIR /workspace
 CMD ["bunx", "prisma", "migrate", "deploy", "--config", "packages/db/prisma.config.ts"]
+
+FROM source AS verify
+RUN bun test apps/app/test/onboarding-gate.spec.ts
+RUN bun run --cwd apps/app typegen && bun run --cwd apps/app check-types

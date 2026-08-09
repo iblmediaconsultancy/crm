@@ -3,9 +3,10 @@ name: ibl-command-center-v2
 x-runtime-environment: &runtime-environment
   DATABASE_URL: postgresql://ibl_v2_app:ibl_v2_app_local@postgres:5432/ibl_command_center_v2
   API_URL: http://api:3001
-  APP_URL: http://localhost:3000
+  APP_URL: http://localhost:3300,http://127.0.0.1:3300
   BETTER_AUTH_URL: http://api:3001
   BETTER_AUTH_SECRET: phase1-local-development-secret-change-me
+  ALLOWED_SIGN_IN: local.test
   CRM_TELEMETRY_DISABLED: "1"
   NEXT_TELEMETRY_DISABLED: "1"
 
@@ -52,13 +53,13 @@ services:
       migrate:
         condition: service_completed_successfully
     ports:
-      - "127.0.0.1:3001:3001"
+      - "127.0.0.1:3301:3001"
     healthcheck:
       test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:3001/health').then(r=>{if(!r.ok)process.exit(1)})"]
       interval: 5s
       timeout: 3s
       retries: 20
-    networks: [private]
+    networks: [private, edge]
 
   app:
     build:
@@ -70,8 +71,8 @@ services:
       api:
         condition: service_healthy
     ports:
-      - "127.0.0.1:3000:3000"
-    networks: [private]
+      - "127.0.0.1:3300:3000"
+    networks: [private, edge]
 
   agent:
     build:
@@ -91,6 +92,7 @@ services:
 networks:
   private:
     internal: true
+  edge:
 
 volumes:
   ibl-v2-postgres-data:
