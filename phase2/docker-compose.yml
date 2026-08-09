@@ -1,0 +1,54 @@
+name: ibl-v2-phase2-validation
+
+x-database-environment: &database-environment
+  DATABASE_MIGRATION_URL: postgresql://ibl_v2_migration:ibl_v2_migration_local@postgres:5432/ibl_command_center_v2
+  DATABASE_URL: postgresql://ibl_v2_app:ibl_v2_app_local@postgres:5432/ibl_command_center_v2
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ibl_v2_root
+      POSTGRES_PASSWORD: ibl_v2_root_local
+      POSTGRES_DB: postgres
+    volumes:
+      - ../phase1/docker/postgres-init.sql:/docker-entrypoint-initdb.d/00-roles.sql:ro
+      - phase2-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ibl_v2_root -d postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks: [database]
+
+  migrate:
+    build:
+      context: ..
+      dockerfile: phase1/docker/Dockerfile
+      target: migrate
+    environment: *database-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [database]
+    restart: "no"
+
+  test:
+    build:
+      context: ..
+      dockerfile: phase1/docker/Dockerfile
+      target: migrate
+    command: ["bun", "test", "phase2/integration.spec.ts"]
+    environment: *database-environment
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks: [database]
+    restart: "no"
+
+networks:
+  database:
+    internal: true
+
+volumes:
+  phase2-postgres-data:

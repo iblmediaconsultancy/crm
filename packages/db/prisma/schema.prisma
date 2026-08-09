@@ -46,6 +46,29 @@ model User {
   conversationSubmissions AgentConversationSubmission[] @relation("ConversationSubmissionAuthor")
   conversationFeedback    AgentConversationFeedback[]   @relation("ConversationFeedbackAuthor")
 
+  ownedContactRoutes       ContactRoute[]          @relation("ContactRouteOwner")
+  approvedRoutePolicies    SharedRoutePolicy[]     @relation("SharedRoutePolicyApprover")
+  createdRepresentations   Representation[]        @relation("RepresentationCreator")
+  representationChanges    RepresentationHistory[] @relation("RepresentationHistoryActor")
+  ownedLeads               Lead[]                  @relation("LeadOwner")
+  createdLeads             Lead[]                  @relation("LeadCreator")
+  assignedOperationalTasks OperationalTask[]       @relation("OperationalTaskAssignee")
+  createdOperationalTasks  OperationalTask[]       @relation("OperationalTaskCreator")
+  authoredNotes            Note[]                  @relation("NoteAuthor")
+  ownedTemplates           Template[]              @relation("TemplateOwner")
+  ownedDrafts              Draft[]                 @relation("DraftOwner")
+  ownedProposals           Proposal[]              @relation("ProposalOwner")
+  requestedApprovals       OutreachApproval[]      @relation("OutreachApprovalRequester")
+  decidedApprovals         OutreachApproval[]      @relation("OutreachApprovalApprover")
+  receivedAssignments      Assignment[]            @relation("AssignmentAssignee")
+  createdAssignments       Assignment[]            @relation("AssignmentCreator")
+  lifecycleEvents          LifecycleEvent[]        @relation("LifecycleEventActor")
+  evidenceSources          EvidenceSource[]        @relation("EvidenceSourceCreator")
+  duplicateReviews         DuplicateCandidate[]    @relation("DuplicateCandidateReviewer")
+  mergeDecisions           MergeDecision[]         @relation("MergeDecisionDecider")
+  researchRequests         ResearchRequest[]       @relation("ResearchRequestOwner")
+  domainAuditEvents        DomainAuditEvent[]      @relation("DomainAuditActor")
+
   members     Member[]
   invitations Invitation[]
 
@@ -266,15 +289,24 @@ model Company {
 
   lastActivityAt DateTime?
 
-  contacts       Contact[]           @relation("CompanyContacts")
-  conversations  AgentConversation[]
-  deals          Deal[]
-  activities     Activity[]
-  emailThreads   EmailThread[]
-  calendarEvents CalendarEvent[]
-  fieldValues    FieldValue[]
-  createdAt      DateTime            @default(now())
-  updatedAt      DateTime            @updatedAt
+  contacts            Contact[]           @relation("CompanyContacts")
+  conversations       AgentConversation[]
+  deals               Deal[]
+  activities          Activity[]
+  emailThreads        EmailThread[]
+  calendarEvents      CalendarEvent[]
+  fieldValues         FieldValue[]
+  agencyProfile       Agency?
+  clubProfile         Club?
+  contactRoutes       ContactRoute[]
+  sharedRoutePolicies SharedRoutePolicy[]
+  representations     Representation[]
+  leads               Lead[]
+  operationalTasks    OperationalTask[]
+  notes               Note[]
+  proofItems          ProofItem[]
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
 
   @@index([ownerId])
   @@index([name])
@@ -324,14 +356,24 @@ model Contact {
 
   lastActivityAt DateTime?
 
-  deals           DealContact[]
-  activities      Activity[]
-  emailThreads    EmailThread[]
-  calendarEvents  CalendarEvent[]
-  eventAttendance CalendarAttendee[]
-  fieldValues     FieldValue[]
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
+  deals                 DealContact[]
+  activities            Activity[]
+  emailThreads          EmailThread[]
+  calendarEvents        CalendarEvent[]
+  eventAttendance       CalendarAttendee[]
+  fieldValues           FieldValue[]
+  playerProfile         FootballPlayer?
+  footballAgentProfile  FootballAgent?
+  contactRoutes         ContactRoute[]
+  sharedRoutePolicies   SharedRoutePolicy[]
+  playerRepresentations Representation[]    @relation("RepresentationPlayer")
+  agentRepresentations  Representation[]    @relation("RepresentationAgent")
+  leads                 Lead[]
+  operationalTasks      OperationalTask[]
+  notes                 Note[]
+  proofItems            ProofItem[]
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
 
   @@index([companyId])
   @@index([ownerId])
@@ -836,14 +878,16 @@ model AgentAuditEvent {
 }
 
 model Deal {
-  id            String              @id @default(cuid())
-  conversations AgentConversation[]
-  name          String
-  description   String?
-  companyId     String
-  company       Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  ownerId       String
-  owner         User                @relation("DealOwner", fields: [ownerId], references: [id])
+  id              String              @id @default(cuid())
+  conversations   AgentConversation[]
+  name            String
+  description     String?
+  companyId       String
+  company         Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  ownerId         String
+  owner           User                @relation("DealOwner", fields: [ownerId], references: [id])
+  pipelineStageId String?
+  pipelineStage   PipelineStage?      @relation(fields: [pipelineStageId], references: [id], onDelete: SetNull)
 
   stage             DealStage @default(DEMO_BOOKED)
   stageChangedAt    DateTime  @default(now())
@@ -860,15 +904,21 @@ model Deal {
 
   lastActivityAt DateTime?
 
-  contacts    DealContact[]
-  activities  Activity[]
-  fieldValues FieldValue[]
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  contacts         DealContact[]
+  activities       Activity[]
+  fieldValues      FieldValue[]
+  operationalTasks OperationalTask[]
+  notes            Note[]
+  proofItems       ProofItem[]
+  leads            Lead[]
+  proposals        Proposal[]
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
 
   @@index([companyId])
   @@index([ownerId])
   @@index([stage])
+  @@index([pipelineStageId])
   @@index([expectedCloseDate])
   @@index([lastActivityAt])
   @@index([baseAmount])
@@ -1104,22 +1154,25 @@ model UserProfile {
 }
 
 model Mailbox {
-  id                String          @id @default(cuid())
+  id                String            @id @default(cuid())
   ownerUserId       String
-  owner             User            @relation("MailboxOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
-  provider          MailboxProvider @default(MIAB)
+  owner             User              @relation("MailboxOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  provider          MailboxProvider   @default(MIAB)
   address           String
-  normalizedAddress String          @unique
+  normalizedAddress String            @unique
   displayName       String?
   signature         String?
-  status            MailboxStatus   @default(UNVERIFIED)
+  status            MailboxStatus     @default(UNVERIFIED)
   verifiedAt        DateTime?
-  createdAt         DateTime        @default(now())
-  updatedAt         DateTime        @updatedAt
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
   grants            MailboxGrant[]
   syncs             MailboxSync[]
   threads           EmailThread[]
   messages          EmailMessage[]
+  drafts            Draft[]
+  researchRequests  ResearchRequest[]
+  evidenceSources   EvidenceSource[]
 
   @@index([ownerUserId])
   @@index([status])
@@ -1445,4 +1498,713 @@ model SsoProvider {
 
   @@unique([providerId])
   @@map("ssoProvider")
+}
+
+enum RepresentationStatus {
+  PENDING
+  ACTIVE
+  FORMER
+  DISPUTED
+}
+
+enum ContactRouteType {
+  EMAIL
+  PHONE
+  WHATSAPP
+  LINKEDIN
+  SOCIAL
+  OTHER
+}
+
+enum ContactRouteVisibility {
+  PRIVATE
+  SHARED
+}
+
+enum LeadStatus {
+  NEW
+  QUALIFIED
+  NURTURING
+  CONVERTED
+  DISQUALIFIED
+  ARCHIVED
+}
+
+enum PipelineStageKind {
+  OPEN
+  WON
+  LOST
+}
+
+enum OperationalTaskStatus {
+  TODO
+  IN_PROGRESS
+  BLOCKED
+  DONE
+  CANCELLED
+}
+
+enum OperationalTaskPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum TemplateKind {
+  EMAIL
+  PROPOSAL
+  RESEARCH
+  FOLLOW_UP
+}
+
+enum DraftStatus {
+  DRAFT
+  IN_REVIEW
+  APPROVED
+  REJECTED
+  QUEUED
+  SENT
+  FAILED
+  CANCELLED
+}
+
+enum ProposalStatus {
+  DRAFT
+  IN_REVIEW
+  APPROVED
+  REJECTED
+  ACCEPTED
+  WITHDRAWN
+}
+
+enum OutreachApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  REVOKED
+}
+
+enum DomainEntityType {
+  COMPANY
+  CONTACT
+  PLAYER
+  FOOTBALL_AGENT
+  AGENCY
+  CLUB
+  REPRESENTATION
+  LEAD
+  DEAL
+  TASK
+  NOTE
+  PROOF_ITEM
+  TEMPLATE
+  DRAFT
+  PROPOSAL
+  OUTREACH
+  RESEARCH_REQUEST
+}
+
+enum EvidenceSourceKind {
+  PUBLIC_URL
+  DOCUMENT
+  MAILBOX_MESSAGE
+  MANUAL
+  IMPORT
+}
+
+enum DuplicateCandidateStatus {
+  OPEN
+  NOT_DUPLICATE
+  MERGE_APPROVED
+  MERGED
+  DISMISSED
+}
+
+enum MergeDecisionStatus {
+  APPROVED
+  APPLIED
+  REVERSED
+}
+
+enum ResearchRequestStatus {
+  QUEUED
+  RUNNING
+  NEEDS_REVIEW
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum ResearchFindingStatus {
+  PROPOSED
+  ACCEPTED
+  DISMISSED
+  SUPERSEDED
+}
+
+model FootballPlayer {
+  contactId      String    @id
+  contact        Contact   @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  dateOfBirth    DateTime?
+  nationality    String?
+  position       String?
+  preferredFoot  String?
+  currentClubId  String?
+  currentClub    Club?     @relation(fields: [currentClubId], references: [companyId], onDelete: SetNull)
+  contractEndsAt DateTime?
+  marketValue    Decimal?  @db.Decimal(14, 2)
+  marketCurrency String?
+  sourceKey      String?   @unique
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([currentClubId])
+  @@index([nationality])
+  @@map("footballPlayer")
+}
+
+model FootballAgent {
+  contactId      String   @id
+  contact        Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  agencyId       String?
+  agency         Agency?  @relation(fields: [agencyId], references: [companyId], onDelete: SetNull)
+  licenseNumber  String?
+  licenseCountry String?
+  sourceKey      String?  @unique
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([agencyId])
+  @@index([licenseNumber])
+  @@map("footballAgent")
+}
+
+model Agency {
+  companyId      String          @id
+  company        Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  registrationId String?
+  jurisdiction   String?
+  sourceKey      String?         @unique
+  agents         FootballAgent[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@map("agency")
+}
+
+model Club {
+  companyId   String           @id
+  company     Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  association String?
+  league      String?
+  countryCode String?
+  sourceKey   String?          @unique
+  players     FootballPlayer[]
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@index([association, league])
+  @@map("club")
+}
+
+model ContactRoute {
+  id              String                 @id @default(cuid())
+  contactId       String?
+  contact         Contact?               @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  companyId       String?
+  company         Company?               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  ownerUserId     String
+  owner           User                   @relation("ContactRouteOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
+  type            ContactRouteType
+  value           String
+  normalizedValue String
+  label           String?
+  visibility      ContactRouteVisibility @default(PRIVATE)
+  verifiedAt      DateTime?
+  sourceKey       String?                @unique
+  sharedPolicies  SharedRoutePolicy[]
+  drafts          Draft[]
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+
+  @@index([contactId])
+  @@index([companyId])
+  @@index([ownerUserId])
+  @@index([type, normalizedValue])
+  @@map("contactRoute")
+}
+
+model SharedRoutePolicy {
+  id               String       @id @default(cuid())
+  routeId          String
+  route            ContactRoute @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  granteeContactId String?
+  granteeContact   Contact?     @relation(fields: [granteeContactId], references: [id], onDelete: Cascade)
+  granteeCompanyId String?
+  granteeCompany   Company?     @relation(fields: [granteeCompanyId], references: [id], onDelete: Cascade)
+  useForResearch   Boolean      @default(true)
+  useForOutreach   Boolean      @default(false)
+  approvedByUserId String
+  approvedBy       User         @relation("SharedRoutePolicyApprover", fields: [approvedByUserId], references: [id], onDelete: Restrict)
+  approvedAt       DateTime     @default(now())
+  revokedAt        DateTime?
+  reason           String?
+
+  @@index([routeId, revokedAt])
+  @@index([granteeContactId])
+  @@index([granteeCompanyId])
+  @@map("sharedRoutePolicy")
+}
+
+model Representation {
+  id              String                  @id @default(cuid())
+  playerContactId String
+  player          Contact                 @relation("RepresentationPlayer", fields: [playerContactId], references: [id], onDelete: Restrict)
+  agentContactId  String
+  agent           Contact                 @relation("RepresentationAgent", fields: [agentContactId], references: [id], onDelete: Restrict)
+  agencyCompanyId String?
+  agency          Company?                @relation(fields: [agencyCompanyId], references: [id], onDelete: SetNull)
+  status          RepresentationStatus    @default(PENDING)
+  startedAt       DateTime?
+  endedAt         DateTime?
+  sourceKey       String?                 @unique
+  createdByUserId String
+  createdBy       User                    @relation("RepresentationCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  history         RepresentationHistory[]
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+
+  @@index([playerContactId, status])
+  @@index([agentContactId, status])
+  @@index([agencyCompanyId])
+  @@index([createdByUserId])
+  @@map("representation")
+}
+
+model RepresentationHistory {
+  id               String                @id @default(cuid())
+  representationId String
+  representation   Representation        @relation(fields: [representationId], references: [id], onDelete: Cascade)
+  fromStatus       RepresentationStatus?
+  toStatus         RepresentationStatus
+  actorUserId      String
+  actor            User                  @relation("RepresentationHistoryActor", fields: [actorUserId], references: [id], onDelete: Restrict)
+  reason           String?
+  occurredAt       DateTime              @default(now())
+
+  @@index([representationId, occurredAt])
+  @@index([actorUserId, occurredAt])
+  @@map("representationHistory")
+}
+
+model PipelineStage {
+  id          String            @id @default(cuid())
+  key         String            @unique
+  name        String
+  kind        PipelineStageKind @default(OPEN)
+  position    Int
+  probability Int               @default(0)
+  active      Boolean           @default(true)
+  deals       Deal[]
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@unique([position])
+  @@index([kind, active])
+  @@map("pipelineStage")
+}
+
+model Lead {
+  id               String            @id @default(cuid())
+  name             String
+  status           LeadStatus        @default(NEW)
+  contactId        String?
+  contact          Contact?          @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  companyId        String?
+  company          Company?          @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  dealId           String?
+  deal             Deal?             @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  ownerUserId      String
+  owner            User              @relation("LeadOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
+  createdByUserId  String
+  createdBy        User              @relation("LeadCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  source           RecordSource      @default(MANUAL)
+  sourceKey        String?           @unique
+  nextActionAt     DateTime?
+  convertedAt      DateTime?
+  disqualifiedAt   DateTime?
+  disqualifyReason String?
+  tasks            OperationalTask[]
+  notes            Note[]
+  proofItems       ProofItem[]
+  proposals        Proposal[]
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@index([ownerUserId, status])
+  @@index([contactId])
+  @@index([companyId])
+  @@index([dealId])
+  @@index([nextActionAt])
+  @@map("lead")
+}
+
+model OperationalTask {
+  id              String                  @id @default(cuid())
+  title           String
+  description     String?
+  status          OperationalTaskStatus   @default(TODO)
+  priority        OperationalTaskPriority @default(NORMAL)
+  assigneeUserId  String
+  assignee        User                    @relation("OperationalTaskAssignee", fields: [assigneeUserId], references: [id], onDelete: Restrict)
+  createdByUserId String
+  createdBy       User                    @relation("OperationalTaskCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  companyId       String?
+  company         Company?                @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  contactId       String?
+  contact         Contact?                @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  leadId          String?
+  lead            Lead?                   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  dealId          String?
+  deal            Deal?                   @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  dueAt           DateTime?
+  reminderAt      DateTime?
+  completedAt     DateTime?
+  idempotencyKey  String?                 @unique
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+
+  @@index([assigneeUserId, status, dueAt])
+  @@index([createdByUserId])
+  @@index([companyId])
+  @@index([contactId])
+  @@index([leadId])
+  @@index([dealId])
+  @@map("operationalTask")
+}
+
+model Note {
+  id           String   @id @default(cuid())
+  body         String
+  authorUserId String
+  author       User     @relation("NoteAuthor", fields: [authorUserId], references: [id], onDelete: Restrict)
+  companyId    String?
+  company      Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  contactId    String?
+  contact      Contact? @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  leadId       String?
+  lead         Lead?    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  dealId       String?
+  deal         Deal?    @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  sourceKey    String?  @unique
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([authorUserId, createdAt])
+  @@index([companyId])
+  @@index([contactId])
+  @@index([leadId])
+  @@index([dealId])
+  @@map("note")
+}
+
+model EvidenceSource {
+  id              String             @id @default(cuid())
+  kind            EvidenceSourceKind
+  locator         String
+  checksum        String
+  title           String?
+  capturedAt      DateTime?
+  createdByUserId String?
+  createdBy       User?              @relation("EvidenceSourceCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  mailboxId       String?
+  mailbox         Mailbox?           @relation(fields: [mailboxId], references: [id], onDelete: Restrict)
+  metadata        Json?
+  proofItems      ProofItem[]
+  findings        ResearchFinding[]
+  createdAt       DateTime           @default(now())
+
+  @@unique([kind, locator, checksum])
+  @@index([createdByUserId, createdAt])
+  @@index([mailboxId, createdAt])
+  @@map("evidenceSource")
+}
+
+model ProofItem {
+  id               String          @id @default(cuid())
+  label            String
+  proofType        String
+  reference        String?
+  companyId        String?
+  company          Company?        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  contactId        String?
+  contact          Contact?        @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  leadId           String?
+  lead             Lead?           @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  dealId           String?
+  deal             Deal?           @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  evidenceSourceId String?
+  evidenceSource   EvidenceSource? @relation(fields: [evidenceSourceId], references: [id], onDelete: SetNull)
+  sourceKey        String?         @unique
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  @@index([companyId])
+  @@index([contactId])
+  @@index([leadId])
+  @@index([dealId])
+  @@index([evidenceSourceId])
+  @@map("proofItem")
+}
+
+model Template {
+  id          String       @id @default(cuid())
+  name        String
+  kind        TemplateKind
+  subject     String?
+  body        String
+  version     Int          @default(1)
+  active      Boolean      @default(true)
+  ownerUserId String?
+  owner       User?        @relation("TemplateOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  sourceKey   String?      @unique
+  drafts      Draft[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@unique([name, version])
+  @@index([kind, active])
+  @@index([ownerUserId])
+  @@map("template")
+}
+
+model Draft {
+  id               String            @id @default(cuid())
+  ownerUserId      String
+  owner            User              @relation("DraftOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
+  mailboxId        String?
+  mailbox          Mailbox?          @relation(fields: [mailboxId], references: [id], onDelete: Restrict)
+  recipientRouteId String?
+  recipientRoute   ContactRoute?     @relation(fields: [recipientRouteId], references: [id], onDelete: SetNull)
+  templateId       String?
+  template         Template?         @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  subject          String?
+  body             String
+  status           DraftStatus       @default(DRAFT)
+  idempotencyKey   String            @unique
+  approvedAt       DateTime?
+  sentAt           DateTime?
+  failureCode      String?
+  outreachApproval OutreachApproval?
+  proposals        Proposal[]
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@index([ownerUserId, status])
+  @@index([mailboxId, status])
+  @@index([recipientRouteId])
+  @@index([templateId])
+  @@map("draft")
+}
+
+model Proposal {
+  id          String         @id @default(cuid())
+  title       String
+  summary     String?
+  content     Json
+  status      ProposalStatus @default(DRAFT)
+  ownerUserId String
+  owner       User           @relation("ProposalOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
+  leadId      String?
+  lead        Lead?          @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  dealId      String?
+  deal        Deal?          @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  draftId     String?
+  draft       Draft?         @relation(fields: [draftId], references: [id], onDelete: SetNull)
+  submittedAt DateTime?
+  decidedAt   DateTime?
+  sourceKey   String?        @unique
+  items       ProposalItem[]
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@index([ownerUserId, status])
+  @@index([leadId])
+  @@index([dealId])
+  @@index([draftId])
+  @@map("proposal")
+}
+
+model ProposalItem {
+  id          String   @id @default(cuid())
+  proposalId  String
+  proposal    Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  label       String
+  description String?
+  quantity    Decimal? @db.Decimal(14, 2)
+  unitAmount  Decimal? @db.Decimal(14, 2)
+  currency    String?
+  position    Int
+
+  @@unique([proposalId, position])
+  @@index([proposalId])
+  @@map("proposalItem")
+}
+
+model OutreachApproval {
+  id             String                 @id @default(cuid())
+  draftId        String                 @unique
+  draft          Draft                  @relation(fields: [draftId], references: [id], onDelete: Cascade)
+  requestedById  String
+  requestedBy    User                   @relation("OutreachApprovalRequester", fields: [requestedById], references: [id], onDelete: Restrict)
+  decidedById    String?
+  decidedBy      User?                  @relation("OutreachApprovalApprover", fields: [decidedById], references: [id], onDelete: Restrict)
+  status         OutreachApprovalStatus @default(PENDING)
+  requestedAt    DateTime               @default(now())
+  decidedAt      DateTime?
+  decisionReason String?
+  idempotencyKey String                 @unique
+
+  @@index([requestedById, status])
+  @@index([decidedById])
+  @@map("outreachApproval")
+}
+
+model Assignment {
+  id               String           @id @default(cuid())
+  entityType       DomainEntityType
+  entityId         String
+  assigneeUserId   String
+  assignee         User             @relation("AssignmentAssignee", fields: [assigneeUserId], references: [id], onDelete: Restrict)
+  assignedByUserId String
+  assignedBy       User             @relation("AssignmentCreator", fields: [assignedByUserId], references: [id], onDelete: Restrict)
+  reason           String?
+  assignedAt       DateTime         @default(now())
+  revokedAt        DateTime?
+
+  @@index([entityType, entityId, revokedAt])
+  @@index([assigneeUserId, revokedAt])
+  @@index([assignedByUserId])
+  @@map("assignment")
+}
+
+model LifecycleEvent {
+  id             String           @id @default(cuid())
+  entityType     DomainEntityType
+  entityId       String
+  fromState      String?
+  toState        String
+  actorUserId    String?
+  actor          User?            @relation("LifecycleEventActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  reason         String?
+  metadata       Json?
+  idempotencyKey String?          @unique
+  occurredAt     DateTime         @default(now())
+
+  @@index([entityType, entityId, occurredAt])
+  @@index([actorUserId, occurredAt])
+  @@map("lifecycleEvent")
+}
+
+model DuplicateCandidate {
+  id            String                   @id @default(cuid())
+  entityType    DomainEntityType
+  leftEntityId  String
+  rightEntityId String
+  score         Decimal                  @db.Decimal(5, 4)
+  reasons       Json
+  status        DuplicateCandidateStatus @default(OPEN)
+  reviewedById  String?
+  reviewedBy    User?                    @relation("DuplicateCandidateReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedAt    DateTime?
+  mergeDecision MergeDecision?
+  createdAt     DateTime                 @default(now())
+  updatedAt     DateTime                 @updatedAt
+
+  @@unique([entityType, leftEntityId, rightEntityId])
+  @@index([entityType, status, score])
+  @@index([reviewedById])
+  @@map("duplicateCandidate")
+}
+
+model MergeDecision {
+  id                String              @id @default(cuid())
+  candidateId       String              @unique
+  candidate         DuplicateCandidate  @relation(fields: [candidateId], references: [id], onDelete: Restrict)
+  survivorEntityId  String
+  duplicateEntityId String
+  status            MergeDecisionStatus @default(APPROVED)
+  decidedByUserId   String
+  decidedBy         User                @relation("MergeDecisionDecider", fields: [decidedByUserId], references: [id], onDelete: Restrict)
+  reason            String?
+  snapshot          Json
+  idempotencyKey    String              @unique
+  decidedAt         DateTime            @default(now())
+  appliedAt         DateTime?
+  reversedAt        DateTime?
+
+  @@index([decidedByUserId, decidedAt])
+  @@map("mergeDecision")
+}
+
+model ResearchRequest {
+  id             String                @id @default(cuid())
+  ownerUserId    String
+  owner          User                  @relation("ResearchRequestOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
+  mailboxId      String?
+  mailbox        Mailbox?              @relation(fields: [mailboxId], references: [id], onDelete: Restrict)
+  targetType     DomainEntityType
+  targetEntityId String
+  prompt         String
+  status         ResearchRequestStatus @default(QUEUED)
+  idempotencyKey String                @unique
+  startedAt      DateTime?
+  completedAt    DateTime?
+  failureCode    String?
+  findings       ResearchFinding[]
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  @@index([ownerUserId, status])
+  @@index([mailboxId, status])
+  @@index([targetType, targetEntityId])
+  @@map("researchRequest")
+}
+
+model ResearchFinding {
+  id               String                @id @default(cuid())
+  requestId        String
+  request          ResearchRequest       @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  evidenceSourceId String
+  evidenceSource   EvidenceSource        @relation(fields: [evidenceSourceId], references: [id], onDelete: Restrict)
+  field            String?
+  summary          String
+  value            Json?
+  confidence       Decimal               @db.Decimal(5, 4)
+  status           ResearchFindingStatus @default(PROPOSED)
+  decidedAt        DateTime?
+  createdAt        DateTime              @default(now())
+
+  @@index([requestId, status])
+  @@index([evidenceSourceId])
+  @@map("researchFinding")
+}
+
+model DomainAuditEvent {
+  id          String           @id @default(cuid())
+  actorUserId String?
+  actor       User?            @relation("DomainAuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  action      String
+  entityType  DomainEntityType
+  entityId    String?
+  outcome     String
+  requestId   String?
+  metadata    Json?
+  createdAt   DateTime         @default(now())
+
+  @@unique([action, requestId])
+  @@index([actorUserId, createdAt])
+  @@index([entityType, entityId, createdAt])
+  @@map("domainAuditEvent")
 }

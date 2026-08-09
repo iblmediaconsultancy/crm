@@ -18,10 +18,11 @@ FROM install AS prisma-client
 COPY packages/db/prisma/schema.prisma packages/db/prisma/schema.prisma
 RUN bun run --cwd packages/db db:generate
 
-FROM install AS source
+FROM prisma-client AS source
 COPY . .
 COPY --from=prisma-client /workspace/packages/db/src/generated /workspace/packages/db/src/generated
 RUN node apps/api/scripts/chmod-trpc-binary.mjs
+RUN bun packages/db/node_modules/prisma/build/index.js migrate diff --from-empty --to-schema packages/db/prisma/schema.prisma --script > /dev/null
 
 FROM source AS app-build
 ENV NEXT_TELEMETRY_DISABLED=1
@@ -63,7 +64,7 @@ CMD ["bun", "run", "--cwd", "apps/agent", "dev:headless"]
 
 FROM source AS migrate
 WORKDIR /workspace
-CMD ["bunx", "prisma", "migrate", "deploy", "--config", "packages/db/prisma.config.ts"]
+CMD ["bun", "packages/db/node_modules/prisma/build/index.js", "migrate", "deploy", "--config", "packages/db/prisma.config.ts"]
 
 FROM source AS verify
 RUN bun test apps/app/test/onboarding-gate.spec.ts

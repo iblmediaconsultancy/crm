@@ -46,14 +46,14 @@ Exit gate: signed-in critical paths pass browser, responsive, keyboard, and acce
 
 ## Phase C: complete the IBL domain model and authorization
 
-- [ ] Model players, football agents, agencies, clubs, companies, contacts, and contact routes.
-- [ ] Model representation relationships, shared-route policies, relationship history, and route ownership.
-- [ ] Model leads, deals, pipeline stages, tasks, notes, proof items, templates, drafts, proposals, and outreach approvals.
-- [ ] Model assignments, lifecycle history, evidence/source provenance, duplicate candidates, merge decisions, and durable audit.
-- [ ] Add explicit constraints, composite/partial indexes, foreign-key indexes, and idempotency keys.
-- [ ] Implement database authorization and forced RLS for sensitive and mailbox-scoped records.
-- [ ] Prove cross-user isolation, role behavior, ownership, lifecycle constraints, duplicate surfacing, and concurrency invariants.
-- [ ] Rehearse fresh schema creation and migration rollback/reapply on isolated PostgreSQL 17.
+- [x] Model players, football agents, agencies, clubs, companies, contacts, and contact routes.
+- [x] Model representation relationships, shared-route policies, relationship history, and route ownership.
+- [x] Model leads, deals, pipeline stages, tasks, notes, proof items, templates, drafts, proposals, and outreach approvals.
+- [x] Model assignments, lifecycle history, evidence/source provenance, duplicate candidates, merge decisions, and durable audit.
+- [x] Add explicit constraints, composite/partial indexes, foreign-key indexes, and idempotency keys.
+- [x] Implement database authorization and forced RLS for sensitive and mailbox-scoped records.
+- [x] Prove cross-user isolation, role behavior, ownership, lifecycle constraints, duplicate surfacing, and concurrency invariants.
+- [x] Rehearse fresh schema creation and migration rollback/reapply on isolated PostgreSQL 17.
 
 Exit gate: fresh migrations pass; schema/RLS tests cover every sensitive table; no orphan, silent merge, or role-based mailbox bypass is possible.
 
