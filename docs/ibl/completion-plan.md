@@ -130,6 +130,6 @@ Exit gate: the development deployment is operational and observable; backup/rest
 - [x] Verify V1 commit/status is unchanged.
 - [x] Complete architecture, schema, authorization, environment, provider, migration, deployment, rollback, administration, and phase documentation.
 - [x] Produce the final completion report with evidence, commits, changed files, limitations, risks, and the exact production-readiness verdict.
-- [ ] Commit logical changes and push `codex/ibl-v2-completion` without pushing to `main`.
+- [x] Commit logical changes and push `codex/ibl-v2-completion` without pushing to `main`.
 
 Exit gate: all independent development work is complete, every acceptance gate passes, external provider limitations are accurately marked, and the pushed branch is reviewable and deployment-ready.

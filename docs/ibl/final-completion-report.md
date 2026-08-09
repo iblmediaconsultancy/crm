@@ -4,6 +4,8 @@ Date: 2026-08-09
 
 Branch: `codex/ibl-v2-completion`
 
+Push remote: `https://github.com/iblmediaconsultancy/crm.git`
+
 Protected V1 baseline: `41e7e0ccf2a012eeb448b5007504e89e289b300c`
 
 Pinned V2 foundation: `c26a08d`
