@@ -118,6 +118,45 @@ export class EnvironmentVariables {
 	@IsOptional()
 	@IsString()
 	CRM_TELEMETRY_DISABLED?: string;
+
+	@IsOptional()
+	@IsString()
+	MIAB_IMAP_HOST?: string;
+
+	@IsOptional()
+	@Type(() => Number)
+	@IsInt()
+	@Min(993)
+	@Max(993)
+	MIAB_IMAP_PORT?: number;
+
+	@IsOptional()
+	@IsString()
+	MIAB_MAILBOX_CREDENTIALS_JSON?: string;
+
+	@IsOptional()
+	@IsString()
+	RESEND_API_KEY?: string;
+
+	@IsOptional()
+	@Type(() => Number)
+	@IsInt()
+	@Min(1)
+	API_RATE_LIMIT_MAX?: number;
+
+	@IsOptional()
+	@Type(() => Number)
+	@IsInt()
+	@Min(1_000)
+	API_RATE_LIMIT_WINDOW_MS?: number;
+
+	@IsOptional()
+	@Type(() => Number)
+	@IsInt()
+	@Min(1_000)
+	WORKER_INTERVAL_MS?: number;
+	RESEND_SYSTEM_FROM_EMAIL?: string;
+	RESEND_SYSTEM_FROM_NAME?: string;
 }
 
 export function validateEnv(

@@ -21,10 +21,15 @@ import { HealthModule } from "./health/health.module";
 import { LoggingModule } from "./logging/logging.module";
 import { logAuthRoute } from "./logging/request-logger.middleware";
 import { MailboxModule } from "./mailbox/mailbox.module";
-import { SearchModule } from "./search/search.module";
+import { MetricsModule } from "./metrics/metrics.module";
+import { OperationsModule } from "./operations/operations.module";
 import { ProfileModule } from "./profile/profile.module";
 import { ProviderCapabilitiesModule } from "./provider-capabilities/provider-capabilities.module";
+import { ProvidersModule } from "./providers/providers.module";
+import { SearchModule } from "./search/search.module";
 import { SettingsModule } from "./settings/settings.module";
+import { SsoModule } from "./sso/sso.module";
+import { SyncModule } from "./sync/sync.module";
 import { TrpcModule } from "./trpc/trpc.module";
 import { UsersModule } from "./users/users.module";
 import { WorkspaceModule } from "./workspace/workspace.module";
@@ -53,12 +58,17 @@ import { WorkspaceModule } from "./workspace/workspace.module";
 		FieldsModule,
 		ProfileModule,
 		ProviderCapabilitiesModule,
+		ProvidersModule,
 		ActivitiesModule,
 		AgentModule,
 		DashboardModule,
 		SearchModule,
 		MailboxModule,
+		MetricsModule,
+		OperationsModule,
 		SettingsModule,
+		SsoModule,
+		SyncModule,
 		WorkspaceModule,
 		BackfillModule,
 	],

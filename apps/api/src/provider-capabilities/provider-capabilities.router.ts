@@ -1,6 +1,7 @@
 import type { ProviderCapability } from "@crm/db";
 import { Inject } from "@nestjs/common";
-import { Query, Router, UseMiddlewares } from "nestjs-trpc";
+import { Ctx, Query, Router, UseMiddlewares } from "nestjs-trpc";
+import type { AuthedTrpcContext } from "../trpc/context.types";
 import { AuthMiddleware } from "../trpc/middlewares/auth.middleware";
 import { ProviderCapabilitiesService } from "./provider-capabilities.service";
 
@@ -15,5 +16,10 @@ export class ProviderCapabilitiesRouter {
 	@Query()
 	get(): Promise<ProviderCapability[]> {
 		return this.capabilities.get();
+	}
+
+	@Query()
+	operations(@Ctx() ctx: AuthedTrpcContext) {
+		return this.capabilities.operations(ctx.user.id);
 	}
 }

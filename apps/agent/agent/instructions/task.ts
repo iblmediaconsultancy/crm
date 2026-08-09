@@ -18,6 +18,12 @@ export default defineDynamic({
 				});
 			}
 
+			if (attribute(ctx, "researchRequestId")) {
+				return defineInstructions({
+					markdown: `${RESEARCH_INSTRUCTIONS}\n\nThis is an authenticated IBL research request. Begin with inspect_ibl_research. Work only inside the returned identity envelope and CRM target. Every finding must cite a record_ibl_evidence result. You may create only DRAFT artifacts and submit findings for human review. You cannot approve, queue, or send outreach. Finish with submit_ibl_research_review.`,
+				});
+			}
+
 			const attributes = ctx.session.auth.current?.attributes ?? {};
 			const budget = asNumber(attributes.budget);
 			const kind = asString(attributes.taskKind);

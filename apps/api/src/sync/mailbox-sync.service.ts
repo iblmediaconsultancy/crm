@@ -4,11 +4,13 @@ import { GoogleConnectionService } from "../google/google-connection.service";
 import { GoogleSyncService } from "../google/google-sync.service";
 import {
 	isGoogleSyncSource,
+	isMiabSyncSource,
 	isMicrosoftSyncSource,
 } from "../mailbox/mailbox.constants";
 import { SyncStateService } from "../mailbox/sync-state.service";
 import { MicrosoftConnectionService } from "../microsoft/microsoft-connection.service";
 import { MicrosoftSyncService } from "../microsoft/microsoft-sync.service";
+import { MiabSyncService } from "../providers/miab-sync.service";
 
 const TICK_BUDGET_MS = 60_000;
 
@@ -31,6 +33,7 @@ export class MailboxSyncService {
 		private readonly microsoft: MicrosoftSyncService,
 		private readonly googleConnections: GoogleConnectionService,
 		private readonly microsoftConnections: MicrosoftConnectionService,
+		private readonly miab: MiabSyncService,
 	) {}
 
 	async runDue(): Promise<TickSummary> {
@@ -58,14 +61,26 @@ export class MailboxSyncService {
 				break;
 			}
 
-			if (!(await this.state.claim(row, new Date()))) continue;
+			if (
+				!isMiabSyncSource(row.source) &&
+				!(await this.state.claim(row, new Date()))
+			)
+				continue;
 
 			summary.attempted += 1;
 
 			try {
-				const outcome = await this.runOne(row.userId, row.source);
+				const outcome = await this.runOne(
+					row.userId,
+					row.source,
+					row.mailboxId,
+				);
 
-				if (outcome === null || outcome.status === "skipped") {
+				if (
+					outcome === null ||
+					outcome.status === "skipped" ||
+					outcome.status === "leased"
+				) {
 					summary.skipped += 1;
 					await this.state.release(row.id);
 				} else if (outcome.status === "rate-limited") {
@@ -80,10 +95,12 @@ export class MailboxSyncService {
 				}
 			} catch (error) {
 				summary.failed += 1;
-				await this.state.markFailed(
-					row.id,
-					error instanceof Error ? error.message : String(error),
-				);
+				if (!isMiabSyncSource(row.source)) {
+					await this.state.markFailed(
+						row.id,
+						error instanceof Error ? error.message : String(error),
+					);
+				}
 				this.logger.error(
 					{
 						message: "Sync threw",
@@ -112,11 +129,14 @@ export class MailboxSyncService {
 		return summary;
 	}
 
-	private async runOne(userId: string, source: string) {
+	private async runOne(userId: string, source: string, mailboxId: string) {
 		if (isGoogleSyncSource(source)) return this.google.runOne(userId, source);
 
 		if (isMicrosoftSyncSource(source)) {
 			return this.microsoft.runOne(userId, source);
+		}
+		if (isMiabSyncSource(source)) {
+			return this.miab.runMailbox(mailboxId, `api-sync:${process.pid}`);
 		}
 
 		return null;

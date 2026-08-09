@@ -19,6 +19,18 @@ export class HealthController {
 	@Get()
 	@AllowAnonymous()
 	async check() {
+		return this.ready();
+	}
+
+	@Get("live")
+	@AllowAnonymous()
+	live() {
+		return { status: "ok" };
+	}
+
+	@Get("ready")
+	@AllowAnonymous()
+	async ready() {
 		const startedAt = process.hrtime.bigint();
 
 		try {

@@ -51,15 +51,15 @@ const OKTA: Row = {
 };
 
 describe("who may configure SSO", () => {
-	it("lets an owner and an admin", async () => {
-		for (const role of ["owner", "admin"]) {
+	it("lets an admin", async () => {
+		for (const role of ["admin"]) {
 			const { sso } = service(role);
 			expect((await sso.settings("u1")).canConfigure).toBe(true);
 		}
 	});
 
-	it("refuses a member, and refuses them the writes too", async () => {
-		const { sso } = service("member");
+	it("refuses a contributor, and refuses them the writes too", async () => {
+		const { sso } = service("contributor");
 
 		expect((await sso.settings("u1")).canConfigure).toBe(false);
 
@@ -86,7 +86,7 @@ describe("who may configure SSO", () => {
 
 describe("what a provider looks like once it is saved", () => {
 	it("never hands back the client secret", async () => {
-		const { sso } = service("owner", [OKTA]);
+		const { sso } = service("admin", [OKTA]);
 		const [provider] = (await sso.list(LIST)).rows;
 
 		expect(JSON.stringify(provider)).not.toContain("shhh");
@@ -94,7 +94,7 @@ describe("what a provider looks like once it is saved", () => {
 	});
 
 	it("splits the domains and names the callback the IdP needs", async () => {
-		const { sso } = service("owner", [OKTA]);
+		const { sso } = service("admin", [OKTA]);
 		const [provider] = (await sso.list(LIST)).rows;
 
 		expect(provider?.domains).toEqual(["acme.com", "subsidiary.com"]);
@@ -104,14 +104,14 @@ describe("what a provider looks like once it is saved", () => {
 	});
 
 	it("reads only the one workspace, never an organization it was passed", async () => {
-		const { sso, seen } = service("owner", [OKTA]);
+		const { sso, seen } = service("admin", [OKTA]);
 		await sso.list(LIST);
 
 		expect(seen.providerWhere).toEqual({ organizationId: WORKSPACE_ID });
 	});
 
 	it("searches the name, the domain and the issuer", async () => {
-		const { sso, seen } = service("owner", [OKTA]);
+		const { sso, seen } = service("admin", [OKTA]);
 		await sso.list({ ...LIST, q: " acme " });
 
 		expect(seen.providerWhere).toEqual({

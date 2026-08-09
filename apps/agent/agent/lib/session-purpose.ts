@@ -1,6 +1,6 @@
 export type SessionPurpose = "builder" | "team-agent" | "research";
 
-type PurposeContext = {
+export type PurposeContext = {
 	readonly session: {
 		readonly auth: {
 			readonly current: {

@@ -13,10 +13,15 @@ import {
 } from "../lib/custom-agent-dispatch";
 import { brief, drainAll, taskAuth } from "../lib/dispatch";
 import { settle } from "../lib/enrichment";
+import {
+	noteResearchContinuation,
+	settleResearchRequest,
+} from "../lib/ibl-research";
 import { finishRun } from "../lib/run-runtime";
 import { completeTask, taskSubject } from "../lib/tasks";
 
 const TASK_MARKER = "task:";
+const IBL_RESEARCH_MARKER = "ibl-research:";
 
 function authorised(request: Request): boolean {
 	const secret = process.env.AGENT_BRIDGE_SECRET?.trim();
@@ -41,6 +46,16 @@ export function taskFromToken(token: string | undefined): string | null {
 	if (marker === -1) return null;
 
 	const id = token.slice(marker + TASK_MARKER.length);
+	return id.length > 0 ? id : null;
+}
+
+export function researchRequestFromToken(
+	token: string | undefined,
+): string | null {
+	if (!token) return null;
+	const marker = token.lastIndexOf(IBL_RESEARCH_MARKER);
+	if (marker === -1) return null;
+	const id = token.slice(marker + IBL_RESEARCH_MARKER.length);
 	return id.length > 0 ? id : null;
 }
 
@@ -128,6 +143,13 @@ export default defineChannel({
 		},
 
 		async "session.waiting"(_data, channel) {
+			const researchRequestId = researchRequestFromToken(
+				channel.continuationToken,
+			);
+			if (researchRequestId) {
+				await settleResearchRequest(researchRequestId, "NEEDS_REVIEW");
+				return;
+			}
 			const taskId = taskFromToken(channel.continuationToken);
 			if (taskId) {
 				const subject = await completeTask(taskId, "ran");
@@ -152,6 +174,13 @@ export default defineChannel({
 				typeof data === "object" && data && "message" in data
 					? String((data as { message: unknown }).message)
 					: "The agent turn failed.";
+			const researchRequestId = researchRequestFromToken(
+				channel.continuationToken,
+			);
+			if (researchRequestId) {
+				await settleResearchRequest(researchRequestId, "FAILED", "TURN_FAILED");
+				return;
+			}
 
 			if (taskId) {
 				const subject = await taskSubject(taskId);
@@ -164,6 +193,13 @@ export default defineChannel({
 		},
 
 		async "session.completed"(_data, channel) {
+			const researchRequestId = researchRequestFromToken(
+				channel.continuationToken,
+			);
+			if (researchRequestId) {
+				await settleResearchRequest(researchRequestId, "NEEDS_REVIEW");
+				return;
+			}
 			const runId = runIdFromToken(channel.continuationToken);
 			if (!runId) return;
 
@@ -181,6 +217,17 @@ export default defineChannel({
 		},
 
 		async "session.failed"(data, channel) {
+			const researchRequestId = researchRequestFromToken(
+				channel.continuationToken,
+			);
+			if (researchRequestId) {
+				await settleResearchRequest(
+					researchRequestId,
+					"FAILED",
+					data.code || "SESSION_FAILED",
+				);
+				return;
+			}
 			const conversationId = builderIdFromToken(channel.continuationToken);
 			if (conversationId) {
 				const { db } = await import("@crm/db");
@@ -201,6 +248,19 @@ export default defineChannel({
 	},
 
 	async receive(input, { send }) {
+		const researchRequestId =
+			typeof input.target?.researchRequestId === "string"
+				? input.target.researchRequestId
+				: null;
+		if (researchRequestId) {
+			assertInternalDispatchAuth(input.auth);
+			const result = await send(input.message, {
+				auth: input.auth,
+				continuationToken: `${IBL_RESEARCH_MARKER}${researchRequestId}`,
+			});
+			await noteResearchContinuation(researchRequestId, result.id);
+			return result;
+		}
 		const builderSubmissionId =
 			typeof input.target?.builderSubmissionId === "string"
 				? input.target.builderSubmissionId

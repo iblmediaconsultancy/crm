@@ -12,6 +12,7 @@ export default defineAgent({
 		fallback: DEFAULT_AGENT_MODEL.id,
 		events: { "session.started": () => selectedModel() },
 	}),
+	modelContextWindowTokens: DEFAULT_AGENT_MODEL.contextWindowTokens,
 	limits: {
 		maxInputTokensPerSession: 500_000,
 		maxOutputTokensPerSession: 50_000,

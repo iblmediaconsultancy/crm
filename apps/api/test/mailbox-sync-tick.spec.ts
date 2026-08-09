@@ -11,6 +11,7 @@ import {
 } from "../src/mailbox/sync-state.service";
 import type { MicrosoftConnectionService } from "../src/microsoft/microsoft-connection.service";
 import type { MicrosoftSyncService } from "../src/microsoft/microsoft-sync.service";
+import type { MiabSyncService } from "../src/providers/miab-sync.service";
 import { MailboxSyncService } from "../src/sync/mailbox-sync.service";
 
 type Outcome = {
@@ -123,6 +124,7 @@ function build(
 		provider as unknown as MicrosoftSyncService,
 		noConnections as unknown as GoogleConnectionService,
 		noConnections as unknown as MicrosoftConnectionService,
+		{ runMailbox: async () => ({ status: "leased", stored: 0 }) } as unknown as MiabSyncService,
 	);
 }
 

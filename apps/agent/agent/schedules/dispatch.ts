@@ -6,6 +6,12 @@ import {
 	queueDueAgentRuns,
 } from "../lib/custom-agent-dispatch";
 import { brief, drainAll, taskAuth } from "../lib/dispatch";
+import {
+	claimResearchRequests,
+	noteResearchContinuation,
+	researchRequestAuth,
+	settleResearchRequest,
+} from "../lib/ibl-research";
 
 export default defineSchedule({
 	cron: "* * * * *",
@@ -42,6 +48,27 @@ export default defineSchedule({
 							}),
 						),
 					]);
+				})(),
+				(async () => {
+					const requests = await claimResearchRequests();
+					await Promise.all(
+						requests.map(async (request) => {
+							try {
+								const session = await receive(crm, {
+									message: `Research request ${request.id}: ${request.prompt}`,
+									target: { researchRequestId: request.id },
+									auth: researchRequestAuth(request),
+								});
+								await noteResearchContinuation(request.id, session.id);
+							} catch {
+								await settleResearchRequest(
+									request.id,
+									"FAILED",
+									"DISPATCH_FAILED",
+								);
+							}
+						}),
+					);
 				})(),
 			]),
 		);

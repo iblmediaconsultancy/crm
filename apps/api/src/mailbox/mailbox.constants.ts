@@ -23,9 +23,11 @@ export type SyncSource = (typeof SYNC_SOURCES)[number];
 
 export const GOOGLE_SYNC_SOURCES = ["calendar", "gmail"] as const;
 export const MICROSOFT_SYNC_SOURCES = ["outlook"] as const;
+export const MIAB_SYNC_SOURCES = ["miab"] as const;
 
 export type GoogleSyncSource = (typeof GOOGLE_SYNC_SOURCES)[number];
 export type MicrosoftSyncSource = (typeof MICROSOFT_SYNC_SOURCES)[number];
+export type MiabSyncSource = (typeof MIAB_SYNC_SOURCES)[number];
 
 export function isGoogleSyncSource(source: string): source is GoogleSyncSource {
 	return (GOOGLE_SYNC_SOURCES as readonly string[]).includes(source);
@@ -37,13 +39,20 @@ export function isMicrosoftSyncSource(
 	return (MICROSOFT_SYNC_SOURCES as readonly string[]).includes(source);
 }
 
-export const SCOPE_FOR_SOURCE: Record<SyncSource, string> = {
+export function isMiabSyncSource(source: string): source is MiabSyncSource {
+	return (MIAB_SYNC_SOURCES as readonly string[]).includes(source);
+}
+
+export const SCOPE_FOR_SOURCE: Record<Exclude<SyncSource, "miab">, string> = {
 	calendar: CALENDAR_SCOPE,
 	gmail: GMAIL_SCOPE,
 	outlook: OUTLOOK_MAIL_SCOPE,
 };
 
-export const PROVIDER_FOR_SOURCE: Record<SyncSource, MailboxProviderId> = {
+export const PROVIDER_FOR_SOURCE: Record<
+	Exclude<SyncSource, "miab">,
+	MailboxProviderId
+> = {
 	calendar: GOOGLE_PROVIDER_ID,
 	gmail: GOOGLE_PROVIDER_ID,
 	outlook: MICROSOFT_PROVIDER_ID,

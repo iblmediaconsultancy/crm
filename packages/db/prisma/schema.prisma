@@ -1231,12 +1231,15 @@ model MailboxSync {
   mailboxId String
   mailbox   Mailbox @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
 
-  status       GoogleSyncStatus @default(IDLE)
-  cursor       String?
-  lastSyncedAt DateTime?
-  lastError    String?
-  retryAfter   DateTime?
-  autoCreate   Boolean          @default(false)
+  status        GoogleSyncStatus @default(IDLE)
+  cursor        String?
+  lastSyncedAt  DateTime?
+  lastError     String?
+  retryAfter    DateTime?
+  attemptCount  Int              @default(0)
+  leaseOwner    String?
+  lastErrorCode String?
+  autoCreate    Boolean          @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1567,6 +1570,14 @@ enum DraftStatus {
   SENT
   FAILED
   CANCELLED
+}
+
+enum OutboundDeliveryStatus {
+  PENDING
+  SENDING
+  SENT
+  RETRY
+  FAILED
 }
 
 enum ProposalStatus {
@@ -1980,32 +1991,54 @@ model Template {
 }
 
 model Draft {
-  id               String            @id @default(cuid())
+  id               String             @id @default(cuid())
   ownerUserId      String
-  owner            User              @relation("DraftOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
+  owner            User               @relation("DraftOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
   mailboxId        String?
-  mailbox          Mailbox?          @relation(fields: [mailboxId], references: [id], onDelete: Restrict)
+  mailbox          Mailbox?           @relation(fields: [mailboxId], references: [id], onDelete: Restrict)
   recipientRouteId String?
-  recipientRoute   ContactRoute?     @relation(fields: [recipientRouteId], references: [id], onDelete: SetNull)
+  recipientRoute   ContactRoute?      @relation(fields: [recipientRouteId], references: [id], onDelete: SetNull)
   templateId       String?
-  template         Template?         @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  template         Template?          @relation(fields: [templateId], references: [id], onDelete: SetNull)
   subject          String?
   body             String
-  status           DraftStatus       @default(DRAFT)
-  idempotencyKey   String            @unique
+  status           DraftStatus        @default(DRAFT)
+  idempotencyKey   String             @unique
   approvedAt       DateTime?
   sentAt           DateTime?
   failureCode      String?
   outreachApproval OutreachApproval?
   proposals        Proposal[]
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  deliveries       OutboundDelivery[]
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
 
   @@index([ownerUserId, status])
   @@index([mailboxId, status])
   @@index([recipientRouteId])
   @@index([templateId])
   @@map("draft")
+}
+
+model OutboundDelivery {
+  id                String                 @id @default(cuid())
+  draftId           String
+  draft             Draft                  @relation(fields: [draftId], references: [id], onDelete: Restrict)
+  status            OutboundDeliveryStatus @default(PENDING)
+  idempotencyKey    String                 @unique
+  providerMessageId String?
+  attemptCount      Int                    @default(0)
+  leaseOwner        String?
+  leasedUntil       DateTime?
+  retryAt           DateTime?
+  lastErrorCode     String?
+  sentAt            DateTime?
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+
+  @@index([status, retryAt, leasedUntil])
+  @@index([draftId, createdAt])
+  @@map("outboundDelivery")
 }
 
 model Proposal {
@@ -2149,25 +2182,31 @@ model MergeDecision {
 }
 
 model ResearchRequest {
-  id             String                @id @default(cuid())
-  ownerUserId    String
-  owner          User                  @relation("ResearchRequestOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
-  mailboxId      String?
-  mailbox        Mailbox?              @relation(fields: [mailboxId], references: [id], onDelete: Restrict)
-  targetType     DomainEntityType
-  targetEntityId String
-  prompt         String
-  status         ResearchRequestStatus @default(QUEUED)
-  idempotencyKey String                @unique
-  startedAt      DateTime?
-  completedAt    DateTime?
-  failureCode    String?
-  findings       ResearchFinding[]
-  createdAt      DateTime              @default(now())
-  updatedAt      DateTime              @updatedAt
+  id                String                @id @default(cuid())
+  ownerUserId       String
+  owner             User                  @relation("ResearchRequestOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
+  mailboxId         String?
+  mailbox           Mailbox?              @relation(fields: [mailboxId], references: [id], onDelete: Restrict)
+  targetType        DomainEntityType
+  targetEntityId    String
+  prompt            String
+  status            ResearchRequestStatus @default(QUEUED)
+  idempotencyKey    String                @unique
+  startedAt         DateTime?
+  completedAt       DateTime?
+  failureCode       String?
+  attemptCount      Int                   @default(0)
+  leaseOwner        String?
+  leasedUntil       DateTime?
+  retryAt           DateTime?
+  continuationToken String?
+  findings          ResearchFinding[]
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
 
   @@index([ownerUserId, status])
   @@index([mailboxId, status])
+  @@index([status, retryAt, leasedUntil])
   @@index([targetType, targetEntityId])
   @@map("researchRequest")
 }

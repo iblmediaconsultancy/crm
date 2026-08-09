@@ -24,9 +24,12 @@ export const metadata: Metadata = { title: "Provider Status" };
 
 export default async function ProviderStatusPage() {
 	await requireSession();
-	const capabilities = await getServerQueryClient().fetchQuery(
-		getServerTrpc().providerCapabilities.get.queryOptions(),
-	);
+	const trpc = getServerTrpc();
+	const queryClient = getServerQueryClient();
+	const [capabilities, operations] = await Promise.all([
+		queryClient.fetchQuery(trpc.providerCapabilities.get.queryOptions()),
+		queryClient.fetchQuery(trpc.providerCapabilities.operations.queryOptions()),
+	]);
 	return (
 		<PageShell>
 			<PageShellHeader>
@@ -50,6 +53,33 @@ export default async function ProviderStatusPage() {
 						</CardContent>
 					</Card>
 				))}
+				<Card>
+					<CardHeader>
+						<CardTitle>Operational state</CardTitle>
+						<CardDescription>
+							Redacted local counters; no message content or credentials.
+						</CardDescription>
+					</CardHeader>
+					<CardContent className="flex flex-wrap gap-2">
+						{operations.miabSyncs.map((row) => (
+							<Badge key={`miab-${row.status}`} variant="outline">
+								MIAB {row.status}: {row.count}
+							</Badge>
+						))}
+						{operations.outboundDeliveries.map((row) => (
+							<Badge key={`outbound-${row.status}`} variant="outline">
+								Outbound {row.status}: {row.count}
+							</Badge>
+						))}
+						{operations.miabSyncs.length +
+							operations.outboundDeliveries.length ===
+						0 ? (
+							<span className="text-muted-foreground text-sm">
+								No provider operations recorded.
+							</span>
+						) : null}
+					</CardContent>
+				</Card>
 			</PageShellContent>
 		</PageShell>
 	);

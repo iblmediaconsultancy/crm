@@ -25,6 +25,7 @@ import { fieldListInput, fieldByKeyInput, fieldIdInput, fieldCreateInput, fieldU
 import { setAutoCreateInput, suppressDomainInput, threadInput, calendarEventInput } from "../google/google.contracts";
 import { mailboxIdInput, updateOwnedMailboxIdentityInput } from "../mailbox/mailbox.contracts";
 import { setOutlookAutoCreateInput } from "../microsoft/microsoft.contracts";
+import { operationsListInput, footballProfileInput, organizationProfileInput, representationCreateInput, representationTransitionInput, contactRouteCreateInput, contactRouteShareInput, leadCreateInput, taskCreateInput, taskTransitionInput, noteCreateInput, assignmentCreateInput, researchRequestCreateInput, templateCreateInput, draftCreateInput, approvalRequestInput, approvalDecisionInput, draftApproveInput, proposalCreateInput, proofCreateInput } from "../operations/operations.contracts";
 import { updateOwnProfileInput } from "../profile/profile.contracts";
 import { setAgentModelInput, setResearchKeyInput } from "../settings/settings.contracts";
 import { ssoProviderListInput, registerSsoProviderInput, deleteSsoProviderInput } from "../sso/sso.contracts";
@@ -41,6 +42,7 @@ import type { FieldsRouter } from "../fields/fields.router";
 import type { GoogleRouter } from "../google/google.router";
 import type { MailboxRouter } from "../mailbox/mailbox.router";
 import type { MicrosoftRouter } from "../microsoft/microsoft.router";
+import type { OperationsRouter } from "../operations/operations.router";
 import type { ProfileRouter } from "../profile/profile.router";
 import type { ProviderCapabilitiesRouter } from "../provider-capabilities/provider-capabilities.router";
 import type { SearchRouter } from "../search/search.router";
@@ -364,6 +366,76 @@ const appRouter = t.router({
       .input(setOutlookAutoCreateInput)
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<MicrosoftRouter["setAutoCreate"]>>)
     }),
+  operations: t.router({
+    overview: publicProcedure
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OperationsRouter["overview"]>>),
+    directory: publicProcedure
+      .input(operationsListInput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OperationsRouter["directory"]>>),
+    workbench: publicProcedure
+      .input(operationsListInput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OperationsRouter["workbench"]>>),
+    saveFootballProfile: publicProcedure
+      .input(footballProfileInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OperationsRouter["saveFootballProfile"]>>),
+    saveOrganizationProfile: publicProcedure
+      .input(organizationProfileInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OperationsRouter["saveOrganizationProfile"]>>),
+    createRepresentation: publicProcedure
+      .input(representationCreateInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OperationsRouter["createRepresentation"]>>),
+    transitionRepresentation: publicProcedure
+      .input(representationTransitionInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OperationsRouter["transitionRepresentation"]>>),
+    createRoute: publicProcedure
+      .input(contactRouteCreateInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OperationsRouter["createRoute"]>>),
+    shareRoute: publicProcedure
+      .input(contactRouteShareInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OperationsRouter["shareRoute"]>>),
+    createLead: publicProcedure
+      .input(leadCreateInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OperationsRouter["createLead"]>>),
+    createTask: publicProcedure
+      .input(taskCreateInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OperationsRouter["createTask"]>>),
+    transitionTask: publicProcedure
+      .input(taskTransitionInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OperationsRouter["transitionTask"]>>),
+    createNote: publicProcedure
+      .input(noteCreateInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OperationsRouter["createNote"]>>),
+    assign: publicProcedure
+      .input(assignmentCreateInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OperationsRouter["assign"]>>),
+    requestResearch: publicProcedure
+      .input(researchRequestCreateInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OperationsRouter["requestResearch"]>>),
+    createTemplate: publicProcedure
+      .input(templateCreateInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OperationsRouter["createTemplate"]>>),
+    createDraft: publicProcedure
+      .input(draftCreateInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OperationsRouter["createDraft"]>>),
+    requestApproval: publicProcedure
+      .input(approvalRequestInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OperationsRouter["requestApproval"]>>),
+    decideApproval: publicProcedure
+      .input(approvalDecisionInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OperationsRouter["decideApproval"]>>),
+    approveDraft: publicProcedure
+      .input(draftApproveInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OperationsRouter["approveDraft"]>>),
+    sendApprovedDraft: publicProcedure
+      .input(draftApproveInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OperationsRouter["sendApprovedDraft"]>>),
+    createProposal: publicProcedure
+      .input(proposalCreateInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OperationsRouter["createProposal"]>>),
+    createProof: publicProcedure
+      .input(proofCreateInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OperationsRouter["createProof"]>>)
+    }),
   profile: t.router({
     get: publicProcedure
       .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<ProfileRouter["get"]>>),
@@ -373,7 +445,9 @@ const appRouter = t.router({
     }),
   providerCapabilities: t.router({
     get: publicProcedure
-      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<ProviderCapabilitiesRouter["get"]>>)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<ProviderCapabilitiesRouter["get"]>>),
+    operations: publicProcedure
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<ProviderCapabilitiesRouter["operations"]>>)
     }),
   search: t.router({
     quick: publicProcedure

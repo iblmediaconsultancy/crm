@@ -1,5 +1,5 @@
-export { type Auth, auth, type Session, type SessionUser } from "./auth";
 export { workspaceAccess, workspaceRoles } from "./access";
+export { type Auth, auth, type Session, type SessionUser } from "./auth";
 export { AUTH_COOKIE_PREFIX } from "./cookies";
 export { isGoogleConfigured, isMicrosoftConfigured } from "./env";
 export {
@@ -44,6 +44,12 @@ export {
 	ssoCallbackURL,
 	ssoProviderName,
 } from "./sso";
+export {
+	type SystemEmail,
+	type SystemEmailDependencies,
+	sendSystemEmail,
+	stableSystemEmailKey,
+} from "./system-email";
 export {
 	hasSignInAllowList,
 	isWorkspaceEmail,
