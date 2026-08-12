@@ -7,6 +7,7 @@ import {
 	type ExportRow,
 	type MigrationOutcome,
 	planRows,
+	sourceIdentity,
 	stableHash,
 	summarize,
 } from "./core";
@@ -224,16 +225,145 @@ const loadExport = async () => {
 	return { manifest, rows };
 };
 
-const plan = async () => {
-	const { manifest, rows } = await loadExport();
-	const outcomes = planRows(rows, {
+type ClassificationState =
+	| "MAPPED"
+	| "PLATFORM_INTERNAL"
+	| "INTENTIONALLY_EXCLUDED"
+	| "AWAITING_OWNER_DECISION";
+type SourceClassification = {
+	formatVersion: 1;
+	inventoryChecksum: string;
+	tables: Record<string, {
+		classification: ClassificationState;
+		rationale: string;
+		fields: Record<string, ClassificationState>;
+	}>;
+};
+
+const classify = async () => {
+	const inventoryDocument = JSON.parse(
+		await readFile(resolve(artifactsRoot, "inventory.json"), "utf8"),
+	) as {
+		checksum: string;
+		tables: Array<{ tablename: string }>;
+		columns: Array<{ table_name: string; column_name: string }>;
+	};
+	const existing = await readFile(
+		resolve(artifactsRoot, "source-classification.json"),
+		"utf8",
+	).then((value) => JSON.parse(value) as SourceClassification).catch(() => null);
+	const tables: SourceClassification["tables"] = {};
+	for (const { tablename } of inventoryDocument.tables) {
+		const prior = existing?.tables[tablename];
+		const fields: Record<string, ClassificationState> = {};
+		for (const column of inventoryDocument.columns.filter(
+			(item) => item.table_name === tablename,
+		)) {
+			fields[column.column_name] =
+				prior?.fields[column.column_name] ?? "AWAITING_OWNER_DECISION";
+		}
+		tables[tablename] = {
+			classification:
+				prior?.classification ?? "AWAITING_OWNER_DECISION",
+			rationale: prior?.rationale ?? "",
+			fields,
+		};
+	}
+	await writeJson(resolve(artifactsRoot, "source-classification.json"), {
+		formatVersion: 1,
+		inventoryChecksum: inventoryDocument.checksum,
+		tables,
+	} satisfies SourceClassification);
+	console.log(JSON.stringify({
+		tables: Object.keys(tables).length,
+		awaitingOwnerDecision: Object.values(tables).filter(
+			(item) =>
+				item.classification === "AWAITING_OWNER_DECISION" ||
+				Object.values(item.fields).includes("AWAITING_OWNER_DECISION"),
+		).length,
+	}));
+};
+
+const planWithClassification = async (rows: ExportRow[]) => {
+	const [inventoryDocument, classification] = await Promise.all([
+		readFile(resolve(artifactsRoot, "inventory.json"), "utf8").then(
+			(value) => JSON.parse(value) as {
+				checksum: string;
+				tables: Array<{ tablename: string }>;
+				columns: Array<{ table_name: string; column_name: string }>;
+			},
+		),
+		readFile(resolve(artifactsRoot, "source-classification.json"), "utf8")
+			.then((value) => JSON.parse(value) as SourceClassification),
+	]);
+	if (classification.inventoryChecksum !== inventoryDocument.checksum) {
+		throw new Error("Source classification does not match the current V1 inventory.");
+	}
+	const unresolved: string[] = [];
+	for (const { tablename } of inventoryDocument.tables) {
+		const table = classification.tables[tablename];
+		if (!table) {
+			unresolved.push(`${tablename}: missing table classification`);
+			continue;
+		}
+		if (table.classification === "AWAITING_OWNER_DECISION") {
+			unresolved.push(`${tablename}: awaiting owner decision`);
+		}
+		if (
+			(table.classification === "PLATFORM_INTERNAL" ||
+				table.classification === "INTENTIONALLY_EXCLUDED") &&
+			table.rationale.trim().length < 10
+		) {
+			unresolved.push(`${tablename}: exclusion rationale is required`);
+		}
+		for (const { column_name } of inventoryDocument.columns.filter(
+			(column) => column.table_name === tablename,
+		)) {
+			if (!table.fields[column_name]) {
+				unresolved.push(`${tablename}.${column_name}: missing classification`);
+			} else if (table.fields[column_name] === "AWAITING_OWNER_DECISION") {
+				unresolved.push(`${tablename}.${column_name}: awaiting owner decision`);
+			}
+		}
+	}
+	if (unresolved.length) {
+		throw new Error(
+			`Migration classification is incomplete (${unresolved.length} decisions). First items: ${unresolved.slice(0, 10).join("; ")}`,
+		);
+	}
+	const mappedRows = rows.filter(
+		(item) => classification.tables[item.table]?.classification === "MAPPED",
+	);
+	const mapped = planRows(mappedRows, {
 		ownerUserId: required("V2_OWNER_USER_ID"),
 	});
+	const mappedByKey = new Map(mapped.map((item) => [item.idempotencyKey, item]));
+	return rows.map((item) => {
+		const identity = sourceIdentity(item.table, item.row);
+		const table = classification.tables[item.table];
+		if (table?.classification === "MAPPED") {
+			const outcome = mappedByKey.get(identity.idempotencyKey);
+			if (!outcome) throw new Error(`No mapping outcome for ${item.table}`);
+			return outcome;
+		}
+		return {
+			...identity,
+			sourceTable: item.table,
+			outcome: "EXCLUDED" as const,
+			reasonCode: table?.classification,
+		};
+	});
+};
+
+const plan = async () => {
+	const { manifest, rows } = await loadExport();
+	const outcomes = await planWithClassification(rows);
 	const summary = summarize(outcomes);
 	const privatePlan = {
 		formatVersion: 1,
 		sourceManifestChecksum: manifest.checksum,
 		sourceWatermark: manifest.watermark,
+		complete: summary.complete,
 		outcomes,
 	};
 	await writeJson(resolve(artifactsRoot, "plan.private.json"), privatePlan);
@@ -243,7 +373,9 @@ const plan = async () => {
 		sourceWatermark: manifest.watermark,
 		...summary,
 		zeroUnexplainedLoss:
-			summary.total === rows.length && summary.accounted === rows.length,
+			summary.total === rows.length &&
+			summary.accounted === rows.length &&
+			summary.complete,
 		outcomes: outcomes.map(({ payload: _payload, ...safe }) => safe),
 	};
 	await writeJson(resolve(artifactsRoot, "reconciliation.json"), report);
@@ -316,7 +448,9 @@ const apply = async () => {
 		sourceManifestChecksum: string;
 		sourceWatermark: { transaction_id: string };
 		outcomes: MigrationOutcome[];
+		complete: boolean;
 	};
+	if (!planDocument.complete) throw new Error("Apply is blocked: unresolved business rows remain in the migration plan.");
 	const ownerUserId = required("V2_OWNER_USER_ID");
 	const client = await connect(required("DATABASE_URL"));
 	const runId = `v1_apply_${stableHash(`${planDocument.sourceManifestChecksum}:${ownerUserId}`).slice(0, 24)}`;
@@ -363,11 +497,24 @@ const apply = async () => {
 						outcome.targetId,
 					],
 				);
-				if (inserted)
-					await client.query(
-						`INSERT INTO "legacyRollbackEntry" ("runId","targetTable","targetId","operation") VALUES ($1,$2,$3,'DELETE_INSERTED_ROW')`,
-						[runId, outcome.targetTable, outcome.targetId],
+				if (inserted) {
+					const insertedRow = await client.query(
+						`SELECT to_jsonb(t) AS row FROM ${safeIdentifier(outcome.targetTable)} t WHERE id=$1`,
+						[outcome.targetId],
 					);
+					const targetFingerprint = stableHash(
+						canonicalJson(insertedRow.rows[0]?.row),
+					);
+					await client.query(
+						`INSERT INTO "legacyRollbackEntry" ("runId","targetTable","targetId","operation","targetFingerprint") VALUES ($1,$2,$3,'DELETE_INSERTED_ROW',$4)`,
+						[
+							runId,
+							outcome.targetTable,
+							outcome.targetId,
+							targetFingerprint,
+						],
+					);
+				}
 			}
 			await client.query(
 				`INSERT INTO "legacyMigrationOutcome" ("idempotencyKey","runId","sourceTable","sourceIdHash","outcome","targetTable","targetId","reasonCode") VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
@@ -400,25 +547,137 @@ const apply = async () => {
 
 const reconcile = async () => {
 	const { manifest, rows } = await loadExport();
-	const report = JSON.parse(
-		await readFile(resolve(artifactsRoot, "reconciliation.json"), "utf8"),
-	) as { total: number; accounted: number; sourceManifestChecksum: string };
+	const [report, planDocument] = await Promise.all([
+		readFile(resolve(artifactsRoot, "reconciliation.json"), "utf8").then(
+			(value) =>
+				JSON.parse(value) as {
+					total: number;
+					accounted: number;
+					sourceManifestChecksum: string;
+					zeroUnexplainedLoss: boolean;
+				},
+		),
+		readFile(resolve(artifactsRoot, "plan.private.json"), "utf8").then(
+			(value) =>
+				JSON.parse(value) as { outcomes: MigrationOutcome[]; complete: boolean },
+		),
+	]);
+	const client = await connect(required("DATABASE_URL"));
+	let missingIdMaps = 0;
+	let missingTargets = 0;
+	let targetMismatches = 0;
+	try {
+		for (const outcome of planDocument.outcomes.filter(
+			(item) => item.outcome === "MAPPED",
+		)) {
+			if (!outcome.targetTable || !outcome.targetId) {
+				targetMismatches += 1;
+				continue;
+			}
+			const mapping = await client.query(
+				`SELECT "targetTable","targetId" FROM "legacyIdMap" WHERE "idempotencyKey"=$1`,
+				[outcome.idempotencyKey],
+			);
+			if (!mapping.rowCount) {
+				missingIdMaps += 1;
+				continue;
+			}
+			if (
+				mapping.rows[0].targetTable !== outcome.targetTable ||
+				mapping.rows[0].targetId !== outcome.targetId
+			) {
+				targetMismatches += 1;
+				continue;
+			}
+			const target = await client.query(
+				`SELECT 1 FROM ${safeIdentifier(outcome.targetTable)} WHERE id=$1`,
+				[outcome.targetId],
+			);
+			if (!target.rowCount) missingTargets += 1;
+		}
+	} finally {
+		await client.end();
+	}
 	const checks = {
 		manifestChecksumMatches:
 			report.sourceManifestChecksum === manifest.checksum,
 		sourceRows: rows.length,
 		outcomes: report.total,
 		accounted: report.accounted,
+		classificationComplete: planDocument.complete,
 		zeroUnexplainedLoss:
-			rows.length === report.total && report.total === report.accounted,
+			rows.length === report.total &&
+			report.total === report.accounted &&
+			report.zeroUnexplainedLoss,
+		missingIdMaps,
+		missingTargets,
+		targetMismatches,
+		targetReconciled:
+			missingIdMaps === 0 &&
+			missingTargets === 0 &&
+			targetMismatches === 0,
 	};
 	console.log(JSON.stringify(checks, null, 2));
 	if (
-		!Object.values(checks).every(
-			(value) => value === true || typeof value === "number",
-		)
-	)
+		!checks.manifestChecksumMatches ||
+		!checks.classificationComplete ||
+		!checks.zeroUnexplainedLoss ||
+		!checks.targetReconciled
+	) {
 		process.exitCode = 1;
+	}
+};
+
+const assertRollbackSafe = async (
+	client: pg.Client,
+	entry: { targetTable: string; targetId: string; targetFingerprint: string | null },
+) => {
+	if (!entry.targetFingerprint) {
+		throw new Error("Rollback entry predates target fingerprints and requires manual review.");
+	}
+	const current = await client.query(
+		`SELECT to_jsonb(t) AS row FROM ${safeIdentifier(entry.targetTable)} t WHERE id=$1 FOR UPDATE`,
+		[entry.targetId],
+	);
+	if (!current.rowCount) return;
+	const fingerprint = stableHash(canonicalJson(current.rows[0].row));
+	if (fingerprint !== entry.targetFingerprint) {
+		throw new Error(
+			`Rollback blocked: ${entry.targetTable}/${entry.targetId} changed after migration.`,
+		);
+	}
+	const references = (
+		await client.query(
+			`SELECT child.relname AS "childTable", child_column.attname AS "childColumn"
+			 FROM pg_constraint constraint_row
+			 JOIN pg_class parent ON parent.oid = constraint_row.confrelid
+			 JOIN pg_namespace parent_ns ON parent_ns.oid = parent.relnamespace
+			 JOIN pg_class child ON child.oid = constraint_row.conrelid
+			 JOIN pg_namespace child_ns ON child_ns.oid = child.relnamespace
+			 JOIN unnest(constraint_row.conkey) WITH ORDINALITY AS child_key(attnum, ordinality) ON TRUE
+			 JOIN unnest(constraint_row.confkey) WITH ORDINALITY AS parent_key(attnum, ordinality)
+			   ON parent_key.ordinality = child_key.ordinality
+			 JOIN pg_attribute child_column ON child_column.attrelid = child.oid AND child_column.attnum = child_key.attnum
+			 JOIN pg_attribute parent_column ON parent_column.attrelid = parent.oid AND parent_column.attnum = parent_key.attnum
+			 WHERE constraint_row.contype='f'
+			   AND parent_ns.nspname='public'
+			   AND child_ns.nspname='public'
+			   AND parent.relname=$1
+			   AND parent_column.attname='id'`,
+			[entry.targetTable],
+		)
+	).rows as Array<{ childTable: string; childColumn: string }>;
+	for (const reference of references) {
+		const count = await client.query(
+			`SELECT count(*)::int AS count FROM ${safeIdentifier(reference.childTable)} WHERE ${safeIdentifier(reference.childColumn)}=$1`,
+			[entry.targetId],
+		);
+		if (Number(count.rows[0]?.count ?? 0) > 0) {
+			throw new Error(
+				`Rollback blocked: ${entry.targetTable}/${entry.targetId} has dependent ${reference.childTable} rows.`,
+			);
+		}
+	}
 };
 
 const rollback = async () => {
@@ -436,13 +695,14 @@ const rollback = async () => {
 		await client.query("BEGIN");
 		const entries = (
 			await client.query(
-				`SELECT "sequence","targetTable","targetId" FROM "legacyRollbackEntry" WHERE "runId"=$1 AND "rolledBackAt" IS NULL ORDER BY "sequence" DESC`,
+				`SELECT "sequence","targetTable","targetId","targetFingerprint" FROM "legacyRollbackEntry" WHERE "runId"=$1 AND "rolledBackAt" IS NULL ORDER BY "sequence" DESC`,
 				[runId],
 			)
 		).rows;
 		for (const entry of entries) {
 			if (!allowed.has(entry.targetTable))
 				throw new Error("Rollback target is not allowlisted");
+			await assertRollbackSafe(client, entry);
 			await client.query(
 				`DELETE FROM ${safeIdentifier(entry.targetTable)} WHERE id=$1`,
 				[entry.targetId],
@@ -476,6 +736,7 @@ const rollback = async () => {
 
 const commands: Record<string, () => Promise<void>> = {
 	inventory,
+	classify,
 	export: exportSource,
 	plan,
 	apply,

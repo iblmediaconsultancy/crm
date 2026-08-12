@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { isGoogleConfigured, WORKSPACE_ID } from "@crm/auth";
+import { WORKSPACE_ID } from "@crm/auth";
 import type { Db } from "@crm/db";
 import { ForbiddenException } from "@nestjs/common";
 import { SsoService } from "../src/sso/sso.service";
@@ -134,9 +134,5 @@ describe("the sign-in page's read", () => {
 		]);
 	});
 
-	it("says whether Google is configured, so the page can offer nothing", async () => {
-		const { sso } = service(null, [OKTA]);
 
-		expect((await sso.signInOptions()).google).toBe(isGoogleConfigured());
-	});
 });

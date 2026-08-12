@@ -7,6 +7,7 @@ import {
 	CardTitle,
 } from "@crm/ui/components/card";
 import type { Metadata } from "next";
+import Link from "next/link";
 import {
 	PageShell,
 	PageShellContent,
@@ -38,17 +39,18 @@ const labels = {
 } as const;
 
 export default async function OperationsPage() {
-	await requireSession();
+	const session = await requireSession();
 	const trpc = getServerTrpc();
 	const queryClient = getServerQueryClient();
-	const [overview, directory, workbench] = await Promise.all([
+	const [overview, directory, workbench, workspace] = await Promise.all([
 		queryClient.fetchQuery(trpc.operations.overview.queryOptions()),
 		queryClient.fetchQuery(
-			trpc.operations.directory.queryOptions({ q: "", take: 20 }),
+			trpc.operations.directory.queryOptions({ q: "", take: 20, skip: 0 }),
 		),
 		queryClient.fetchQuery(
-			trpc.operations.workbench.queryOptions({ q: "", take: 20 }),
+			trpc.operations.workbench.queryOptions({ q: "", take: 20, skip: 0 }),
 		),
+		queryClient.fetchQuery(trpc.workspace.get.queryOptions()),
 	]);
 
 	return (
@@ -63,6 +65,14 @@ export default async function OperationsPage() {
 				</PageShellHeading>
 			</PageShellHeader>
 			<PageShellContent>
+				<nav aria-label="Football CRM" className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+					{[
+						["Players", "players"], ["Football agents", "football-agents"], ["Agencies", "agencies"], ["Clubs", "clubs"],
+						["Representations", "representations"], ["Leads", "leads"], ["Tasks", "football-tasks"], ["Outreach", "outreach"],
+						...(workspace.viewerRole === "contributor" ? [] : [["Duplicates", "duplicates"], ["Allocation", "allocation"]]),
+						["Archived", "archived"],
+					].map(([label, href]) => <Link key={href} href={`../${href}`} className="rounded-md border bg-card px-3 py-2 text-sm font-medium hover:bg-muted">{label}</Link>)}
+				</nav>
 				<section
 					aria-labelledby="operations-summary"
 					className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
@@ -82,7 +92,7 @@ export default async function OperationsPage() {
 					))}
 				</section>
 
-				<OperationsActions />
+				<OperationsActions viewerRole={workspace.viewerRole} viewerUserId={session.user.id} />
 
 				<div className="grid gap-4 xl:grid-cols-2">
 					<Collection
@@ -134,7 +144,7 @@ export default async function OperationsPage() {
 						{directory.representations.map((row) => (
 							<Row
 								key={row.id}
-								title={`${row.player.firstName} → ${row.agent.firstName}`}
+								title={`${row.player.firstName} \u2192 ${row.agent.firstName}`}
 								detail={row.agency?.name ?? "No agency"}
 								status={row.status}
 							/>
@@ -157,7 +167,7 @@ export default async function OperationsPage() {
 							<Row
 								key={row.id}
 								title={row.name}
-								detail={`${row._count.deals} deals · ${row.probability}%`}
+								detail={`${row._count.deals} deals \u00b7 ${row.probability}%`}
 								status={row.kind}
 							/>
 						))}
@@ -213,7 +223,7 @@ export default async function OperationsPage() {
 							<Row
 								key={row.id}
 								title={`${row.entityType} duplicate`}
-								detail={`${row.leftEntityId} / ${row.rightEntityId}`}
+								detail={`${Math.round(Number(row.score) * 100)}% evidence match \u00b7 open side-by-side review`}
 								status="REVIEW"
 							/>
 						))}

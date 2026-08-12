@@ -20,7 +20,6 @@ import {
 } from "@nestjs/common";
 import {
 	ActivityStampService,
-	type StampTargets,
 } from "../crm/activity-stamp.service";
 import { type BulkResult, requireOwner, runBulk } from "../crm/bulk";
 import {
@@ -123,6 +122,10 @@ export class DealsService {
 					orderBy: resolveOrderBy(input, SORTABLE, [{ createdAt: "desc" }]),
 					select: {
 						id: true,
+					lifecycleState: true,
+					version: true,
+					archiveReason: true,
+					archivedAt: true,
 						name: true,
 						stage: true,
 						amount: true,
@@ -168,6 +171,7 @@ export class DealsService {
 					closedAt: closedAt?.toISOString() ?? null,
 					lastActivityAt: lastActivityAt?.toISOString() ?? null,
 					createdAt: createdAt.toISOString(),
+					archivedAt: row.archivedAt?.toISOString() ?? null,
 					fields: tableFields.get(row.id) ?? {},
 				}),
 			),
@@ -188,6 +192,10 @@ export class DealsService {
 			where: { id },
 			select: {
 				id: true,
+					lifecycleState: true,
+					version: true,
+					archiveReason: true,
+					archivedAt: true,
 				name: true,
 				description: true,
 				stage: true,
@@ -200,6 +208,8 @@ export class DealsService {
 				expectedCloseDate: true,
 				closedAt: true,
 				closedReason: true,
+
+
 				createdAt: true,
 				company: { select: { ...COMPANY_SELECT, industry: true } },
 				owner: { select: OWNER_SELECT },
@@ -331,35 +341,6 @@ export class DealsService {
 		} catch (error) {
 			throw this.translate(error, id);
 		}
-	}
-
-	async delete(id: string): Promise<{ id: string; name: string }> {
-		let deleted: { targets: StampTargets; name: string };
-
-		try {
-			deleted = await this.db.$transaction(async (tx) => {
-				const targets = await this.stamp.targetsOf({ dealId: id }, tx);
-
-				const deal = await tx.deal.delete({
-					where: { id },
-					select: { name: true },
-				});
-
-				return { targets, name: deal.name };
-			});
-		} catch (error) {
-			throw this.translate(error, id);
-		}
-
-		await this.stamp.recomputeAfterDelete(deleted.targets, { dealId: id });
-
-		this.logger.log({
-			message: "Deal deleted",
-			dealId: id,
-			name: deleted.name,
-		});
-
-		return { id, name: deleted.name };
 	}
 
 	async setStage(input: SetStageInput, actingUserId: string) {
@@ -559,10 +540,6 @@ export class DealsService {
 		);
 	}
 
-	async bulkDelete(ids: string[]): Promise<BulkResult> {
-		return runBulk(ids, (id) => this.delete(id));
-	}
-
 	private async companyOf(dealId: string) {
 		const deal = await this.db.deal.findUnique({
 			where: { id: dealId },
@@ -589,7 +566,10 @@ export class DealsService {
 	}
 
 	private buildWhere(input: DealListInput): Prisma.DealWhereInput {
-		const where: Prisma.DealWhereInput = this.searchFilter(input.q);
+		const where: Prisma.DealWhereInput = {
+			...this.searchFilter(input.q),
+			lifecycleState: input.lifecycle,
+		};
 
 		if (input.owner !== FACET_ALL) {
 			where.ownerId =

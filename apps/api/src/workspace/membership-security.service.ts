@@ -52,7 +52,10 @@ export class MembershipSecurityService {
 						status === "ACTIVE" ? new Date() : target.user.profile?.activatedAt,
 				},
 			});
-			await this.audit(tx, actorUserId, "MEMBER_STATUS_CHANGED", target.id, {
+			if (status === "SUSPENDED") {
+				await tx.session.deleteMany({ where: { userId: target.userId } });
+				await this.enqueueReallocation(tx, actorUserId, target.userId, "MEMBER_SUSPENDED");
+			}			await this.audit(tx, actorUserId, "MEMBER_STATUS_CHANGED", target.id, {
 				from: target.user.profile?.status ?? null,
 				to: status,
 			});
@@ -66,38 +69,16 @@ export class MembershipSecurityService {
 				role: "contributor",
 				status: "SUSPENDED",
 			});
-			await tx.member.delete({ where: { id: target.id } });
-			await this.audit(tx, actorUserId, "MEMBER_REMOVED", target.id, {});
-		});
-	}
-
-	async deleteAccount(
-		actorUserId: string,
-		targetUserId: string,
-	): Promise<void> {
-		await this.inWorkspaceTransaction(actorUserId, async (tx) => {
-			const target = await tx.member.findUnique({
-				where: {
-					organizationId_userId: {
-						organizationId: WORKSPACE_ID,
-						userId: targetUserId,
-					},
-				},
-				select: {
-					id: true,
-					userId: true,
-					role: true,
-					user: { select: { profile: true } },
-				},
+			await tx.userProfile.update({
+				where: { userId: target.userId },
+				data: { status: "SUSPENDED", suspendedAt: new Date() },
 			});
-			if (!target)
-				throw new NotFoundException("That account is not in this workspace.");
-			await this.assertRetainsActiveAdmin(tx, target, {
-				role: "contributor",
-				status: "SUSPENDED",
+			await tx.session.deleteMany({ where: { userId: target.userId } });
+			await this.enqueueReallocation(tx, actorUserId, target.userId, "MEMBER_REMOVED");
+			await this.audit(tx, actorUserId, "MEMBER_REMOVED", target.id, {
+				userId: target.userId,
+				sessionsRevoked: true,
 			});
-			await this.audit(tx, actorUserId, "ACCOUNT_DELETED", targetUserId, {});
-			await tx.user.delete({ where: { id: targetUserId } });
 		});
 	}
 
@@ -209,6 +190,32 @@ export class MembershipSecurityService {
 		}
 	}
 
+	private async enqueueReallocation(
+		tx: Prisma.TransactionClient,
+		actorUserId: string,
+		assigneeUserId: string,
+		reason: string,
+	): Promise<void> {
+		const assignments = await tx.assignment.findMany({
+			where: { assigneeUserId, revokedAt: null },
+			select: { id: true, entityType: true, entityId: true },
+		});
+		if (!assignments.length) return;
+		await tx.assignment.updateMany({
+			where: { id: { in: assignments.map((assignment) => assignment.id) } },
+			data: { revokedAt: new Date() },
+		});
+		await tx.allocationRequest.createMany({
+			data: assignments.map((assignment) => ({
+				entityType: assignment.entityType,
+				entityId: assignment.entityId,
+				requestedByUserId: actorUserId,
+				idempotencyKey: `member-reallocation:${assignment.id}`,
+				explanation: { reason, previousAssigneeUserId: assigneeUserId },
+			})),
+			skipDuplicates: true,
+		});
+	}
 	private async audit(
 		tx: Prisma.TransactionClient,
 		actorUserId: string,

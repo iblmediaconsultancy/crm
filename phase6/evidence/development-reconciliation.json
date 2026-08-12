@@ -13,6 +13,7 @@
 		"mapped": 10,
 		"rejected": 8,
 		"duplicateCandidates": 0,
+		"unresolvedBusinessRows": 8,
 		"rejectionReasons": {
 			"UNSUPPORTED_SOURCE_TABLE": 8
 		}
@@ -22,7 +23,7 @@
 		"idempotentRerunPassed": true,
 		"rollbackRehearsalPassed": true,
 		"reapplyAfterRollbackPassed": true,
-		"zeroUnexplainedLoss": true
+		"zeroUnexplainedLoss": false
 	},
 	"containsSourceValues": false
 }

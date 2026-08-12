@@ -429,7 +429,6 @@ export function AgentComposer({
 			q: state.resourceQuery,
 		}),
 	);
-	const google = useQuery(trpc.google.status.queryOptions());
 	const submitAction = useAsyncAction({
 		action: onSubmit,
 		onSuccess: () => {
@@ -462,9 +461,6 @@ export function AgentComposer({
 		submitAction.run(prompt, clientRequestId);
 	};
 
-	const connectedGoogle = (google.data?.sources ?? []).filter(
-		(source) => source.connected,
-	);
 	const focusAfterContext = (key: string) => {
 		let attempts = 0;
 		const focus = () => {
@@ -521,7 +517,6 @@ export function AgentComposer({
 					resources={resourceResults.data ?? []}
 					resourcesLoading={resourceResults.isFetching}
 					resourcesReady={resourceResults.isSuccess}
-					connectedGoogle={connectedGoogle}
 					disabled={locked}
 					attachmentsReading={state.attachmentsReading}
 					dispatch={dispatch}
@@ -1157,7 +1152,6 @@ function ComposerTools({
 	resources,
 	resourcesLoading,
 	resourcesReady,
-	connectedGoogle,
 	disabled,
 	attachmentsReading,
 	dispatch,
@@ -1168,7 +1162,6 @@ function ComposerTools({
 	resources: BuilderResource[];
 	resourcesLoading: boolean;
 	resourcesReady: boolean;
-	connectedGoogle: Array<{ source: string }>;
 	disabled: boolean;
 	attachmentsReading: boolean;
 	dispatch: React.Dispatch<ComposerAction>;
@@ -1183,7 +1176,6 @@ function ComposerTools({
 				resources={resources}
 				loading={resourcesLoading}
 				ready={resourcesReady}
-				connectedGoogle={connectedGoogle}
 				disabled={disabled}
 				dispatch={dispatch}
 				getInsertionOffset={getInsertionOffset}
@@ -1215,7 +1207,6 @@ function ResourcePicker({
 	resources,
 	loading,
 	ready,
-	connectedGoogle,
 	disabled,
 	dispatch,
 	getInsertionOffset,
@@ -1226,7 +1217,6 @@ function ResourcePicker({
 	resources: BuilderResource[];
 	loading: boolean;
 	ready: boolean;
-	connectedGoogle: Array<{ source: string }>;
 	disabled: boolean;
 	dispatch: React.Dispatch<ComposerAction>;
 	getInsertionOffset: () => number;
@@ -1280,27 +1270,6 @@ function ResourcePicker({
 					</InputGroup>
 				</div>
 				<div className="max-h-72 overflow-y-auto p-1">
-					{connectedGoogle.map((source) => {
-						const calendar = source.source === "calendar";
-						const label = calendar ? "Google Calendar" : "Gmail";
-						return (
-							<ResourceButton
-								key={source.source}
-								icon={calendar ? Calendar : Email}
-								label={label}
-								disabled={disabled}
-								onSelect={() =>
-									add({
-										kind: "integration",
-										id: `google:${source.source}`,
-										label,
-										detail: null,
-										imageUrl: null,
-									})
-								}
-							/>
-						);
-					})}
 					<SkeletonSwap
 						loading={loading}
 						label="CRM records"
@@ -1316,7 +1285,7 @@ function ResourcePicker({
 								onSelect={() => add(resource)}
 							/>
 						))}
-						{ready && connectedGoogle.length === 0 && resources.length === 0 ? (
+						{ready && resources.length === 0 ? (
 							<p className="px-3 py-5 text-center text-muted-foreground text-xs">
 								No matching records.
 							</p>

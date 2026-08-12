@@ -265,7 +265,8 @@ export function CompanySheet({ companyId }: { companyId: string }) {
 						<RecordActions
 							record={{ kind: "company", id: company.id }}
 							name={company.name}
-							consequence={companyConsequence(company)}
+							version={company.version}
+							lifecycleState={company.lifecycleState}
 						/>
 					</>
 				) : null

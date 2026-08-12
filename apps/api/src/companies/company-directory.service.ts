@@ -20,22 +20,20 @@ export class CompanyDirectoryService {
 		const domain = domainFromEmail(email);
 		if (!domain) return null;
 
-		const existing = await this.db.company.findUnique({
+		const existing = await this.db.company.findFirst({
 			where: { domain },
 			select: { id: true },
 		});
 		if (existing) return existing.id;
 
-		const company = await this.db.company.upsert({
-			where: { domain },
-			create: {
+		const company = await this.db.company.create({
+			data: {
 				name: domain,
 				domain,
 				website: `https://${domain}`,
 				enrichmentStatus: EnrichmentStatus.PENDING,
 				ownerId: options.ownerId ?? null,
 			},
-			update: {},
 			select: { id: true },
 		});
 

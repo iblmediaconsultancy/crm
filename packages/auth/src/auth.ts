@@ -7,7 +7,7 @@ import { workspaceAccess, workspaceRoles } from "./access";
 import { AUTH_COOKIE_PREFIX } from "./cookies";
 import { env } from "./env";
 import { ensureWorkspaceMembership } from "./organization";
-import { sendSystemEmail, stableSystemEmailKey } from "./system-email";
+import { enqueueSystemEmail, stableSystemEmailKey } from "./system-email";
 export const auth = betterAuth({
 	appName: "IBL Command Center",
 	baseURL: env.apiUrl,
@@ -20,7 +20,7 @@ export const auth = betterAuth({
 		enabled: true,
 		disableSignUp: true,
 		sendResetPassword: async ({ user, url }) => {
-			await sendSystemEmail({
+			await enqueueSystemEmail({
 				actorUserId: user.id,
 				to: user.email,
 				subject: "Reset your IBL Command Center password",
@@ -73,7 +73,7 @@ export const auth = betterAuth({
 			roles: workspaceRoles,
 			sendInvitationEmail: async ({ id, email, organization, inviter }) => {
 				const url = `${env.appUrl}/accept-invitation?id=${encodeURIComponent(id)}`;
-				await sendSystemEmail({
+				await enqueueSystemEmail({
 					actorUserId: inviter.userId,
 					to: email,
 					subject: `Invitation to ${organization.name}`,

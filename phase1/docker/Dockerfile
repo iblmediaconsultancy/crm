@@ -22,17 +22,16 @@ FROM prisma-client AS source
 COPY . .
 COPY --from=prisma-client /workspace/packages/db/src/generated /workspace/packages/db/src/generated
 RUN node apps/api/scripts/chmod-trpc-binary.mjs
-RUN bun packages/db/node_modules/prisma/build/index.js migrate diff --from-empty --to-schema packages/db/prisma/schema.prisma --script > /dev/null
+RUN bun packages/db/node_modules/prisma/build/index.js validate --schema packages/db/prisma/schema.prisma
 
 FROM source AS app-build
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV DATABASE_URL=postgresql://phase1:phase1@127.0.0.1:1/phase1
 ENV APP_URL=http://localhost:3000
 ENV API_URL=http://localhost:3001
-ENV BETTER_AUTH_SECRET=phase1-build-only-secret-not-production
 ENV ALLOWED_SIGN_IN=local.test
 COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node-real
-RUN node-real apps/app/node_modules/next/dist/bin/next build apps/app
+RUN BETTER_AUTH_SECRET=phase1-build-only-secret-not-production node-real apps/app/node_modules/next/dist/bin/next build apps/app
 
 FROM node-runtime AS app
 ENV NODE_ENV=production
@@ -49,20 +48,26 @@ CMD ["node", "apps/app/server.js"]
 
 FROM source AS api-build
 RUN bun run --cwd apps/api build
-RUN bun build apps/api/src/worker.ts --target=bun --outdir apps/api/dist-worker --packages=external --sourcemap
+RUN bun build apps/api/src/worker.ts --target=bun --outdir apps/api/dist-worker --external '@nestjs/graphql' --external '@nestjs/microservices' --external '@nestjs/microservices/*' --external '@nestjs/websockets/*'
 
 FROM oven/bun:1.3.12 AS api
 ENV NODE_ENV=production
 WORKDIR /workspace
-COPY --from=api-build /workspace .
+COPY --from=api-build /workspace/phase7/docker/run-with-secrets.sh ./phase7/docker/run-with-secrets.sh
+COPY --from=api-build /workspace/apps/api/dist ./apps/api/dist
 EXPOSE 3001
 CMD ["bun", "apps/api/dist/main.js"]
 
-FROM api AS worker
+FROM oven/bun:1.3.12 AS worker
+ENV NODE_ENV=production
+WORKDIR /workspace
+COPY --from=api-build /workspace/phase7/docker/run-with-secrets.sh ./phase7/docker/run-with-secrets.sh
+COPY --from=api-build /workspace/apps/api/dist-worker ./apps/api/dist-worker
 CMD ["bun", "apps/api/dist-worker/worker.js"]
 
 FROM source AS agent-build
 ENV NODE_ENV=production
+ENV AGENT_BUILD=true
 ENV DATABASE_URL=postgresql://phase1:phase1@127.0.0.1:1/phase1
 ENV CRM_TELEMETRY_DISABLED=1
 WORKDIR /workspace/apps/agent
@@ -79,8 +84,23 @@ COPY --from=agent-build /workspace/apps/agent/.output ./apps/agent/.output
 EXPOSE 2000
 CMD ["node", "apps/agent/.output/server/index.mjs"]
 
-FROM source AS migrate
+FROM oven/bun:1.3.12 AS migrate
 WORKDIR /workspace
+COPY package.json bun.lock ./
+COPY apps/app/package.json apps/app/package.json
+COPY apps/api/package.json apps/api/package.json
+COPY apps/agent/package.json apps/agent/package.json
+COPY packages/auth/package.json packages/auth/package.json
+COPY packages/db/package.json packages/db/package.json
+COPY packages/env/package.json packages/env/package.json
+COPY packages/telemetry/package.json packages/telemetry/package.json
+COPY packages/typescript-config/package.json packages/typescript-config/package.json
+COPY packages/ui/package.json packages/ui/package.json
+RUN bun install --frozen-lockfile --ignore-scripts --filter @crm/db
+COPY packages/db/prisma packages/db/prisma
+COPY packages/db/prisma.config.ts packages/db/prisma.config.ts
+COPY packages/env/src packages/env/src
+COPY phase7/docker/run-with-secrets.sh phase7/docker/run-with-secrets.sh
 CMD ["bun", "packages/db/node_modules/prisma/build/index.js", "migrate", "deploy", "--config", "packages/db/prisma.config.ts"]
 
 FROM source AS verify

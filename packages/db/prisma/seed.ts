@@ -370,9 +370,9 @@ async function seedCompanies(
 	const companies = [];
 
 	for (const company of COMPANIES) {
-		const row = await db.company.upsert({
-			where: { domain: company.domain },
-			create: {
+		const existing = await db.company.findFirst({ where: { domain: company.domain }, select: { id: true, name: true, domain: true, iconUrl: true } });
+		const row = existing ?? await db.company.create({
+			data: {
 				name: company.name,
 				domain: company.domain,
 				website: `https://${company.domain}`,
@@ -383,7 +383,6 @@ async function seedCompanies(
 				ownerId: pick(ownerIds),
 				createdAt: daysFromNow(-integer(30, 400), 12),
 			},
-			update: {},
 			select: { id: true, name: true, domain: true, iconUrl: true },
 		});
 		companies.push({ ...row, domain: row.domain ?? company.domain });
@@ -437,9 +436,9 @@ async function seedContacts(
 			if (used.has(email)) continue;
 			used.add(email);
 
-			const contact = await db.contact.upsert({
-				where: { email },
-				create: {
+			const existingContact = await db.contact.findFirst({ where: { email }, select: { id: true } });
+			const contact = existingContact ?? await db.contact.create({
+				data: {
 					firstName,
 					lastName,
 					email,
@@ -449,7 +448,6 @@ async function seedContacts(
 					ownerId: pick(ownerIds),
 					createdAt: daysFromNow(-integer(10, 300), 12),
 				},
-				update: {},
 				select: { id: true },
 			});
 
@@ -497,9 +495,8 @@ async function seedRates(): Promise<number> {
 			id: SETTINGS_ID,
 			reportingCurrency: DEFAULT_REPORTING_CURRENCY,
 		},
-		update: {},
-		select: { id: true },
-	});
+				select: { id: true },
+			});
 
 	seedBase = await readReportingCurrency(db);
 

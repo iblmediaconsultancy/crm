@@ -10,13 +10,14 @@ import {
 import { Injectable, Logger } from "@nestjs/common";
 import { ActivityStampService } from "../crm/activity-stamp.service";
 import { InjectDatabase } from "../database/database.constants";
-import type { SyncSource } from "./mailbox.constants";
 import {
 	MailboxMatchService,
 	type MatchContext,
 } from "./mailbox-match.service";
 import { snippetOf } from "./message-text";
 import type { Participant } from "./participants";
+
+export type IngestionOrigin = "miab" | "legacy";
 
 export type IncomingMessage = {
 	rfcMessageId: string;
@@ -26,9 +27,6 @@ export type IncomingMessage = {
 	recipients: { email: string; name: string | null; kind: "to" | "cc" }[];
 	body: string;
 	sentAt: Date;
-	gmailMessageId?: string | null;
-	outlookMessageId?: string | null;
-	outlookWebLink?: string | null;
 };
 
 @Injectable()
@@ -58,7 +56,7 @@ export class ThreadWriterService {
 
 	async store(
 		row: MailboxSync,
-		options: { mailbox: string; origin: SyncSource },
+		options: { mailbox: string; origin: IngestionOrigin },
 		parsed: IncomingMessage,
 		context: MatchContext,
 	): Promise<boolean> {
@@ -166,9 +164,6 @@ export class ThreadWriterService {
 							mailboxId: row.mailboxId,
 							rfcMessageId: parsed.rfcMessageId,
 							syncedByUserId: row.userId,
-							gmailMessageId: parsed.gmailMessageId ?? null,
-							outlookMessageId: parsed.outlookMessageId ?? null,
-							outlookWebLink: parsed.outlookWebLink ?? null,
 							direction: outbound
 								? EmailDirection.OUTBOUND
 								: EmailDirection.INBOUND,
@@ -183,6 +178,74 @@ export class ThreadWriterService {
 					});
 				}
 
+				if (!outbound && contactId) {
+					const plans = await tx.followUpPlan.findMany({
+						where: { contactId, status: { in: ["ACTIVE", "PAUSED"] } },
+						select: { id: true },
+					});
+					const planIds = plans.map((plan) => plan.id);
+					if (planIds.length) {
+						const steps = await tx.followUpStep.findMany({
+							where: { planId: { in: planIds }, draftId: { not: null } },
+							select: { draftId: true },
+						});
+						const draftIds = [
+							...new Set(
+								steps.flatMap((step) => (step.draftId ? [step.draftId] : [])),
+							),
+						];
+						await tx.followUpPlan.updateMany({
+							where: { id: { in: planIds } },
+							data: {
+								status: "CANCELLED",
+								cancellationReason: "Inbound reply received",
+							},
+						});
+						await tx.followUpStep.updateMany({
+							where: {
+								planId: { in: planIds },
+								status: { in: ["PENDING", "LEASED", "QUEUED"] },
+							},
+							data: {
+								status: "CANCELLED",
+								leaseOwner: null,
+								leasedUntil: null,
+							},
+						});
+						if (draftIds.length) {
+							await tx.draft.updateMany({
+								where: { id: { in: draftIds }, status: "QUEUED" },
+								data: { status: "CANCELLED" },
+							});
+							await tx.outboundDelivery.updateMany({
+								where: {
+									draftId: { in: draftIds },
+									status: { in: ["PENDING", "RETRY", "SENDING"] },
+								},
+								data: {
+									status: "CANCELLED",
+									leaseOwner: null,
+									leasedUntil: null,
+									lastErrorCode: "INBOUND_REPLY",
+								},
+							});
+						}
+					}
+				}
+				const repliedDelivery = await tx.outboundDelivery.findFirst({
+					where: {
+						status: { in: ["SENT", "DELIVERED"] },
+						draft: { recipientRoute: { contactId } },
+					},
+					orderBy: [{ sentAt: "desc" }, { createdAt: "desc" }],
+					select: { id: true },
+				});
+				if (repliedDelivery) {
+					await tx.outboundDelivery.update({
+						where: { id: repliedDelivery.id },
+						data: { status: "REPLIED" },
+					});
+				}
 				const stats = await tx.emailMessage.aggregate({
 					where: { threadId: record.id },
 					_count: { _all: true },
@@ -288,7 +351,7 @@ export class ThreadWriterService {
 			lastMessageAt: Date;
 			companyId: string | null;
 			contactId: string | null;
-			origin: SyncSource;
+			origin: IngestionOrigin;
 		},
 	): Promise<Date> {
 		const activity = await tx.activity.upsert({

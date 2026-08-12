@@ -246,12 +246,12 @@ describe("proxy", () => {
 		).toBeNull();
 	});
 
-	it("never fights /grant-access, which would ping-pong forever", async () => {
+	it("routes the quarantined legacy grant screen through onboarding", async () => {
 		setup({ onboarded: false });
 
 		expect(
 			redirectedTo(await proxy(request("/grant-access", [SESSION_COOKIE]))),
-		).toBeNull();
+		).toBe("/onboarding");
 	});
 
 	it("leaves the agent bridge alone", async () => {

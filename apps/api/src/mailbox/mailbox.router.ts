@@ -11,9 +11,12 @@ import type { z } from "zod";
 import type { AuthedTrpcContext } from "../trpc/context.types";
 import { AuthMiddleware } from "../trpc/middlewares/auth.middleware";
 import {
+	mailboxEventInput,
 	mailboxIdInput,
+	mailboxThreadInput,
 	updateOwnedMailboxIdentityInput,
 } from "./mailbox.contracts";
+import { MailboxConversationService } from "./mailbox-conversation.service";
 import { MailboxFoundationService } from "./mailbox-foundation.service";
 
 @Router({ alias: "mailbox" })
@@ -22,6 +25,8 @@ export class MailboxRouter {
 	constructor(
 		@Inject(MailboxFoundationService)
 		private readonly mailbox: MailboxFoundationService,
+		@Inject(MailboxConversationService)
+		private readonly conversations: MailboxConversationService,
 	) {}
 
 	@Query()
@@ -43,5 +48,21 @@ export class MailboxRouter {
 		@Input() input: z.infer<typeof updateOwnedMailboxIdentityInput>,
 	) {
 		return this.mailbox.updateOwnedIdentity(ctx.user.id, input);
+	}
+
+	@Query({ input: mailboxThreadInput })
+	thread(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof mailboxThreadInput>,
+	) {
+		return this.conversations.thread(ctx.user.id, input.threadId);
+	}
+
+	@Query({ input: mailboxEventInput })
+	event(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof mailboxEventInput>,
+	) {
+		return this.conversations.event(ctx.user.id, input.eventId);
 	}
 }

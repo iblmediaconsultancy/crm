@@ -5,6 +5,7 @@ import { formatTrpcError } from "./error-formatter";
 import { AuthMiddleware } from "./middlewares/auth.middleware";
 import { DomainErrorMiddleware } from "./middlewares/domain-error.middleware";
 import { LoggingMiddleware } from "./middlewares/logging.middleware";
+import { PermissionMiddleware } from "./middlewares/permission.middleware";
 import { TrpcContext } from "./trpc.context";
 import { TrpcErrorHandler } from "./trpc-error.handler";
 
@@ -25,7 +26,8 @@ import { TrpcErrorHandler } from "./trpc-error.handler";
 		LoggingMiddleware,
 		DomainErrorMiddleware,
 		AuthMiddleware,
+		PermissionMiddleware,
 	],
-	exports: [AuthMiddleware],
+	exports: [AuthMiddleware, PermissionMiddleware],
 })
 export class TrpcModule {}

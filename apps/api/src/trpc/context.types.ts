@@ -1,4 +1,4 @@
-import type { Session, SessionUser } from "@crm/auth";
+import type { Session, SessionUser, WorkspaceRole } from "@crm/auth";
 import type { Request } from "express";
 
 export type BaseTrpcContext = {
@@ -8,4 +8,5 @@ export type BaseTrpcContext = {
 
 export type AuthedTrpcContext = BaseTrpcContext & {
 	user: SessionUser;
+	workspaceRole: WorkspaceRole;
 };

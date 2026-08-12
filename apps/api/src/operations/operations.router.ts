@@ -11,6 +11,7 @@ import type { z } from "zod";
 import { OutboundDeliveryService } from "../providers/outbound-delivery.service";
 import type { AuthedTrpcContext } from "../trpc/context.types";
 import { AuthMiddleware } from "../trpc/middlewares/auth.middleware";
+import { PermissionMiddleware } from "../trpc/middlewares/permission.middleware";
 import {
 	approvalDecisionInput,
 	approvalRequestInput,
@@ -36,7 +37,7 @@ import {
 import { OperationsService } from "./operations.service";
 
 @Router({ alias: "operations" })
-@UseMiddlewares(AuthMiddleware)
+@UseMiddlewares(AuthMiddleware, PermissionMiddleware)
 export class OperationsRouter {
 	constructor(
 		@Inject(OperationsService) private readonly operations: OperationsService,
@@ -44,12 +45,19 @@ export class OperationsRouter {
 		private readonly outbound: OutboundDeliveryService,
 	) {}
 
-	@Query()
+	@Query({ meta: { permission: "crm.read" } })
 	overview(@Ctx() ctx: AuthedTrpcContext) {
 		return this.operations.overview(ctx.user.id);
 	}
 
-	@Query({ input: operationsListInput })
+	@Query({ input: operationsListInput, meta: { permission: "crm.read" } })
+	selectors(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof operationsListInput>,
+	) {
+		return this.operations.selectors(ctx.user.id, input);
+	}
+	@Query({ input: operationsListInput, meta: { permission: "crm.read" } })
 	directory(
 		@Ctx() ctx: AuthedTrpcContext,
 		@Input() input: z.infer<typeof operationsListInput>,
@@ -57,7 +65,7 @@ export class OperationsRouter {
 		return this.operations.directory(ctx.user.id, input);
 	}
 
-	@Query({ input: operationsListInput })
+	@Query({ input: operationsListInput, meta: { permission: "crm.read" } })
 	workbench(
 		@Ctx() ctx: AuthedTrpcContext,
 		@Input() input: z.infer<typeof operationsListInput>,
@@ -65,7 +73,7 @@ export class OperationsRouter {
 		return this.operations.workbench(ctx.user.id, input);
 	}
 
-	@Mutation({ input: footballProfileInput })
+	@Mutation({ input: footballProfileInput, meta: { permission: "football.manage" } })
 	saveFootballProfile(
 		@Ctx() ctx: AuthedTrpcContext,
 		@Input() input: z.infer<typeof footballProfileInput>,
@@ -73,7 +81,7 @@ export class OperationsRouter {
 		return this.operations.saveFootballProfile(ctx.user.id, input);
 	}
 
-	@Mutation({ input: organizationProfileInput })
+	@Mutation({ input: organizationProfileInput, meta: { permission: "football.manage" } })
 	saveOrganizationProfile(
 		@Ctx() ctx: AuthedTrpcContext,
 		@Input() input: z.infer<typeof organizationProfileInput>,
@@ -81,7 +89,7 @@ export class OperationsRouter {
 		return this.operations.saveOrganizationProfile(ctx.user.id, input);
 	}
 
-	@Mutation({ input: representationCreateInput })
+	@Mutation({ input: representationCreateInput, meta: { permission: "football.manage" } })
 	createRepresentation(
 		@Ctx() ctx: AuthedTrpcContext,
 		@Input() input: z.infer<typeof representationCreateInput>,
@@ -89,7 +97,7 @@ export class OperationsRouter {
 		return this.operations.createRepresentation(ctx.user.id, input);
 	}
 
-	@Mutation({ input: representationTransitionInput })
+	@Mutation({ input: representationTransitionInput, meta: { permission: "football.manage" } })
 	transitionRepresentation(
 		@Ctx() ctx: AuthedTrpcContext,
 		@Input() input: z.infer<typeof representationTransitionInput>,
@@ -97,7 +105,7 @@ export class OperationsRouter {
 		return this.operations.transitionRepresentation(ctx.user.id, input);
 	}
 
-	@Mutation({ input: contactRouteCreateInput })
+	@Mutation({ input: contactRouteCreateInput, meta: { permission: "crm.create" } })
 	createRoute(
 		@Ctx() ctx: AuthedTrpcContext,
 		@Input() input: z.infer<typeof contactRouteCreateInput>,
@@ -105,7 +113,7 @@ export class OperationsRouter {
 		return this.operations.createRoute(ctx.user.id, input);
 	}
 
-	@Mutation({ input: contactRouteShareInput })
+	@Mutation({ input: contactRouteShareInput, meta: { permission: "football.manage" } })
 	shareRoute(
 		@Ctx() ctx: AuthedTrpcContext,
 		@Input() input: z.infer<typeof contactRouteShareInput>,
@@ -113,7 +121,7 @@ export class OperationsRouter {
 		return this.operations.shareRoute(ctx.user.id, input);
 	}
 
-	@Mutation({ input: leadCreateInput })
+	@Mutation({ input: leadCreateInput, meta: { permission: "crm.create" } })
 	createLead(
 		@Ctx() ctx: AuthedTrpcContext,
 		@Input() input: z.infer<typeof leadCreateInput>,
@@ -121,7 +129,7 @@ export class OperationsRouter {
 		return this.operations.createLead(ctx.user.id, input);
 	}
 
-	@Mutation({ input: taskCreateInput })
+	@Mutation({ input: taskCreateInput, meta: { permission: "crm.create" } })
 	createTask(
 		@Ctx() ctx: AuthedTrpcContext,
 		@Input() input: z.infer<typeof taskCreateInput>,
@@ -129,7 +137,7 @@ export class OperationsRouter {
 		return this.operations.createTask(ctx.user.id, input);
 	}
 
-	@Mutation({ input: taskTransitionInput })
+	@Mutation({ input: taskTransitionInput, meta: { permission: "crm.update.owned" } })
 	transitionTask(
 		@Ctx() ctx: AuthedTrpcContext,
 		@Input() input: z.infer<typeof taskTransitionInput>,
@@ -137,7 +145,7 @@ export class OperationsRouter {
 		return this.operations.transitionTask(ctx.user.id, input);
 	}
 
-	@Mutation({ input: noteCreateInput })
+	@Mutation({ input: noteCreateInput, meta: { permission: "crm.create" } })
 	createNote(
 		@Ctx() ctx: AuthedTrpcContext,
 		@Input() input: z.infer<typeof noteCreateInput>,
@@ -145,7 +153,7 @@ export class OperationsRouter {
 		return this.operations.createNote(ctx.user.id, input);
 	}
 
-	@Mutation({ input: assignmentCreateInput })
+	@Mutation({ input: assignmentCreateInput, meta: { permission: "allocation.manage" } })
 	assign(
 		@Ctx() ctx: AuthedTrpcContext,
 		@Input() input: z.infer<typeof assignmentCreateInput>,
@@ -153,7 +161,7 @@ export class OperationsRouter {
 		return this.operations.assign(ctx.user.id, input);
 	}
 
-	@Mutation({ input: researchRequestCreateInput })
+	@Mutation({ input: researchRequestCreateInput, meta: { permission: "crm.create" } })
 	requestResearch(
 		@Ctx() ctx: AuthedTrpcContext,
 		@Input() input: z.infer<typeof researchRequestCreateInput>,
@@ -161,7 +169,7 @@ export class OperationsRouter {
 		return this.operations.requestResearch(ctx.user.id, input);
 	}
 
-	@Mutation({ input: templateCreateInput })
+	@Mutation({ input: templateCreateInput, meta: { permission: "crm.create" } })
 	createTemplate(
 		@Ctx() ctx: AuthedTrpcContext,
 		@Input() input: z.infer<typeof templateCreateInput>,
@@ -169,7 +177,7 @@ export class OperationsRouter {
 		return this.operations.createTemplate(ctx.user.id, input);
 	}
 
-	@Mutation({ input: draftCreateInput })
+	@Mutation({ input: draftCreateInput, meta: { permission: "crm.create" } })
 	createDraft(
 		@Ctx() ctx: AuthedTrpcContext,
 		@Input() input: z.infer<typeof draftCreateInput>,
@@ -177,7 +185,7 @@ export class OperationsRouter {
 		return this.operations.createDraft(ctx.user.id, input);
 	}
 
-	@Mutation({ input: approvalRequestInput })
+	@Mutation({ input: approvalRequestInput, meta: { permission: "crm.create" } })
 	requestApproval(
 		@Ctx() ctx: AuthedTrpcContext,
 		@Input() input: z.infer<typeof approvalRequestInput>,
@@ -185,7 +193,7 @@ export class OperationsRouter {
 		return this.operations.requestApproval(ctx.user.id, input);
 	}
 
-	@Mutation({ input: approvalDecisionInput })
+	@Mutation({ input: approvalDecisionInput, meta: { permission: "outreach.approve" } })
 	decideApproval(
 		@Ctx() ctx: AuthedTrpcContext,
 		@Input() input: z.infer<typeof approvalDecisionInput>,
@@ -193,23 +201,15 @@ export class OperationsRouter {
 		return this.operations.decideApproval(ctx.user.id, input);
 	}
 
-	@Mutation({ input: draftApproveInput })
-	approveDraft(
-		@Ctx() ctx: AuthedTrpcContext,
-		@Input("draftId") draftId: string,
-	) {
-		return this.operations.approveDraft(ctx.user.id, draftId);
-	}
-
-	@Mutation({ input: draftApproveInput })
+	@Mutation({ input: draftApproveInput, meta: { permission: "crm.create" } })
 	sendApprovedDraft(
 		@Ctx() ctx: AuthedTrpcContext,
 		@Input("draftId") draftId: string,
 	) {
-		return this.outbound.sendApprovedDraft(ctx.user.id, draftId);
+		return this.outbound.queueApprovedDraft(ctx.user.id, draftId);
 	}
 
-	@Mutation({ input: proposalCreateInput })
+	@Mutation({ input: proposalCreateInput, meta: { permission: "crm.create" } })
 	createProposal(
 		@Ctx() ctx: AuthedTrpcContext,
 		@Input() input: z.infer<typeof proposalCreateInput>,
@@ -217,7 +217,7 @@ export class OperationsRouter {
 		return this.operations.createProposal(ctx.user.id, input);
 	}
 
-	@Mutation({ input: proofCreateInput })
+	@Mutation({ input: proofCreateInput, meta: { permission: "crm.create" } })
 	createProof(
 		@Ctx() ctx: AuthedTrpcContext,
 		@Input() input: z.infer<typeof proofCreateInput>,

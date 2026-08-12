@@ -17,3 +17,5 @@ use a repeatable-read, read-only transaction and record its transaction
 watermark. The plan is resumable by stable SHA-256 idempotency keys. Duplicate
 candidates are surfaced, never merged. Freeze-and-delta procedure and rollback
 commands are documented in `docs/ibl/migration-runbook.md`.
+
+Unsupported business rows, rejected rows, and unresolved duplicate candidates never satisfy completeness. Reconciliation requires the V2 migration-owner connection and verifies both the legacy ID map and target-row existence. Rollback checks target fingerprints and foreign-key dependencies before deleting only rows inserted by that run.

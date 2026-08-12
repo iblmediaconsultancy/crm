@@ -1,7 +1,10 @@
-import { type Db, GoogleSyncStatus, type Prisma } from "@crm/db";
+import { type Db, GoogleSyncStatus, type MailboxSyncModel } from "@crm/db";
 import { ProviderCapabilityError, withPrincipal } from "@crm/db/security";
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import { InjectDatabase } from "../database/database.constants";
+import { runInPrincipalTransaction } from "../database/database-context";
+import { ThreadWriterService } from "../mailbox/thread-writer.service";
+import { AttachmentStorageService } from "./attachment-storage.service";
 import type {
 	MiabFetchedMessage,
 	MiabProtocolClient,
@@ -16,7 +19,6 @@ import {
 export const MIAB_CREDENTIAL_SOURCE = Symbol("MIAB_CREDENTIAL_SOURCE");
 export const MIAB_PROTOCOL_FACTORY = Symbol("MIAB_PROTOCOL_FACTORY");
 const LEASE_MS = 300_000;
-
 type MiabFactory = () => MiabProtocolClient;
 
 @Injectable()
@@ -28,7 +30,32 @@ export class MiabSyncService {
 		@Inject(MIAB_CREDENTIAL_SOURCE)
 		private readonly credentials: MiabCredentialSource,
 		@Inject(MIAB_PROTOCOL_FACTORY) private readonly createClient: MiabFactory,
+		private readonly threads: ThreadWriterService,
+		private readonly attachments: AttachmentStorageService,
 	) {}
+
+	async runDue(workerId: string): Promise<number> {
+		const due = await withPrincipal(
+			this.db,
+			{ userId: null, kind: "worker" },
+			(tx) =>
+				tx.mailboxSync.findMany({
+					where: {
+						source: "miab",
+						OR: [{ retryAfter: null }, { retryAfter: { lte: new Date() } }],
+					},
+					select: { mailboxId: true },
+					orderBy: [{ retryAfter: "asc" }, { mailboxId: "asc" }],
+					take: 25,
+				}),
+		);
+		let processed = 0;
+		for (const sync of due) {
+			await this.runMailbox(sync.mailboxId, workerId).catch(() => undefined);
+			processed += 1;
+		}
+		return processed;
+	}
 
 	async runMailbox(mailboxId: string, workerId: string) {
 		const context = await withPrincipal(
@@ -46,32 +73,40 @@ export class MiabSyncService {
 				const sync = await tx.mailboxSync.findUnique({
 					where: { mailboxId_source: { mailboxId, source: "miab" } },
 				});
-				if (capability?.status !== "VERIFIED" || mailbox?.status !== "VERIFIED")
+				if (
+					capability?.status !== "VERIFIED" ||
+					mailbox?.status !== "VERIFIED"
+				) {
 					throw new ProviderCapabilityError(
 						"MIAB_IMAP",
 						"MIAB_IMAP is not verified",
 					);
+				}
 				if (!sync || !mailbox) throw new Error("MIAB_SYNC_NOT_CONFIGURED");
 				return { mailbox, sync };
 			},
 		);
-
 		const now = new Date();
-		const claimed = await this.db.mailboxSync.updateMany({
-			where: {
-				id: context.sync.id,
-				updatedAt: context.sync.updatedAt,
-				OR: [{ retryAfter: null }, { retryAfter: { lte: now } }],
-			},
-			data: {
-				status: GoogleSyncStatus.RUNNING,
-				leaseOwner: workerId,
-				retryAfter: new Date(now.getTime() + LEASE_MS),
-				attemptCount: { increment: 1 },
-				lastError: null,
-				lastErrorCode: null,
-			},
-		});
+		const claimed = await withPrincipal(
+			this.db,
+			{ userId: null, mailboxId, kind: "worker" },
+			(tx) =>
+				tx.mailboxSync.updateMany({
+					where: {
+						id: context.sync.id,
+						updatedAt: context.sync.updatedAt,
+						OR: [{ retryAfter: null }, { retryAfter: { lte: now } }],
+					},
+					data: {
+						status: GoogleSyncStatus.RUNNING,
+						leaseOwner: workerId,
+						retryAfter: new Date(now.getTime() + LEASE_MS),
+						attemptCount: { increment: 1 },
+						lastError: null,
+						lastErrorCode: null,
+					},
+				}),
+		);
 		if (claimed.count !== 1) return { status: "leased" as const, stored: 0 };
 
 		let client: MiabProtocolClient | null = null;
@@ -86,65 +121,117 @@ export class MiabSyncService {
 			if (
 				!capabilities.some((value) => /IMAP4/i.test(value)) ||
 				!folders.some((value) => value.toUpperCase() === "INBOX")
-			)
+			) {
 				throw new Error("MIAB_PROTOCOL_REQUIREMENTS_MISSING");
+			}
 			const cursor = parseCursor(context.sync.cursor);
 			const messages = await client.fetchReadOnly("INBOX", cursor, 50);
+			const mimeErrors = client.drainErrors?.() ?? [];
+			if (mimeErrors.length) {
+				await withPrincipal(
+					this.db,
+					{ userId: null, mailboxId, kind: "worker" },
+					async (tx) => {
+						for (const failure of mimeErrors) {
+							await tx.mimeIngestionError.upsert({
+								where: {
+									mailboxId_providerUid: {
+										mailboxId,
+										providerUid: String(failure.uid),
+									},
+								},
+								create: {
+									mailboxId,
+									providerUid: String(failure.uid),
+									errorCode: failure.errorCode,
+									reprocessStatus: "FAILED",
+									attemptCount: 1,
+								},
+								update: {
+									errorCode: failure.errorCode,
+									reprocessStatus: "FAILED",
+									attemptCount: { increment: 1 },
+								},
+							});
+						}
+					},
+				);
+			}
 			const stored = await this.store(
-				mailboxId,
-				context.sync.userId,
+				context.sync,
 				context.mailbox.address,
 				messages,
 			);
-			const nextCursor = messages.reduce(
-				(maximum, message) => Math.max(maximum, message.uid),
+			const failureCursor = mimeErrors.reduce(
+				(maximum, failure) => Math.max(maximum, failure.uid),
 				cursor ?? 0,
 			);
-			await this.db.mailboxSync.updateMany({
-				where: { id: context.sync.id, leaseOwner: workerId },
-				data: {
-					status: GoogleSyncStatus.IDLE,
-					cursor: String(nextCursor),
-					lastSyncedAt: new Date(),
-					retryAfter: null,
-					leaseOwner: null,
-					lastError: null,
-					lastErrorCode: null,
-				},
-			});
+			const nextCursor = messages.reduce(
+				(maximum, message) => Math.max(maximum, message.uid),
+				failureCursor,
+			);
+			await withPrincipal(
+				this.db,
+				{ userId: null, mailboxId, kind: "worker" },
+				(tx) =>
+					tx.mailboxSync.updateMany({
+						where: { id: context.sync.id, leaseOwner: workerId },
+						data: {
+							status: GoogleSyncStatus.IDLE,
+							cursor: String(nextCursor),
+							lastSyncedAt: new Date(),
+							retryAfter: null,
+							leaseOwner: null,
+							lastError: null,
+							lastErrorCode: null,
+						},
+					}),
+			);
 			this.logger.log({
 				message: "MIAB mailbox sync completed",
 				mailboxId,
 				stored,
+				mimeFailures: mimeErrors.length,
 				cursor: nextCursor,
 			});
-			return { status: "synced" as const, stored, cursor: nextCursor };
+			return {
+				status: "synced" as const,
+				stored,
+				mimeFailures: mimeErrors.length,
+				cursor: nextCursor,
+			};
 		} catch (error) {
 			const code = providerErrorCode(error);
 			const retryMs = Math.min(
 				3_600_000,
 				15_000 * 2 ** Math.min(context.sync.attemptCount, 8),
 			);
-			await this.db.mailboxSync.updateMany({
-				where: { id: context.sync.id, leaseOwner: workerId },
-				data: {
-					status: GoogleSyncStatus.FAILED,
-					retryAfter: new Date(Date.now() + retryMs),
-					leaseOwner: null,
-					lastError: code,
-					lastErrorCode: code,
+			await withPrincipal(
+				this.db,
+				{ userId: null, mailboxId, kind: "worker" },
+				async (tx) => {
+					await tx.mailboxSync.updateMany({
+						where: { id: context.sync.id, leaseOwner: workerId },
+						data: {
+							status: GoogleSyncStatus.FAILED,
+							retryAfter: new Date(Date.now() + retryMs),
+							leaseOwner: null,
+							lastError: code,
+							lastErrorCode: code,
+						},
+					});
+					await tx.securityAuditEvent.createMany({
+						data: {
+							actorUserId: null,
+							action: "MIAB_SYNC_FAILED",
+							resourceType: "Mailbox",
+							resourceId: mailboxId,
+							outcome: "DENIED",
+							metadata: { code },
+						},
+					});
 				},
-			});
-			await this.db.securityAuditEvent.create({
-				data: {
-					actorUserId: null,
-					action: "MIAB_SYNC_FAILED",
-					resourceType: "Mailbox",
-					resourceId: mailboxId,
-					outcome: "DENIED",
-					metadata: { code },
-				},
-			});
+			);
 			this.logger.warn({
 				message: "MIAB mailbox sync failed",
 				mailboxId,
@@ -157,67 +244,56 @@ export class MiabSyncService {
 	}
 
 	private store(
-		mailboxId: string,
-		userId: string,
+		sync: MailboxSyncModel,
 		mailboxAddress: string,
 		messages: MiabFetchedMessage[],
 	) {
-		return withPrincipal(
+		return runInPrincipalTransaction(
 			this.db,
-			{ userId: null, mailboxId, kind: "worker" },
-			async (tx) => {
+			{ userId: null, mailboxId: sync.mailboxId, kind: "worker" },
+			async () => {
+				const context = await this.threads.context();
 				let stored = 0;
 				for (const message of messages) {
-					const rfcMessageId = normalizeMessageId(message.messageId);
-					const exists = await tx.emailMessage.findUnique({
-						where: { mailboxId_rfcMessageId: { mailboxId, rfcMessageId } },
-						select: { id: true },
-					});
-					if (exists) continue;
-					const rootMessageId = normalizeMessageId(
-						message.references[0] ?? message.inReplyTo ?? message.messageId,
-					);
-					const thread = await upsertThread(
-						tx,
-						mailboxId,
-						rootMessageId,
-						message,
-					);
-					await tx.emailMessage.create({
-						data: {
-							mailboxId,
-							threadId: thread.id,
-							rfcMessageId,
-							syncedByUserId: userId,
-							direction:
-								message.from.email === mailboxAddress.toLowerCase()
-									? "OUTBOUND"
-									: "INBOUND",
-							fromEmail: message.from.email,
-							fromName: message.from.name,
-							recipients: message.recipients,
+					const normalizedMessageId = normalizeMessageId(message.messageId);
+					const written = await this.threads.store(
+						sync,
+						{
+							mailbox: mailboxAddress.trim().toLowerCase(),
+							origin: "miab",
+						},
+						{
+							rfcMessageId: normalizedMessageId,
+							rootId: normalizeMessageId(
+								message.references[0] ?? message.inReplyTo ?? message.messageId,
+							),
 							subject: message.subject,
-							snippet:
-								message.body.replace(/\s+/g, " ").trim().slice(0, 240) || null,
+							from: message.from,
+							recipients: message.recipients,
 							body: message.body,
 							sentAt: message.sentAt,
 						},
-					});
-					await tx.emailThread.update({
-						where: { id: thread.id },
-						data: {
-							messageCount: { increment: 1 },
-							firstMessageAt:
-								message.sentAt < thread.firstMessageAt
-									? message.sentAt
-									: thread.firstMessageAt,
-							lastMessageAt:
-								message.sentAt > thread.lastMessageAt
-									? message.sentAt
-									: thread.lastMessageAt,
-						},
-					});
-					stored += 1;
+						context,
+					);
+					if (written) stored += 1;
+					if (message.attachments.length) {
+						const persisted = await this.db.emailMessage.findUnique({
+							where: {
+								mailboxId_rfcMessageId: {
+									mailboxId: sync.mailboxId,
+									rfcMessageId: normalizedMessageId,
+								},
+							},
+							select: { id: true },
+						});
+						if (persisted) {
+							await this.attachments.ingest(
+								sync.mailboxId,
+								persisted.id,
+								message.attachments,
+							);
+						}
+					}
 				}
 				return stored;
 			},
@@ -225,31 +301,9 @@ export class MiabSyncService {
 	}
 }
 
-async function upsertThread(
-	tx: Prisma.TransactionClient,
-	mailboxId: string,
-	rootMessageId: string,
-	message: MiabFetchedMessage,
-) {
-	return tx.emailThread.upsert({
-		where: { mailboxId_rootMessageId: { mailboxId, rootMessageId } },
-		create: {
-			mailboxId,
-			rootMessageId,
-			subject: message.subject,
-			firstMessageAt: message.sentAt,
-			lastMessageAt: message.sentAt,
-			messageCount: 0,
-		},
-		update: {},
-		select: { id: true, firstMessageAt: true, lastMessageAt: true },
-	});
-}
-
 function normalizeMessageId(value: string): string {
 	return value.trim().toLowerCase();
 }
-
 function parseCursor(value: string | null): number | null {
 	if (!value) return null;
 	const parsed = Number(value);

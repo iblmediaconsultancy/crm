@@ -28,7 +28,7 @@ const agent = {
 const stamp = new ActivityStampService(db);
 const directory = new CompanyDirectoryService(db, agent);
 const log = new EnrichmentLogService(db, stamp);
-const match = new MailboxMatchService(db, directory, agent, log);
+const match = new MailboxMatchService(db, directory, agent, log, { detectContact: async () => [] } as never);
 const threads = new ThreadWriterService(db, match, stamp);
 
 let row: MailboxSync;
@@ -42,9 +42,6 @@ function message(id: string, sentAt: Date, root = rootId): IncomingMessage {
 		recipients: [{ email: person, name: "A Buyer", kind: "to" }],
 		body: "The numbers you asked for.",
 		sentAt,
-		gmailMessageId: null,
-		outlookMessageId: null,
-		outlookWebLink: null,
 	};
 }
 
@@ -97,7 +94,7 @@ describe("storing a synced email", () => {
 	it("writes the message, the counts and the activity together", async () => {
 		const stored = await threads.store(
 			row,
-			{ mailbox, origin: "gmail" },
+			{ mailbox, origin: "legacy" },
 			message(`<one-${suffix}@mail.test>`, new Date("2026-01-01T10:00:00Z")),
 			await threads.context(),
 		);
@@ -132,7 +129,7 @@ describe("storing a synced email", () => {
 
 		const stored = await threads.store(
 			row,
-			{ mailbox, origin: "gmail" },
+			{ mailbox, origin: "legacy" },
 			message(`<one-${suffix}@mail.test>`, new Date("2026-01-01T10:00:00Z")),
 			await threads.context(),
 		);
@@ -156,8 +153,8 @@ describe("storing a synced email", () => {
 		const context = await threads.context();
 
 		const results = await Promise.all([
-			threads.store(row, { mailbox, origin: "gmail" }, parsed, context),
-			threads.store(row, { mailbox, origin: "outlook" }, parsed, context),
+			threads.store(row, { mailbox, origin: "legacy" }, parsed, context),
+			threads.store(row, { mailbox, origin: "legacy" }, parsed, context),
 		]);
 
 		expect(results.filter(Boolean)).toHaveLength(1);
@@ -191,7 +188,7 @@ describe("storing a synced email", () => {
 
 		const stored = await threads.store(
 			row,
-			{ mailbox, origin: "outlook" },
+			{ mailbox, origin: "legacy" },
 			message(
 				`<race-${suffix}@mail.test>`,
 				new Date("2026-01-02T10:00:00Z"),

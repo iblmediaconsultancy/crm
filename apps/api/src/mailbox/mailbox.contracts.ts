@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+export const mailboxThreadInput = z.object({ threadId: z.string().cuid() });
+export const mailboxEventInput = z.object({ eventId: z.string().cuid() });
+
 export const mailboxIdInput = z.object({
 	mailboxId: z.string().min(1),
 });

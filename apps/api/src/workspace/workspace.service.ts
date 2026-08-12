@@ -213,6 +213,20 @@ export class WorkspaceService {
 		return this.readMember(input.memberId, userId);
 	}
 
+	async removeMember(userId: string, memberId: string): Promise<void> {
+		return this.membershipSecurity.removeMember(userId, memberId);
+	}
+
+	async transferAdmin(
+		userId: string,
+		input: { replacementMemberId: string; previousMemberId: string },
+	): Promise<void> {
+		return this.membershipSecurity.transferAdmin(
+			userId,
+			input.replacementMemberId,
+			input.previousMemberId,
+		);
+	}
 	private async readMember(memberId: string, userId: string): Promise<WorkspaceMember> {
 		const row = await this.db.member.findUniqueOrThrow({
 			where: { id: memberId },

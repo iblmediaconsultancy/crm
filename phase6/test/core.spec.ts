@@ -32,8 +32,17 @@ describe("V1 migration planner", () => {
 		expect(summarize(outcomes)).toEqual({
 			total: 3,
 			accounted: 3,
-			byOutcome: { MAPPED: 2, REJECTED: 1, DUPLICATE_CANDIDATE: 0 },
+			byOutcome: {
+				MAPPED: 2,
+				REJECTED: 1,
+				DUPLICATE_CANDIDATE: 0,
+				EXCLUDED: 0,
+			},
 			byReason: { UNSUPPORTED_SOURCE_TABLE: 1 },
+			platformInternalRows: 0,
+			intentionallyExcludedBusinessRows: 0,
+			unresolvedBusinessRows: 1,
+			complete: false,
 		});
 		expect(JSON.stringify(outcomes)).not.toContain("never copied");
 	});
@@ -58,6 +67,27 @@ describe("V1 migration planner", () => {
 		]);
 	});
 
+	test("does not represent excluded business data as migration-complete", () => {
+		const summary = summarize([
+			{
+				idempotencyKey: "1",
+				sourceTable: "sessions",
+				sourceIdHash: "a",
+				outcome: "EXCLUDED",
+				reasonCode: "PLATFORM_INTERNAL",
+			},
+			{
+				idempotencyKey: "2",
+				sourceTable: "legacy_contacts",
+				sourceIdHash: "b",
+				outcome: "EXCLUDED",
+				reasonCode: "INTENTIONALLY_EXCLUDED",
+			},
+		]);
+		expect(summary.platformInternalRows).toBe(1);
+		expect(summary.intentionallyExcludedBusinessRows).toBe(1);
+		expect(summary.complete).toBe(false);
+	});
 	test("fails closed without an explicit V2 owner", () => {
 		const [outcome] = planRows(
 			[{ table: "leads", row: { id: "1", name: "Lead" } }],

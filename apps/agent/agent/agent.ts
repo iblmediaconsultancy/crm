@@ -5,7 +5,7 @@ import { defineAgent, defineDynamic } from "eve";
 import { logCapabilities } from "./lib/capabilities";
 import { selectedModel } from "./lib/model";
 
-void logCapabilities();
+if (process.env.AGENT_BUILD !== "true") void logCapabilities();
 
 export default defineAgent({
 	model: defineDynamic({

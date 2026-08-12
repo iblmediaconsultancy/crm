@@ -1,5 +1,4 @@
-import { auth, needsMailboxGrant, type Session } from "@crm/auth";
-import { db } from "@crm/db";
+import { auth, ensureWorkspaceMembership, type Session } from "@crm/auth";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { cache } from "react";
@@ -15,23 +14,14 @@ export async function requireSession(): Promise<Session> {
 	if (!session) {
 		redirect("/sign-in");
 	}
+	const workspaceId = await ensureWorkspaceMembership(session.user.id);
+	if (!workspaceId) {
+		redirect("/sign-in?error=workspace-access-inactive");
+	}
 
 	return session;
 }
 
-export const signInAccounts = cache(async (userId: string) =>
-	db.account.findMany({
-		where: { userId },
-		select: { providerId: true, scope: true },
-	}),
-);
-
 export async function requireMailboxAccess(): Promise<Session> {
-	const session = await requireSession();
-
-	if (needsMailboxGrant(await signInAccounts(session.user.id))) {
-		redirect("/grant-access");
-	}
-
-	return session;
+	return requireSession();
 }

@@ -1,6 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 
-export type OutcomeKind = "MAPPED" | "REJECTED" | "DUPLICATE_CANDIDATE";
+export type OutcomeKind =
+	| "MAPPED"
+	| "REJECTED"
+	| "DUPLICATE_CANDIDATE"
+	| "EXCLUDED";
 
 export interface ExportRow {
 	table: string;
@@ -207,18 +211,41 @@ export const planRows = (rows: ExportRow[], context: PlanContext) => {
 };
 
 export const summarize = (outcomes: MigrationOutcome[]) => {
-	const byOutcome = { MAPPED: 0, REJECTED: 0, DUPLICATE_CANDIDATE: 0 };
+	const byOutcome = {
+		MAPPED: 0,
+		REJECTED: 0,
+		DUPLICATE_CANDIDATE: 0,
+		EXCLUDED: 0,
+	};
 	const byReason: Record<string, number> = {};
 	for (const outcome of outcomes) {
 		byOutcome[outcome.outcome] += 1;
 		if (outcome.reasonCode)
 			byReason[outcome.reasonCode] = (byReason[outcome.reasonCode] ?? 0) + 1;
 	}
+	const platformInternalRows = outcomes.filter(
+		(outcome) =>
+			outcome.outcome === "EXCLUDED" &&
+			outcome.reasonCode === "PLATFORM_INTERNAL",
+	).length;
+	const intentionallyExcludedBusinessRows = outcomes.filter(
+		(outcome) =>
+			outcome.outcome === "EXCLUDED" &&
+			outcome.reasonCode !== "PLATFORM_INTERNAL",
+	).length;
+	const unresolvedBusinessRows =
+		byOutcome.REJECTED +
+		byOutcome.DUPLICATE_CANDIDATE +
+		intentionallyExcludedBusinessRows;
 	return {
 		total: outcomes.length,
 		byOutcome,
 		byReason,
 		accounted: outcomes.length,
+		platformInternalRows,
+		intentionallyExcludedBusinessRows,
+		unresolvedBusinessRows,
+		complete: unresolvedBusinessRows === 0,
 	};
 };
 

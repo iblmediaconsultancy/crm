@@ -2,6 +2,7 @@ import type { Db, Prisma } from "@crm/db";
 import { withPrincipal } from "@crm/db/security";
 import {
 	BadRequestException,
+	ForbiddenException,
 	Injectable,
 	NotFoundException,
 } from "@nestjs/common";
@@ -42,6 +43,30 @@ export class OperationsService {
 		return withPrincipal(this.db, { userId, kind: "user" }, work);
 	}
 
+	private async roleOf(tx: Prisma.TransactionClient, userId: string) {
+		const member = await tx.member.findUnique({
+			where: { organizationId_userId: { organizationId: "workspace", userId } },
+			select: { role: true },
+		});
+		return member?.role;
+	}
+	private async requireManager(
+		tx: Prisma.TransactionClient,
+		userId: string,
+	): Promise<void> {
+		const member = await tx.member.findUnique({
+			where: {
+				organizationId_userId: {
+					organizationId: "workspace",
+					userId,
+				},
+			},
+			select: { role: true },
+		});
+		if (member?.role !== "admin" && member?.role !== "team") {
+			throw new ForbiddenException("This operation requires Team or Admin access.");
+		}
+	}
 	async overview(userId: string) {
 		return this.run(userId, async (tx) => {
 			const now = new Date();
@@ -102,6 +127,24 @@ export class OperationsService {
 		});
 	}
 
+	async selectors(userId: string, input: Input<typeof operationsListInput>) {
+		return this.run(userId, async (tx) => {
+			const term = input.q.trim();
+			const contains = term ? { contains: term, mode: "insensitive" as const } : undefined;
+			const [contacts, companies, members, mailboxes, routes, drafts, approvals, leads] = await Promise.all([
+				tx.contact.findMany({ where: { lifecycleState: "ACTIVE", ...(contains ? { OR: [{ firstName: contains }, { lastName: contains }, { email: contains }] } : {}) }, take: input.take, orderBy: [{ firstName: "asc" }, { lastName: "asc" }], select: { id: true, firstName: true, lastName: true, email: true, playerProfile: { select: { contactId: true } }, footballAgentProfile: { select: { contactId: true } } } }),
+				tx.company.findMany({ where: { lifecycleState: "ACTIVE", ...(contains ? { name: contains } : {}) }, take: input.take, orderBy: { name: "asc" }, select: { id: true, name: true, domain: true, agencyProfile: { select: { companyId: true } }, clubProfile: { select: { companyId: true } } } }),
+				tx.member.findMany({ where: { organizationId: "workspace", user: { profile: { status: "ACTIVE" } } }, take: input.take, orderBy: { user: { name: "asc" } }, select: { userId: true, role: true, user: { select: { name: true, email: true } } } }),
+				tx.mailbox.findMany({ where: { status: "VERIFIED" }, take: input.take, orderBy: { address: "asc" }, select: { id: true, address: true, displayName: true } }),
+				tx.contactRoute.findMany({ where: { OR: [{ ownerUserId: userId }, { visibility: "SHARED" }] }, take: input.take, orderBy: { updatedAt: "desc" }, select: { id: true, type: true, value: true, label: true, contact: { select: { id: true, firstName: true, lastName: true } }, company: { select: { name: true } } } }),
+				tx.draft.findMany({ where: { ownerUserId: userId, status: { in: ["DRAFT", "IN_REVIEW", "APPROVED"] } }, take: input.take, orderBy: { updatedAt: "desc" }, select: { id: true, subject: true, status: true, recipientRouteId: true } }),
+				tx.outreachApproval.findMany({ where: { status: "PENDING" }, take: input.take, orderBy: { requestedAt: "desc" }, select: { id: true, draft: { select: { subject: true } }, requestedBy: { select: { name: true } } } }),
+				tx.lead.findMany({ where: { status: { notIn: ["ARCHIVED", "DISQUALIFIED"] } }, take: input.take, orderBy: { updatedAt: "desc" }, select: { id: true, name: true, status: true } }),
+			]);
+			return { contacts, companies, members, mailboxes, routes, drafts, approvals, leads };
+		});
+	}
+
 	async directory(userId: string, input: Input<typeof operationsListInput>) {
 		return this.run(userId, async (tx) => {
 			const contains = input.q
@@ -117,7 +160,8 @@ export class OperationsService {
 									},
 								}
 							: undefined,
-						take: input.take,
+						skip: input.skip,
+					take: input.take,
 						orderBy: { updatedAt: "desc" },
 						select: {
 							contactId: true,
@@ -133,7 +177,8 @@ export class OperationsService {
 									},
 								}
 							: undefined,
-						take: input.take,
+						skip: input.skip,
+					take: input.take,
 						orderBy: { updatedAt: "desc" },
 						select: {
 							contactId: true,
@@ -143,7 +188,8 @@ export class OperationsService {
 					}),
 					tx.agency.findMany({
 						where: contains ? { company: { name: contains } } : undefined,
-						take: input.take,
+						skip: input.skip,
+					take: input.take,
 						orderBy: { updatedAt: "desc" },
 						select: {
 							companyId: true,
@@ -153,7 +199,8 @@ export class OperationsService {
 					}),
 					tx.club.findMany({
 						where: contains ? { company: { name: contains } } : undefined,
-						take: input.take,
+						skip: input.skip,
+					take: input.take,
 						orderBy: { updatedAt: "desc" },
 						select: {
 							companyId: true,
@@ -162,7 +209,8 @@ export class OperationsService {
 						},
 					}),
 					tx.representation.findMany({
-						take: input.take,
+						skip: input.skip,
+					take: input.take,
 						orderBy: { updatedAt: "desc" },
 						select: {
 							id: true,
@@ -173,7 +221,8 @@ export class OperationsService {
 						},
 					}),
 					tx.contactRoute.findMany({
-						take: input.take,
+						skip: input.skip,
+					take: input.take,
 						orderBy: { updatedAt: "desc" },
 						select: {
 							id: true,
@@ -212,6 +261,7 @@ export class OperationsService {
 					include: { _count: { select: { deals: true } } },
 				}),
 				tx.lead.findMany({
+					skip: input.skip,
 					take: input.take,
 					orderBy: { updatedAt: "desc" },
 					select: {
@@ -222,6 +272,7 @@ export class OperationsService {
 					},
 				}),
 				tx.operationalTask.findMany({
+					skip: input.skip,
 					take: input.take,
 					orderBy: [{ dueAt: "asc" }, { createdAt: "desc" }],
 					select: {
@@ -234,6 +285,7 @@ export class OperationsService {
 					},
 				}),
 				tx.note.findMany({
+					skip: input.skip,
 					take: input.take,
 					orderBy: { createdAt: "desc" },
 					select: {
@@ -245,6 +297,7 @@ export class OperationsService {
 				}),
 				tx.assignment.findMany({
 					where: { revokedAt: null },
+					skip: input.skip,
 					take: input.take,
 					orderBy: { assignedAt: "desc" },
 					select: {
@@ -256,6 +309,7 @@ export class OperationsService {
 					},
 				}),
 				tx.researchRequest.findMany({
+					skip: input.skip,
 					take: input.take,
 					orderBy: { createdAt: "desc" },
 					select: {
@@ -266,6 +320,7 @@ export class OperationsService {
 					},
 				}),
 				tx.evidenceSource.findMany({
+					skip: input.skip,
 					take: input.take,
 					orderBy: { createdAt: "desc" },
 					select: {
@@ -277,16 +332,19 @@ export class OperationsService {
 					},
 				}),
 				tx.proofItem.findMany({
+					skip: input.skip,
 					take: input.take,
 					orderBy: { updatedAt: "desc" },
 					select: { id: true, label: true, proofType: true, reference: true },
 				}),
 				tx.template.findMany({
+					skip: input.skip,
 					take: input.take,
 					orderBy: { updatedAt: "desc" },
 					select: { id: true, name: true, kind: true, active: true },
 				}),
 				tx.draft.findMany({
+					skip: input.skip,
 					take: input.take,
 					orderBy: { updatedAt: "desc" },
 					select: {
@@ -297,6 +355,7 @@ export class OperationsService {
 					},
 				}),
 				tx.proposal.findMany({
+					skip: input.skip,
 					take: input.take,
 					orderBy: { updatedAt: "desc" },
 					select: {
@@ -307,6 +366,7 @@ export class OperationsService {
 					},
 				}),
 				tx.outreachApproval.findMany({
+					skip: input.skip,
 					take: input.take,
 					orderBy: { requestedAt: "desc" },
 					select: {
@@ -319,6 +379,7 @@ export class OperationsService {
 				}),
 				tx.duplicateCandidate.findMany({
 					where: { status: "OPEN" },
+					skip: input.skip,
 					take: input.take,
 					orderBy: { score: "desc" },
 					select: {
@@ -509,32 +570,40 @@ export class OperationsService {
 	}
 
 	async createLead(userId: string, input: Input<typeof leadCreateInput>) {
-		return this.run(userId, (tx) =>
-			tx.lead.create({
+		return this.run(userId, async (tx) => {
+			const ownerUserId =
+				(await this.roleOf(tx, userId)) === "contributor"
+					? userId
+					: input.ownerUserId;
+			return tx.lead.create({
 				data: {
 					...input,
+					ownerUserId,
 					nextActionAt: input.nextActionAt
 						? new Date(input.nextActionAt)
 						: null,
 					createdByUserId: userId,
 				},
-			}),
-		);
+			});
+		});
 	}
-
 	async createTask(userId: string, input: Input<typeof taskCreateInput>) {
-		return this.run(userId, (tx) =>
-			tx.operationalTask.create({
+		return this.run(userId, async (tx) => {
+			const assigneeUserId =
+				(await this.roleOf(tx, userId)) === "contributor"
+					? userId
+					: input.assigneeUserId;
+			return tx.operationalTask.create({
 				data: {
 					...input,
+					assigneeUserId,
 					dueAt: input.dueAt ? new Date(input.dueAt) : null,
 					reminderAt: input.reminderAt ? new Date(input.reminderAt) : null,
 					createdByUserId: userId,
 				},
-			}),
-		);
+			});
+		});
 	}
-
 	async transitionTask(
 		userId: string,
 		input: Input<typeof taskTransitionInput>,
@@ -558,6 +627,7 @@ export class OperationsService {
 
 	async assign(userId: string, input: Input<typeof assignmentCreateInput>) {
 		return this.run(userId, async (tx) => {
+			await this.requireManager(tx, userId);
 			await tx.assignment.updateMany({
 				where: {
 					entityType: input.entityType,
@@ -586,58 +656,52 @@ export class OperationsService {
 		input: Input<typeof templateCreateInput>,
 	) {
 		const { shared, ...data } = input;
-		return this.run(userId, (tx) =>
-			tx.template.create({
-				data: { ...data, ownerUserId: shared ? null : userId },
-			}),
-		);
-	}
-
-	async createDraft(userId: string, input: Input<typeof draftCreateInput>) {
-		return this.run(userId, (tx) =>
-			tx.draft.create({ data: { ...input, ownerUserId: userId } }),
-		);
-	}
-
-	async requestApproval(
-		userId: string,
-		input: Input<typeof approvalRequestInput>,
-	) {
 		return this.run(userId, async (tx) => {
-			await tx.draft.update({
-				where: { id: input.draftId },
-				data: { status: "IN_REVIEW" },
-			});
-			return tx.outreachApproval.create({
-				data: { ...input, requestedById: userId },
+			if (shared) await this.requireManager(tx, userId);
+			return tx.template.create({
+				data: { ...data, ownerUserId: shared ? null : userId },
 			});
 		});
 	}
 
-	async decideApproval(
-		userId: string,
-		input: Input<typeof approvalDecisionInput>,
-	) {
-		return this.run(userId, (tx) =>
-			tx.outreachApproval.update({
-				where: { id: input.id },
-				data: {
-					status: input.status,
-					decidedById: userId,
-					decidedAt: new Date(),
-					decisionReason: input.reason,
-				},
-			}),
-		);
+	async createDraft(userId: string, input: Input<typeof draftCreateInput>) {
+		return this.run(userId, async (tx) => {
+			if (input.recipientRouteId) {
+				const route = await tx.contactRoute.findUnique({
+					where: { id: input.recipientRouteId },
+					select: { ownerUserId: true, type: true, contact: { select: { lifecycleState: true } } },
+				});
+				const consent = await tx.contactRouteConsent.findUnique({ where: { routeId: input.recipientRouteId } });
+				if (!route || route.ownerUserId !== userId || route.type !== "EMAIL" || route.contact?.lifecycleState !== "ACTIVE" || consent?.status === "DO_NOT_CONTACT") {
+					throw new ForbiddenException("This route cannot receive outreach.");
+				}
+			}
+			return tx.draft.create({ data: { ...input, ownerUserId: userId } });
+		});
 	}
 
-	async approveDraft(userId: string, draftId: string) {
-		return this.run(userId, (tx) =>
-			tx.draft.update({
-				where: { id: draftId },
-				data: { status: "APPROVED", approvedAt: new Date() },
-			}),
-		);
+	async requestApproval(userId: string, input: Input<typeof approvalRequestInput>) {
+		return this.run(userId, async (tx) => {
+			const draft = await tx.draft.findUnique({ where: { id: input.draftId }, select: { ownerUserId: true, status: true, recipientRouteId: true, recipientRoute: { select: { contact: { select: { lifecycleState: true } } } } } });
+			const consent = draft?.recipientRouteId ? await tx.contactRouteConsent.findUnique({ where: { routeId: draft.recipientRouteId } }) : null;
+			if (!draft || draft.ownerUserId !== userId || draft.status !== "DRAFT" || draft.recipientRoute?.contact?.lifecycleState !== "ACTIVE" || consent?.status === "DO_NOT_CONTACT") throw new ForbiddenException("This draft cannot enter review.");
+			await tx.draft.update({ where: { id: input.draftId }, data: { status: "IN_REVIEW" } });
+			return tx.outreachApproval.create({ data: { ...input, requestedById: userId } });
+		});
+	}
+
+	async decideApproval(userId: string, input: Input<typeof approvalDecisionInput>) {
+		return this.run(userId, async (tx) => {
+			await this.requireManager(tx, userId);
+			const approval = await tx.outreachApproval.findUniqueOrThrow({ where: { id: input.id }, select: { draftId: true, requestedById: true, status: true, draft: { select: { recipientRouteId: true, recipientRoute: { select: { contact: { select: { lifecycleState: true } } } } } } } });
+			const consent = approval.draft.recipientRouteId ? await tx.contactRouteConsent.findUnique({ where: { routeId: approval.draft.recipientRouteId } }) : null;
+			if (approval.requestedById === userId || approval.status !== "PENDING") throw new ForbiddenException("The requester cannot decide this approval.");
+			if (input.status === "APPROVED" && (approval.draft.recipientRoute?.contact?.lifecycleState !== "ACTIVE" || consent?.status === "DO_NOT_CONTACT")) throw new ForbiddenException("DNC or archive state prevents approval.");
+			const decidedAt = new Date();
+			const result = await tx.outreachApproval.update({ where: { id: input.id }, data: { status: input.status, decidedById: userId, decidedAt, decisionReason: input.reason } });
+			await tx.draft.update({ where: { id: approval.draftId }, data: input.status === "APPROVED" ? { status: "APPROVED", approvedAt: decidedAt } : { status: "REJECTED", approvedAt: null } });
+			return result;
+		});
 	}
 
 	async createProposal(

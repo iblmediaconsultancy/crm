@@ -9,6 +9,49 @@ export const WORKSPACE_ROLES = ["admin", "team", "contributor"] as const;
 
 export type WorkspaceRole = (typeof WORKSPACE_ROLES)[number];
 
+export const WORKSPACE_PERMISSIONS = [
+	"crm.read",
+	"crm.create",
+	"crm.update.shared",
+	"crm.update.owned",
+	"crm.archive",
+	"crm.restore",
+	"crm.bulk.assign",
+	"football.manage",
+	"allocation.manage",
+	"duplicates.review",
+	"outreach.approve",
+	"workspace.manage",
+	"canonical.destroy",
+] as const;
+
+export type WorkspacePermission = (typeof WORKSPACE_PERMISSIONS)[number];
+
+const ROLE_PERMISSIONS: Record<WorkspaceRole, ReadonlySet<WorkspacePermission>> = {
+	admin: new Set(WORKSPACE_PERMISSIONS),
+	team: new Set([
+		"crm.read",
+		"crm.create",
+		"crm.update.shared",
+		"crm.update.owned",
+		"crm.archive",
+		"crm.restore",
+		"crm.bulk.assign",
+		"football.manage",
+		"allocation.manage",
+		"duplicates.review",
+		"outreach.approve",
+	]),
+	contributor: new Set(["crm.read", "crm.create", "crm.update.owned"]),
+};
+
+export function hasWorkspacePermission(
+	role: WorkspaceRole,
+	permission: WorkspacePermission,
+): boolean {
+	return ROLE_PERMISSIONS[role].has(permission);
+}
+
 export function isWorkspaceRole(value: string): value is WorkspaceRole {
 	return (WORKSPACE_ROLES as readonly string[]).includes(value);
 }
@@ -32,84 +75,19 @@ export function canManageCurrency(role: WorkspaceRole | null): boolean {
 export async function ensureWorkspaceMembership(
 	userId: string,
 ): Promise<string | undefined> {
-	try {
-		return await db.$transaction(async (tx) => {
-			const workspace = await tx.organization.upsert({
-				where: { id: WORKSPACE_ID },
-				create: {
-					id: WORKSPACE_ID,
-					name: DEFAULT_WORKSPACE_NAME,
-					slug: workspaceSlug(DEFAULT_WORKSPACE_NAME),
-					createdAt: new Date(),
-				},
-				update: {},
-				select: { id: true, name: true, slug: true },
-			});
-
-			const slug = workspaceSlug(workspace.name);
-
-			if (workspace.slug !== slug) {
-				await tx.organization.update({
-					where: { id: workspace.id },
-					data: { slug },
-				});
-			}
-
-			const enrolled = await tx.member.count({
-				where: { organizationId: workspace.id },
-			});
-
-			if (enrolled === 0) {
-				const existing = await tx.user.findMany({
-					select: { id: true },
-					orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-				});
-
-				await tx.member.createMany({
-					data: existing.map((user, index) => ({
-						id: crypto.randomUUID(),
-						organizationId: workspace.id,
-						userId: user.id,
-						role: index === 0 ? "admin" : "contributor",
-						createdAt: new Date(),
-					})),
-					skipDuplicates: true,
-				});
-			}
-
-			await tx.member.upsert({
-				where: {
-					organizationId_userId: { organizationId: workspace.id, userId },
-				},
-				create: {
-					id: crypto.randomUUID(),
-					organizationId: workspace.id,
-					userId,
-					role: "contributor",
-					createdAt: new Date(),
-				},
-				update: {},
-			});
-			await tx.userProfile.upsert({
-				where: { userId },
-				create: {
-					userId,
-					status: "ACTIVE",
-					preferredLanguage: "English",
-					locale: "en",
-					timeZone: "Europe/Amsterdam",
-					workingPreferences: {},
-				},
-				update: {},
-			});
-
-			return workspace.id;
-		});
-	} catch (error) {
-		console.error(
-			`[auth] could not enrol user ${userId} in workspace ${WORKSPACE_ID}; the next sign-in will retry`,
-			error,
-		);
-		return undefined;
-	}
+	const membership = await db.member.findUnique({
+		where: {
+			organizationId_userId: {
+				organizationId: WORKSPACE_ID,
+				userId,
+			},
+		},
+		select: {
+			organizationId: true,
+			user: { select: { profile: { select: { status: true } } } },
+		},
+	});
+	return membership?.user.profile?.status === "ACTIVE"
+		? membership.organizationId
+		: undefined;
 }

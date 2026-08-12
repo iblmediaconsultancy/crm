@@ -246,10 +246,15 @@ enum AgentResponseRating {
   DOWN
 }
 
+enum CanonicalLifecycleState {
+  ACTIVE
+  ARCHIVED
+}
+
 model Company {
   id          String  @id @default(cuid())
   name        String
-  domain      String? @unique
+  domain      String?
   website     String?
   description String?
 
@@ -287,6 +292,12 @@ model Company {
 
   source RecordSource @default(MANUAL)
 
+  lifecycleState    CanonicalLifecycleState @default(ACTIVE)
+  archivedAt        DateTime?
+  archivedByUserId  String?
+  archiveReason     String?
+  version           Int @default(1)
+
   lastActivityAt DateTime?
 
   contacts            Contact[]           @relation("CompanyContacts")
@@ -310,7 +321,9 @@ model Company {
 
   @@index([ownerId])
   @@index([name])
+  @@index([domain])
   @@index([lastActivityAt])
+  @@index([lifecycleState, name])
   @@map("company")
 }
 
@@ -328,7 +341,7 @@ model Contact {
   id          String  @id @default(cuid())
   firstName   String
   lastName    String?
-  email       String? @unique
+  email       String?
   phone       String?
   title       String?
   linkedinUrl String?
@@ -354,6 +367,12 @@ model Contact {
 
   source RecordSource @default(MANUAL)
 
+  lifecycleState    CanonicalLifecycleState @default(ACTIVE)
+  archivedAt        DateTime?
+  archivedByUserId  String?
+  archiveReason     String?
+  version           Int @default(1)
+
   lastActivityAt DateTime?
 
   deals                 DealContact[]
@@ -377,7 +396,9 @@ model Contact {
 
   @@index([companyId])
   @@index([ownerId])
+  @@index([email])
   @@index([lastActivityAt])
+  @@index([lifecycleState, firstName])
   @@map("contact")
 }
 
@@ -902,6 +923,12 @@ model Deal {
   fxRate       Decimal?  @db.Decimal(20, 10)
   fxRateAt     DateTime?
 
+  lifecycleState    CanonicalLifecycleState @default(ACTIVE)
+  archivedAt        DateTime?
+  archivedByUserId  String?
+  archiveReason     String?
+  version           Int @default(1)
+
   lastActivityAt DateTime?
 
   contacts         DealContact[]
@@ -923,6 +950,7 @@ model Deal {
   @@index([lastActivityAt])
   @@index([baseAmount])
   @@index([currency])
+  @@index([lifecycleState, name])
   @@map("deal")
 }
 
@@ -1077,6 +1105,12 @@ model Activity {
   createdById String
   createdBy   User   @relation("ActivityAuthor", fields: [createdById], references: [id])
   meta        Json?
+
+  lifecycleState    CanonicalLifecycleState @default(ACTIVE)
+  archivedAt        DateTime?
+  archivedByUserId  String?
+  archiveReason     String?
+  version           Int @default(1)
 
   emailThreadId   String?        @unique
   emailThread     EmailThread?   @relation(fields: [emailThreadId], references: [id], onDelete: Cascade)
@@ -1576,8 +1610,13 @@ enum OutboundDeliveryStatus {
   PENDING
   SENDING
   SENT
+  DELIVERED
+  BOUNCED
+  COMPLAINED
+  REPLIED
   RETRY
   FAILED
+  CANCELLED
 }
 
 enum ProposalStatus {
@@ -2110,8 +2149,8 @@ model Assignment {
   entityId         String
   assigneeUserId   String
   assignee         User             @relation("AssignmentAssignee", fields: [assigneeUserId], references: [id], onDelete: Restrict)
-  assignedByUserId String
-  assignedBy       User             @relation("AssignmentCreator", fields: [assignedByUserId], references: [id], onDelete: Restrict)
+  assignedByUserId String?
+  assignedBy       User?            @relation("AssignmentCreator", fields: [assignedByUserId], references: [id], onDelete: SetNull)
   reason           String?
   assignedAt       DateTime         @default(now())
   revokedAt        DateTime?
@@ -2140,13 +2179,61 @@ model LifecycleEvent {
   @@map("lifecycleEvent")
 }
 
+model CanonicalAlias {
+  id               String           @id @default(cuid())
+  entityType       DomainEntityType
+  aliasEntityId    String
+  survivorEntityId String
+  createdByUserId  String
+  reason           String
+  createdAt        DateTime         @default(now())
+
+  @@unique([entityType, aliasEntityId])
+  @@index([entityType, survivorEntityId])
+  @@map("canonicalAlias")
+}
+
+model CanonicalTombstone {
+  id               String           @id @default(cuid())
+  entityType       DomainEntityType
+  entityId         String
+  survivorEntityId String?
+  kind             String
+  snapshot         Json
+  createdByUserId  String
+  reason           String
+  createdAt        DateTime         @default(now())
+
+  @@unique([entityType, entityId])
+  @@index([entityType, survivorEntityId])
+  @@map("canonicalTombstone")
+}
+
+model DestructiveConfirmation {
+  id                 String           @id @default(cuid())
+  entityType         DomainEntityType
+  entityId           String
+  entityVersion      Int
+  dependencyDigest   String
+  requestedByUserId  String
+  expiresAt          DateTime
+  consumedAt         DateTime?
+  createdAt          DateTime         @default(now())
+
+  @@index([requestedByUserId, expiresAt])
+  @@map("destructiveConfirmation")
+}
 model DuplicateCandidate {
   id            String                   @id @default(cuid())
   entityType    DomainEntityType
   leftEntityId  String
   rightEntityId String
-  score         Decimal                  @db.Decimal(5, 4)
-  reasons       Json
+  score           Decimal                  @db.Decimal(5, 4)
+  reasons         Json
+  scoreComponents Json
+  detectorVersion String
+  leftVersion     Int
+  rightVersion    Int
   status        DuplicateCandidateStatus @default(OPEN)
   reviewedById  String?
   reviewedBy    User?                    @relation("DuplicateCandidateReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
@@ -2171,6 +2258,7 @@ model MergeDecision {
   decidedByUserId   String
   decidedBy         User                @relation("MergeDecisionDecider", fields: [decidedByUserId], references: [id], onDelete: Restrict)
   reason            String?
+  fieldChoices      Json
   snapshot          Json
   idempotencyKey    String              @unique
   decidedAt         DateTime            @default(now())
@@ -2246,4 +2334,253 @@ model DomainAuditEvent {
   @@index([actorUserId, createdAt])
   @@index([entityType, entityId, createdAt])
   @@map("domainAuditEvent")
+}
+
+enum DurableJobStatus {
+  PENDING
+  LEASED
+  SUCCEEDED
+  FAILED
+  DEAD
+  CANCELLED
+}
+
+enum DncStatus {
+  ALLOWED
+  DO_NOT_CONTACT
+}
+
+enum FollowUpPlanStatus {
+  ACTIVE
+  PAUSED
+  COMPLETED
+  CANCELLED
+}
+
+enum FollowUpStepStatus {
+  PENDING
+  LEASED
+  QUEUED
+  COMPLETED
+  CANCELLED
+  DEAD
+}
+
+enum AttachmentStatus {
+  QUARANTINED
+  CLEAN
+  INFECTED
+  REJECTED
+  SCAN_FAILED
+}
+
+enum AllocationRequestStatus {
+  PENDING
+  LEASED
+  ALLOCATED
+  UNALLOCATED
+  FAILED
+  DEAD
+}
+
+model SystemEmailJob {
+  id                String           @id @default(cuid())
+  kind              String
+  actorUserId       String
+  recipientEmail    String
+  subject           String
+  textBody          String
+  status            DurableJobStatus @default(PENDING)
+  idempotencyKey    String           @unique
+  providerMessageId String?
+  attemptCount      Int              @default(0)
+  maxAttempts       Int              @default(5)
+  leaseOwner        String?
+  leasedUntil       DateTime?
+  retryAt           DateTime?
+  lastErrorCode     String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  @@index([status, retryAt, leasedUntil])
+  @@map("systemEmailJob")
+}
+
+model ContactRouteConsent {
+  id            String    @id @default(cuid())
+  routeId       String    @unique
+  contactId     String
+  status        DncStatus @default(ALLOWED)
+  reason        String?
+  source        String
+  changedByUserId String?
+  changedAt     DateTime  @default(now())
+  consentedAt   DateTime?
+  version       Int       @default(1)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([contactId, status])
+  @@map("contactRouteConsent")
+}
+
+model FollowUpPlan {
+  id              String             @id @default(cuid())
+  contactId       String
+  routeId         String
+  ownerUserId     String
+  sourceDraftId   String?
+  status          FollowUpPlanStatus @default(ACTIVE)
+  cancellationReason String?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@index([contactId, status])
+  @@index([ownerUserId, status])
+  @@map("followUpPlan")
+}
+
+model FollowUpStep {
+  id             String             @id @default(cuid())
+  planId         String
+  position       Int
+  dueAt          DateTime
+  status         FollowUpStepStatus @default(PENDING)
+  draftId        String?
+  idempotencyKey String             @unique
+  attemptCount   Int                @default(0)
+  maxAttempts    Int                @default(5)
+  leaseOwner     String?
+  leasedUntil    DateTime?
+  retryAt        DateTime?
+  lastErrorCode  String?
+  completedAt    DateTime?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  @@unique([planId, position])
+  @@index([status, dueAt, retryAt, leasedUntil])
+  @@map("followUpStep")
+}
+
+model OutreachEvent {
+  id                String   @id @default(cuid())
+  deliveryId        String
+  eventType         String
+  providerEventId   String   @unique
+  providerMessageId String?
+  occurredAt        DateTime
+  payloadDigest     String
+  createdAt         DateTime @default(now())
+
+  @@index([deliveryId, occurredAt])
+  @@map("outreachEvent")
+}
+
+model AllocationPolicy {
+  id                String   @id @default(cuid())
+  version           Int      @unique
+  name              String
+  active            Boolean  @default(false)
+  rules             Json
+  createdByUserId   String
+  createdAt         DateTime @default(now())
+  activatedAt       DateTime?
+
+  @@index([active, version])
+  @@map("allocationPolicy")
+}
+
+model AllocationRequest {
+  id                String                  @id @default(cuid())
+  entityType        DomainEntityType
+  entityId          String
+  policyVersion     Int?
+  status            AllocationRequestStatus @default(PENDING)
+  requestedByUserId String?
+  idempotencyKey    String                  @unique
+  explanation       Json?
+  assigneeUserId    String?
+  attemptCount      Int                     @default(0)
+  maxAttempts       Int                     @default(5)
+  leaseOwner        String?
+  leasedUntil       DateTime?
+  retryAt           DateTime?
+  lastErrorCode     String?
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+
+  @@index([status, retryAt, leasedUntil])
+  @@index([entityType, entityId, status])
+  @@map("allocationRequest")
+}
+
+model MessageAttachment {
+  id              String           @id @default(cuid())
+  mailboxId       String
+  messageId       String
+  filename        String
+  mediaType       String
+  contentId       String?
+  disposition     String?
+  byteSize        Int
+  checksumSha256  String
+  objectKey       String           @unique
+  status          AttachmentStatus @default(QUARANTINED)
+  scanCompletedAt DateTime?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@index([mailboxId, messageId])
+  @@index([status, createdAt])
+  @@map("messageAttachment")
+}
+
+model AttachmentScanJob {
+  id             String           @id @default(cuid())
+  attachmentId   String           @unique
+  status         DurableJobStatus @default(PENDING)
+  idempotencyKey String           @unique
+  attemptCount   Int              @default(0)
+  maxAttempts    Int              @default(5)
+  leaseOwner     String?
+  leasedUntil    DateTime?
+  retryAt        DateTime?
+  lastErrorCode  String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@index([status, retryAt, leasedUntil])
+  @@map("attachmentScanJob")
+}
+
+model MimeIngestionError {
+  id              String   @id @default(cuid())
+  mailboxId       String
+  providerUid     String
+  rfcMessageId    String?
+  errorCode       String
+  detail          String?
+  reprocessStatus DurableJobStatus @default(FAILED)
+  attemptCount    Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([mailboxId, providerUid])
+  @@index([reprocessStatus, updatedAt])
+  @@map("mimeIngestionError")
+}
+
+model ProviderEvidence {
+  id              String   @id @default(cuid())
+  capability      ProviderCapabilityKey
+  probeKind       String
+  outcome         String
+  evidence        Json
+  configurationDigest String
+  operatorUserId  String
+  createdAt       DateTime @default(now())
+
+  @@index([capability, createdAt])
+  @@map("providerEvidence")
 }

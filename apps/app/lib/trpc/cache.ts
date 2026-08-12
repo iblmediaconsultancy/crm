@@ -25,8 +25,6 @@ export type CrmCache = {
 	removedMany(records: RemovedRecords): Promise<void>;
 	conversationRemoved(id: string): Promise<void>;
 	activity(options?: Options): Promise<void>;
-	google(options?: Options): Promise<void>;
-	microsoft(options?: Options): Promise<void>;
 	settings(options?: Options): Promise<void>;
 	currency(options?: Options): Promise<void>;
 	workspace(options?: Options): Promise<void>;
@@ -210,32 +208,6 @@ export function useCrmCache(): CrmCache {
 					trpc.companies.byId.queryKey(),
 					trpc.contacts.byId.queryKey(),
 					trpc.deals.byId.queryKey(),
-					trpc.dashboard.summary.queryKey(),
-				],
-				options,
-			),
-
-		google: (options) =>
-			run(
-				[trpc.google.status.queryKey()],
-				[
-					...activityKeys(),
-					...listKeys(),
-					trpc.companies.byId.queryKey(),
-					trpc.contacts.byId.queryKey(),
-					trpc.dashboard.summary.queryKey(),
-				],
-				options,
-			),
-
-		microsoft: (options) =>
-			run(
-				[trpc.microsoft.status.queryKey()],
-				[
-					...activityKeys(),
-					...listKeys(),
-					trpc.companies.byId.queryKey(),
-					trpc.contacts.byId.queryKey(),
 					trpc.dashboard.summary.queryKey(),
 				],
 				options,

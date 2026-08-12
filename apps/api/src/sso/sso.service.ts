@@ -1,8 +1,6 @@
 import {
 	auth,
 	canConfigureSso,
-	isGoogleConfigured,
-	isMicrosoftConfigured,
 	isWorkspaceRole,
 	ssoCallbackBase,
 	ssoCallbackURL,
@@ -34,8 +32,6 @@ export interface PublicSsoProvider {
 }
 
 export interface SignInOptions {
-	google: boolean;
-	microsoft: boolean;
 	providers: PublicSsoProvider[];
 }
 
@@ -144,8 +140,6 @@ export class SsoService {
 		});
 
 		return {
-			google: isGoogleConfigured(),
-			microsoft: isMicrosoftConfigured(),
 			providers: rows.map((row) => ({
 				providerId: row.providerId,
 				name: ssoProviderName(row.providerId),

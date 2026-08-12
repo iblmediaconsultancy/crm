@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { db } from "@crm/db";
-import { guardProviderOperation } from "@crm/db/security";
+import { withPrincipal } from "@crm/db/security";
 
 export type SystemEmail = {
 	actorUserId: string;
@@ -31,9 +31,25 @@ export type SystemEmailDependencies = {
 	}) => Promise<void>;
 };
 
+export async function enqueueSystemEmail(message: SystemEmail): Promise<void> {
+	await withPrincipal(db, { userId: message.actorUserId, kind: "user" }, (tx) =>
+		tx.systemEmailJob.upsert({
+			where: { idempotencyKey: message.idempotencyKey },
+			create: {
+				kind: message.kind,
+				actorUserId: message.actorUserId,
+				recipientEmail: safeAddress(message.to),
+				subject: safeHeader(message.subject),
+				textBody: message.text,
+				idempotencyKey: message.idempotencyKey,
+			},
+			update: {},
+		}),
+	);
+}
 export async function sendSystemEmail(
 	message: SystemEmail,
-	dependencies: SystemEmailDependencies = productionDependencies,
+	dependencies: SystemEmailDependencies,
 ): Promise<void> {
 	await dependencies.guard(message.actorUserId);
 	const apiKey = await dependencies.credential();
@@ -82,50 +98,3 @@ function safeHeader(value: string): string {
 	}
 	return header;
 }
-
-const productionDependencies: SystemEmailDependencies = {
-	guard: (actorUserId) =>
-		guardProviderOperation(db, {
-			capability: "RESEND_OUTBOUND",
-			actorUserId,
-		}),
-	credential: async () => {
-		const value = process.env.RESEND_API_KEY?.trim();
-		if (!value) throw new Error("RESEND_CREDENTIAL_UNAVAILABLE");
-		return value;
-	},
-	transport: async (apiKey, message) => {
-		const response = await fetch("https://api.resend.com/emails", {
-			method: "POST",
-			headers: {
-				authorization: `Bearer ${apiKey}`,
-				"content-type": "application/json",
-				"idempotency-key": message.idempotencyKey,
-			},
-			body: JSON.stringify({
-				from: message.from,
-				to: [message.to],
-				subject: message.subject,
-				text: message.text,
-			}),
-		});
-		if (!response.ok) throw new Error(`RESEND_${response.status}`);
-		const body = (await response.json()) as { id?: unknown };
-		if (typeof body.id !== "string" || !body.id) {
-			throw new Error("RESEND_INVALID_RESPONSE");
-		}
-		return { providerMessageId: body.id };
-	},
-	audit: async ({ actorUserId, kind, providerMessageId }) => {
-		await db.securityAuditEvent.create({
-			data: {
-				actorUserId,
-				action: "SYSTEM_EMAIL_SENT",
-				resourceType: "SystemEmail",
-				resourceId: kind,
-				outcome: "SENT",
-				metadata: { providerMessageId },
-			},
-		});
-	},
-};

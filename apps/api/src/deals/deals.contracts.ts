@@ -26,6 +26,7 @@ export const CLOSING_WINDOWS = [
 export type ClosingWindow = (typeof CLOSING_WINDOWS)[number];
 
 export const dealListInput = listInput.extend({
+	lifecycle: z.enum(["ACTIVE", "ARCHIVED"]).default("ACTIVE"),
 	status: z.string().default("all"),
 	owner: z.string().default("all"),
 	stage: z.string().default("all"),
