@@ -20,12 +20,29 @@ export const auth = betterAuth({
 		enabled: true,
 		disableSignUp: true,
 		sendResetPassword: async ({ user, url }) => {
+			const authUrl = new URL(url);
+			const publicUrl = new URL(
+				`${authUrl.pathname}${authUrl.search}`,
+				env.appUrl,
+			);
+			const callbackUrl = publicUrl.searchParams.get("callbackURL");
+			if (callbackUrl) {
+				publicUrl.searchParams.set(
+					"callbackURL",
+					new URL(callbackUrl, env.appUrl).toString(),
+				);
+			}
+			const publicUrlString = publicUrl.toString();
+
 			await enqueueSystemEmail({
 				actorUserId: user.id,
 				to: user.email,
 				subject: "Reset your IBL Command Center password",
-				text: `Open this secure link to reset your password: ${url}`,
-				idempotencyKey: stableSystemEmailKey("PASSWORD_RESET", url),
+				text: `Open this secure link to reset your password: ${publicUrlString}`,
+				idempotencyKey: stableSystemEmailKey(
+					"PASSWORD_RESET",
+					publicUrlString,
+				),
 				kind: "PASSWORD_RESET",
 			});
 		},

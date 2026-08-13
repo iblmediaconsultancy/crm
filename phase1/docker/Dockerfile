@@ -84,19 +84,7 @@ COPY --from=agent-build /workspace/apps/agent/.output ./apps/agent/.output
 EXPOSE 2000
 CMD ["node", "apps/agent/.output/server/index.mjs"]
 
-FROM oven/bun:1.3.12 AS migrate
-WORKDIR /workspace
-COPY package.json bun.lock ./
-COPY apps/app/package.json apps/app/package.json
-COPY apps/api/package.json apps/api/package.json
-COPY apps/agent/package.json apps/agent/package.json
-COPY packages/auth/package.json packages/auth/package.json
-COPY packages/db/package.json packages/db/package.json
-COPY packages/env/package.json packages/env/package.json
-COPY packages/telemetry/package.json packages/telemetry/package.json
-COPY packages/typescript-config/package.json packages/typescript-config/package.json
-COPY packages/ui/package.json packages/ui/package.json
-RUN bun install --frozen-lockfile --ignore-scripts --filter @crm/db
+FROM prisma-client AS migrate
 COPY packages/db/prisma packages/db/prisma
 COPY packages/db/prisma.config.ts packages/db/prisma.config.ts
 COPY packages/env/src packages/env/src

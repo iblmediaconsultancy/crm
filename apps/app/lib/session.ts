@@ -1,12 +1,20 @@
-import { auth, ensureWorkspaceMembership, type Session } from "@crm/auth";
+import { ensureWorkspaceMembership, type Session } from "@crm/auth";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { cache } from "react";
+import { API_URL } from "@/lib/env";
 
-export const getSession = cache(
-	async (): Promise<Session | null> =>
-		auth.api.getSession({ headers: await headers() }),
-);
+export async function getSession(): Promise<Session | null> {
+	const cookie = (await headers()).get("cookie");
+	if (!cookie) return null;
+
+	const response = await fetch(`${API_URL}/api/auth/get-session`, {
+		headers: { cookie },
+		cache: "no-store",
+	});
+	if (!response.ok) return null;
+
+	return (await response.json()) as Session | null;
+}
 
 export async function requireSession(): Promise<Session> {
 	const session = await getSession();

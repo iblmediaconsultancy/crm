@@ -720,6 +720,19 @@ export class DuplicateService {
 			throw new ConflictException(
 				"Both contacts have football-agent profiles; choose profile fields before merging.",
 			);
+		const sharedRepresentation = await tx.representation.findFirst({
+			where: {
+				OR: [
+					{ playerContactId: survivor, agentContactId: duplicate },
+					{ playerContactId: duplicate, agentContactId: survivor },
+				],
+			},
+			select: { id: true },
+		});
+		if (sharedRepresentation)
+			throw new ConflictException(
+				"Contacts linked as player and agent in the same representation cannot be merged.",
+			);
 		if (duplicatePlayer)
 			await tx.footballPlayer.update({
 				where: { contactId: duplicate },

@@ -18,6 +18,7 @@ import {
 } from "@/components/page-shell";
 import { requireSession } from "@/lib/session";
 import { getServerQueryClient, getServerTrpc } from "@/lib/trpc/server";
+import { workspaceUrl } from "@/lib/workspace-url";
 import { OperationsActions } from "./operations-actions";
 
 export const metadata: Metadata = { title: "Operations" };
@@ -71,7 +72,7 @@ export default async function OperationsPage() {
 						["Representations", "representations"], ["Leads", "leads"], ["Tasks", "football-tasks"], ["Outreach", "outreach"],
 						...(workspace.viewerRole === "contributor" ? [] : [["Duplicates", "duplicates"], ["Allocation", "allocation"]]),
 						["Archived", "archived"],
-					].map(([label, href]) => <Link key={href} href={`../${href}`} className="rounded-md border bg-card px-3 py-2 text-sm font-medium hover:bg-muted">{label}</Link>)}
+					].map(([label, href]) => <Link key={href} href={workspaceUrl(workspace.slug, href)} className="rounded-md border bg-card px-3 py-2 text-sm font-medium hover:bg-muted">{label}</Link>)}
 				</nav>
 				<section
 					aria-labelledby="operations-summary"
