@@ -56,9 +56,14 @@ export class ThreadWriterService {
 
 	async store(
 		row: MailboxSync,
-		options: { mailbox: string; origin: IngestionOrigin },
+		options: {
+			mailbox: string;
+			origin: IngestionOrigin;
+			exactContactId?: string;
+			projectActivity?: boolean;
+		},
 		parsed: IncomingMessage,
-		context: MatchContext,
+		context?: MatchContext,
 	): Promise<boolean> {
 		const existing = await this.db.emailMessage.findUnique({
 			where: {
@@ -103,7 +108,10 @@ export class ThreadWriterService {
 		let companyId = thread?.companyId ?? null;
 		let contactId = thread?.contactId ?? null;
 
-		if (!thread) {
+		if (!thread && options.exactContactId) {
+			contactId = options.exactContactId;
+		} else if (!thread) {
+			if (!context) throw new Error("Mailbox match context is required.");
 			const repliedTo =
 				outbound ||
 				(await this.hasOutboundInThread(
@@ -268,6 +276,7 @@ export class ThreadWriterService {
 					},
 				});
 
+				if (options.projectActivity === false) return lastMessageAt;
 				return this.project(tx, record.id, row.userId, {
 					subject: parsed.subject ?? "(no subject)",
 					snippet: snippetOf(parsed.body),

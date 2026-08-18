@@ -1,6 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { EnrichmentStatus } from "@crm/db";
-import { defineChannel, POST } from "eve/channels";
+import { defineChannel, POST, type SendFn } from "eve/channels";
 import { verifyKey } from "../lib/context-dev";
 import {
 	builderIdFromToken,
@@ -14,7 +14,10 @@ import {
 import { brief, drainAll, taskAuth } from "../lib/dispatch";
 import { settle } from "../lib/enrichment";
 import {
+	claimResearchRequests,
+	completeLocalResearchRequest,
 	noteResearchContinuation,
+	researchRequestAuth,
 	settleResearchRequest,
 } from "../lib/ibl-research";
 import { finishRun } from "../lib/run-runtime";
@@ -77,6 +80,18 @@ export default defineChannel({
 
 			return new Response(null, { status: 202 });
 		}),
+
+		POST(
+			"/internal/crm/research-dispatch",
+			async (request, { send, waitUntil }) => {
+				if (!authorised(request)) {
+					return new Response("Unauthorized", { status: 401 });
+				}
+
+				waitUntil(dispatchResearch(send));
+				return new Response(null, { status: 202 });
+			},
+		),
 
 		POST(
 			"/internal/crm/builder-dispatch",
@@ -288,6 +303,33 @@ export default defineChannel({
 		});
 	},
 });
+
+async function dispatchResearch(send: SendFn): Promise<void> {
+	const requests = await claimResearchRequests();
+	await Promise.all(
+		requests.map(async (request) => {
+			try {
+				if (
+					process.env.NODE_ENV !== "production" &&
+					process.env.IBL_LOCAL_PROVIDER_DOUBLE === "enabled"
+				) {
+					await completeLocalResearchRequest(request);
+					return;
+				}
+				const session = await send(
+					`Research request ${request.id}: ${request.prompt}`,
+					{
+						auth: researchRequestAuth(request),
+						continuationToken: `${IBL_RESEARCH_MARKER}${request.id}`,
+					},
+				);
+				await noteResearchContinuation(request.id, session.id);
+			} catch {
+				await settleResearchRequest(request.id, "FAILED", "DISPATCH_FAILED");
+			}
+		}),
+	);
+}
 
 function assertInternalDispatchAuth(value: unknown): void {
 	const auth = recordOf(value);

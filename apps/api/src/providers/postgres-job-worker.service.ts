@@ -1,8 +1,15 @@
 import { sendSystemEmail } from "@crm/auth";
 import type { Db } from "@crm/db";
 import { withPrincipal } from "@crm/db/security";
-import { Inject, Injectable, Logger } from "@nestjs/common";
+import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import { InjectDatabase } from "../database/database.constants";
+import { runInPrincipalTransaction } from "../database/database-context";
+import { ThreadWriterService } from "../mailbox/thread-writer.service";
+import {
+	localProviderDoubleEnabled,
+	localResendCredentialSource,
+	localResendTransport,
+} from "./local-provider-double";
 import type { ResendCredentialSource } from "./provider-credentials";
 import {
 	EnvironmentResendCredentialSource,
@@ -69,6 +76,7 @@ export class PostgresJobWorkerService {
 		private readonly credentials: ResendCredentialSource,
 		@Inject(WORKER_RESEND_TRANSPORT)
 		private readonly transport: ResendTransport,
+		@Optional() private readonly threadWriter?: ThreadWriterService,
 	) {}
 
 	async runDue(workerId: string): Promise<number> {
@@ -103,7 +111,7 @@ export class PostgresJobWorkerService {
 					kind: job.kind,
 				},
 				{
-					guard: async (actorUserId) => {
+					guard: async (_actorUserId) => {
 						await withPrincipal(
 							this.db,
 							{ userId: null, kind: "worker" },
@@ -180,7 +188,10 @@ export class PostgresJobWorkerService {
 						where: { key: "RESEND_OUTBOUND" },
 						select: { status: true },
 					});
-					if (capability?.status !== "VERIFIED") {
+					if (
+						!localProviderDoubleEnabled() &&
+						capability?.status !== "VERIFIED"
+					) {
 						throw new Error("RESEND_OUTBOUND_UNVERIFIED");
 					}
 					const draft = await tx.draft.findUniqueOrThrow({
@@ -190,12 +201,21 @@ export class PostgresJobWorkerService {
 							status: true,
 							subject: true,
 							body: true,
+							mailboxId: true,
+							mailbox: {
+								select: {
+									id: true,
+									address: true,
+									displayName: true,
+									ownerUserId: true,
+								},
+							},
 							recipientRoute: {
 								select: {
 									id: true,
 									type: true,
 									normalizedValue: true,
-									contact: { select: { lifecycleState: true } },
+									contact: { select: { id: true, lifecycleState: true } },
 								},
 							},
 						},
@@ -231,21 +251,100 @@ export class PostgresJobWorkerService {
 				},
 			);
 			if (!prepared) return true;
+			const preparedMailboxId = prepared.mailboxId;
+			const preparedMailbox =
+				prepared.mailbox ??
+				(localProviderDoubleEnabled() && preparedMailboxId
+					? await withPrincipal(
+							this.db,
+							{ userId: null, mailboxId: preparedMailboxId, kind: "worker" },
+							(tx) =>
+								tx.mailbox.findUnique({
+									where: { id: preparedMailboxId },
+									select: {
+										id: true,
+										address: true,
+										displayName: true,
+										ownerUserId: true,
+									},
+								}),
+						)
+					: null);
 			const secret = await this.credentials.load();
-			const fromAddress = process.env.RESEND_OUTREACH_FROM_EMAIL?.trim();
+			const fromAddress = localProviderDoubleEnabled()
+				? preparedMailbox?.address
+				: process.env.RESEND_OUTREACH_FROM_EMAIL?.trim();
 			if (!fromAddress) throw new Error("RESEND_OUTREACH_SENDER_UNAVAILABLE");
 			const sent = await this.transport.send(secret.apiKey, {
 				from: {
 					address: fromAddress,
 					displayName:
+						prepared.mailbox?.displayName ||
 						process.env.RESEND_OUTREACH_FROM_NAME?.trim() ||
 						"IBL Media Consultancy",
 				},
 				to: prepared.recipientRoute?.normalizedValue ?? "",
 				subject: prepared.subject ?? "",
 				text: prepared.body,
-				idempotencyKey: "ibl-outbound:" + prepared.id,
+				idempotencyKey: `ibl-outbound:${prepared.id}`,
 			});
+			if (
+				localProviderDoubleEnabled() &&
+				this.threadWriter &&
+				preparedMailbox
+			) {
+				const sentAt = new Date();
+				const mailbox = preparedMailbox;
+				const threadWriter = this.threadWriter;
+				await runInPrincipalTransaction(
+					this.db,
+					{ userId: null, mailboxId: mailbox.id, kind: "worker" },
+					async () =>
+						threadWriter.store(
+							{
+								id: `local-sync-${mailbox.id}`,
+								userId: mailbox.ownerUserId,
+								source: "local-double",
+								mailboxId: mailbox.id,
+								status: "IDLE",
+								cursor: null,
+								lastSyncedAt: null,
+								lastError: null,
+								retryAfter: null,
+								attemptCount: 0,
+								leaseOwner: null,
+								lastErrorCode: null,
+								autoCreate: false,
+								createdAt: sentAt,
+								updatedAt: sentAt,
+							},
+							{
+								mailbox: mailbox.address.toLowerCase(),
+								origin: "legacy",
+								exactContactId: prepared.recipientRoute?.contact?.id,
+								projectActivity: false,
+							},
+							{
+								rfcMessageId: `<${sent.providerMessageId}@local.invalid>`,
+								rootId: sent.providerMessageId,
+								subject: prepared.subject,
+								from: {
+									email: mailbox.address.toLowerCase(),
+									name: mailbox.displayName,
+								},
+								recipients: [
+									{
+										email: prepared.recipientRoute?.normalizedValue ?? "",
+										name: null,
+										kind: "to",
+									},
+								],
+								body: prepared.body,
+								sentAt,
+							},
+						),
+				);
+			}
 			await withPrincipal(
 				this.db,
 				{ userId: null, kind: "worker" },
@@ -291,6 +390,11 @@ export class PostgresJobWorkerService {
 				},
 			);
 		} catch (error) {
+			this.logger.debug({
+				message: "Outbound delivery diagnostic",
+				deliveryId: delivery.id,
+				reason: error instanceof Error ? error.message : String(error),
+			});
 			await this.failOutbound(delivery, providerErrorCode(error));
 		}
 		return true;
@@ -354,10 +458,16 @@ function parseSender(value: string): { address: string; displayName: string } {
 export const defaultPostgresJobProviders = [
 	{
 		provide: WORKER_RESEND_CREDENTIAL_SOURCE,
-		useClass: EnvironmentResendCredentialSource,
+		useFactory: () =>
+			localProviderDoubleEnabled()
+				? localResendCredentialSource
+				: new EnvironmentResendCredentialSource(),
 	},
 	{
 		provide: WORKER_RESEND_TRANSPORT,
-		useValue: new HttpResendTransport(),
+		useFactory: () =>
+			localProviderDoubleEnabled()
+				? localResendTransport
+				: new HttpResendTransport(),
 	},
 ];

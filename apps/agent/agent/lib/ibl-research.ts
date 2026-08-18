@@ -331,6 +331,99 @@ export async function claimResearchRequests(
 	});
 }
 
+export async function completeLocalResearchRequest(
+	request: ClaimedResearchRequest,
+): Promise<void> {
+	if (
+		process.env.NODE_ENV === "production" ||
+		process.env.IBL_LOCAL_PROVIDER_DOUBLE !== "enabled"
+	) {
+		throw new Error("LOCAL_RESEARCH_DOUBLE_DISABLED");
+	}
+	await withPrincipal(
+		db,
+		{ userId: request.ownerUserId, mailboxId: request.mailboxId, kind: "user" },
+		async (tx) => {
+			const locator = `local-acceptance:${request.id}`;
+			const evidence = await tx.evidenceSource.upsert({
+				where: {
+					kind_locator_checksum: {
+						kind: "MANUAL",
+						locator,
+						checksum: stableHash(locator),
+					},
+				},
+				create: {
+					kind: "MANUAL",
+					locator,
+					checksum: stableHash(locator),
+					title: "Safe local AI research double",
+					createdByUserId: request.ownerUserId,
+					metadata: { localProviderDouble: true, contentStored: false },
+				},
+				update: {},
+				select: { id: true },
+			});
+			const existingFinding = await tx.researchFinding.findFirst({
+				where: { requestId: request.id, evidenceSourceId: evidence.id },
+				select: { id: true },
+			});
+			if (!existingFinding) {
+				await tx.researchFinding.create({
+					data: {
+						requestId: request.id,
+						evidenceSourceId: evidence.id,
+						field: "outreachAngle",
+						summary:
+							"Local acceptance research suggests a concise, evidence-led introduction and a single clear next step.",
+						value: { source: "local-provider-double" },
+						confidence: 0.9,
+					},
+				});
+			}
+			await tx.draft.upsert({
+				where: { idempotencyKey: `agent:${request.id}:local-acceptance-draft` },
+				create: {
+					ownerUserId: request.ownerUserId,
+					mailboxId: request.mailboxId,
+					subject: "A focused opportunity for your team",
+					body: "Hi,\n\nI researched your current priorities and identified one focused way IBL could help. Would you be open to a short conversation next week?\n\nBest,",
+					idempotencyKey: `agent:${request.id}:local-acceptance-draft`,
+				},
+				update: {},
+			});
+			await tx.researchRequest.update({
+				where: { id: request.id },
+				data: {
+					status: "NEEDS_REVIEW",
+					completedAt: new Date(),
+					leaseOwner: null,
+					leasedUntil: null,
+					failureCode: null,
+				},
+			});
+			await tx.domainAuditEvent.upsert({
+				where: {
+					action_requestId: {
+						action: "AGENT_RESEARCH_SUBMITTED",
+						requestId: `local-double:${request.id}`,
+					},
+				},
+				create: {
+					actorUserId: request.ownerUserId,
+					action: "AGENT_RESEARCH_SUBMITTED",
+					entityType: "RESEARCH_REQUEST",
+					entityId: request.id,
+					outcome: "NEEDS_REVIEW",
+					requestId: `local-double:${request.id}`,
+					metadata: { localProviderDouble: true },
+				},
+				update: {},
+			});
+		},
+	);
+}
+
 export function researchRequestAuth(request: ClaimedResearchRequest): AppAuth {
 	return {
 		...APP_AUTH,
@@ -449,6 +542,10 @@ async function ownedRequest(
 
 function scopedKey(requestId: string, value: string): string {
 	return `agent:${requestId}:${value}`.slice(0, 191);
+}
+
+function stableHash(value: string): string {
+	return createHash("sha256").update(value).digest("hex");
 }
 
 async function auditArtifact(

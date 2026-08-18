@@ -14,6 +14,7 @@ import { PermissionMiddleware } from "../trpc/middlewares/permission.middleware"
 import {
 	followUpCancelInput,
 	followUpPlanCreateInput,
+	localReplyInput,
 	routeConsentInput,
 } from "./outreach.contracts";
 
@@ -64,6 +65,21 @@ export class OutreachLifecycleRouter {
 			{ userId: ctx.user.id, role: ctx.workspaceRole },
 			input.planId,
 			input.reason,
+		);
+	}
+
+	@Mutation({
+		input: localReplyInput,
+		meta: { permission: "crm.create" },
+	})
+	simulateLocalReply(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof localReplyInput>,
+	) {
+		return this.outreach.simulateLocalReply(
+			ctx.user.id,
+			input.deliveryId,
+			input.body,
 		);
 	}
 }

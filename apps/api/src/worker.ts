@@ -1,15 +1,17 @@
 import { rm, writeFile } from "node:fs/promises";
-import { hostname } from "node:os";
+import { hostname, tmpdir } from "node:os";
+import { join } from "node:path";
 import { Logger } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import { AppModule } from "./app.module";
 import { AllocationService } from "./operations/allocation.service";
 import { AttachmentStorageService } from "./providers/attachment-storage.service";
 import { MiabSyncService } from "./providers/miab-sync.service";
-import { PostgresJobWorkerService } from "./providers/postgres-job-worker.service";
 import { OutreachLifecycleService } from "./providers/outreach-lifecycle.service";
+import { PostgresJobWorkerService } from "./providers/postgres-job-worker.service";
 
 const logger = new Logger("PostgresWorker");
+const readyFile = join(tmpdir(), "worker-ready");
 let stopping = false;
 
 const wait = (milliseconds: number) =>
@@ -26,14 +28,14 @@ async function bootstrap() {
 	if (!Number.isFinite(intervalMs) || intervalMs < 1_000) {
 		throw new Error("WORKER_INTERVAL_MS must be at least 1000");
 	}
-	const workerId = hostname() + ":" + process.pid + ":" + crypto.randomUUID();
+	const workerId = `${hostname()}:${process.pid}:${crypto.randomUUID()}`;
 	const stop = () => {
 		stopping = true;
 	};
 	process.once("SIGTERM", stop);
 	process.once("SIGINT", stop);
 	logger.log({ message: "PostgreSQL worker ready", intervalMs, workerId });
-	await writeFile("/tmp/worker-ready", new Date().toISOString());
+	await writeFile(readyFile, new Date().toISOString());
 
 	while (!stopping) {
 		try {
@@ -59,7 +61,7 @@ async function bootstrap() {
 		if (!stopping) await wait(intervalMs);
 	}
 
-	await rm("/tmp/worker-ready", { force: true });
+	await rm(readyFile, { force: true });
 	await context.close();
 	logger.log({ message: "PostgreSQL worker stopped" });
 }

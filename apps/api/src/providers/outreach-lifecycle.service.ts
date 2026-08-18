@@ -1,5 +1,5 @@
-import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { type Db, Prisma } from "@crm/db";
 import { withPrincipal } from "@crm/db/security";
 import {
@@ -9,6 +9,9 @@ import {
 } from "@nestjs/common";
 import { Webhook } from "svix";
 import { InjectDatabase } from "../database/database.constants";
+import { runInPrincipalTransaction } from "../database/database-context";
+import { ThreadWriterService } from "../mailbox/thread-writer.service";
+import { localProviderDoubleEnabled } from "./local-provider-double";
 
 const CLAIM = `UPDATE "followUpStep" SET "status"='LEASED', "leaseOwner"=$1, "leasedUntil"=NOW()+INTERVAL '60 seconds', "attemptCount"="attemptCount"+1, "updatedAt"=NOW() WHERE "id"=(SELECT s."id" FROM "followUpStep" s JOIN "followUpPlan" p ON p."id"=s."planId" WHERE s."status" IN ('PENDING','LEASED') AND p."status"='ACTIVE' AND s."dueAt"<=NOW() AND (s."retryAt" IS NULL OR s."retryAt"<=NOW()) AND (s."leasedUntil" IS NULL OR s."leasedUntil"<=NOW()) AND s."attemptCount"<s."maxAttempts" ORDER BY s."dueAt",s."id" FOR UPDATE OF s SKIP LOCKED LIMIT 1) RETURNING "id","planId","draftId","attemptCount"`;
 type Claim = {
@@ -25,7 +28,112 @@ type ResendEvent = {
 
 @Injectable()
 export class OutreachLifecycleService {
-	constructor(@InjectDatabase() private readonly db: Db) {}
+	constructor(
+		@InjectDatabase() private readonly db: Db,
+		private readonly threadWriter?: ThreadWriterService,
+	) {}
+
+	async simulateLocalReply(userId: string, deliveryId: string, body: string) {
+		if (!localProviderDoubleEnabled() || !this.threadWriter) {
+			throw new ConflictException("The local provider double is not enabled.");
+		}
+		const threadWriter = this.threadWriter;
+		const delivery = await withPrincipal(
+			this.db,
+			{ userId, kind: "user" },
+			(tx) =>
+				tx.outboundDelivery.findUnique({
+					where: { id: deliveryId },
+					select: {
+						status: true,
+						providerMessageId: true,
+						draft: {
+							select: {
+								ownerUserId: true,
+								subject: true,
+								mailbox: {
+									select: {
+										id: true,
+										ownerUserId: true,
+										address: true,
+									},
+								},
+								recipientRoute: {
+									select: { normalizedValue: true, contactId: true },
+								},
+							},
+						},
+					},
+				}),
+		);
+		if (
+			!delivery ||
+			delivery.draft.ownerUserId !== userId ||
+			!delivery.draft.mailbox ||
+			!delivery.draft.recipientRoute ||
+			!delivery.providerMessageId ||
+			!(["SENT", "DELIVERED"] as string[]).includes(delivery.status)
+		) {
+			throw new ConflictException(
+				"This delivery cannot receive a local reply.",
+			);
+		}
+		const now = new Date();
+		const mailbox = delivery.draft.mailbox;
+		const recipientRoute = delivery.draft.recipientRoute;
+		const providerMessageId = delivery.providerMessageId;
+		await runInPrincipalTransaction(
+			this.db,
+			{ userId: null, mailboxId: mailbox.id, kind: "worker" },
+			async () =>
+				threadWriter.store(
+					{
+						id: `local-sync-${mailbox.id}`,
+						userId: mailbox.ownerUserId,
+						source: "local-double",
+						mailboxId: mailbox.id,
+						status: "IDLE",
+						cursor: null,
+						lastSyncedAt: null,
+						lastError: null,
+						retryAfter: null,
+						attemptCount: 0,
+						leaseOwner: null,
+						lastErrorCode: null,
+						autoCreate: false,
+						createdAt: now,
+						updatedAt: now,
+					},
+					{
+						mailbox: mailbox.address.toLowerCase(),
+						origin: "legacy",
+						exactContactId: recipientRoute.contactId ?? undefined,
+						projectActivity: false,
+					},
+					{
+						rfcMessageId: `<reply-${crypto.randomUUID()}@local.invalid>`,
+						rootId: providerMessageId,
+						subject: delivery.draft.subject
+							? `Re: ${delivery.draft.subject.replace(/^Re:\s*/i, "")}`
+							: "Re: Outreach",
+						from: {
+							email: recipientRoute.normalizedValue,
+							name: null,
+						},
+						recipients: [
+							{
+								email: mailbox.address.toLowerCase(),
+								name: null,
+								kind: "to",
+							},
+						],
+						body,
+						sentAt: now,
+					},
+				),
+		);
+		return { status: "REPLIED" as const };
+	}
 
 	async setConsent(
 		actor: { userId: string; role: "admin" | "team" | "contributor" },
@@ -449,8 +557,7 @@ export class OutreachLifecycleService {
 						})
 					: null;
 				if (
-					!plan ||
-					plan.status !== "ACTIVE" ||
+					plan?.status !== "ACTIVE" ||
 					draft?.status !== "APPROVED" ||
 					draft.outreachApproval?.status !== "APPROVED" ||
 					draft.recipientRoute?.contact?.lifecycleState !== "ACTIVE" ||

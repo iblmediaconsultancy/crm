@@ -2,6 +2,7 @@ import type { Db } from "@crm/db";
 import { ProviderCapabilityError, withPrincipal } from "@crm/db/security";
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { InjectDatabase } from "../database/database.constants";
+import { localProviderDoubleEnabled } from "./local-provider-double";
 
 @Injectable()
 export class OutboundDeliveryService {
@@ -13,7 +14,7 @@ export class OutboundDeliveryService {
 				where: { key: "RESEND_OUTBOUND" },
 				select: { status: true },
 			});
-			if (capability?.status !== "VERIFIED") {
+			if (capability?.status !== "VERIFIED" && !localProviderDoubleEnabled()) {
 				throw new ProviderCapabilityError(
 					"RESEND_OUTBOUND",
 					"RESEND_OUTBOUND is not verified",
@@ -74,7 +75,7 @@ export class OutboundDeliveryService {
 			if (consent?.status === "DO_NOT_CONTACT") {
 				throw new Error("OUTBOUND_ROUTE_DO_NOT_CONTACT");
 			}
-			const idempotencyKey = "ibl-outbound:" + draft.id;
+			const idempotencyKey = `ibl-outbound:${draft.id}`;
 			const delivery = await tx.outboundDelivery.upsert({
 				where: { idempotencyKey },
 				create: { draftId: draft.id, idempotencyKey },
@@ -101,7 +102,11 @@ export class OutboundDeliveryService {
 					requestId: idempotencyKey,
 				},
 			});
-			return { status: "QUEUED" as const, deliveryId: delivery.id, duplicate: false };
+			return {
+				status: "QUEUED" as const,
+				deliveryId: delivery.id,
+				duplicate: false,
+			};
 		});
 	}
 }

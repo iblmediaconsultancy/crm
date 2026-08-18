@@ -149,6 +149,14 @@ export const draftCreateInput = z.object({
 	idempotencyKey: id,
 });
 
+export const draftUpdateInput = z.object({
+	id,
+	mailboxId: id,
+	recipientRouteId: id,
+	subject: z.string().trim().max(500).nullable().optional(),
+	body: z.string().trim().min(1).max(50000),
+});
+
 export const approvalRequestInput = z.object({
 	draftId: id,
 	idempotencyKey: id,

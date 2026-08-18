@@ -151,6 +151,10 @@ export class EnvironmentVariables {
 	@IsOptional()
 	@IsString()
 	RESEND_OUTREACH_FROM_NAME?: string;
+
+	@IsOptional()
+	@IsString()
+	IBL_LOCAL_PROVIDER_DOUBLE?: string;
 }
 
 export function validateEnv(
@@ -168,13 +172,23 @@ export function validateEnv(
 		const details = errors
 			.map((error) => Object.values(error.constraints ?? {}).join(", "))
 			.join("\n  - ");
-		throw new Error(`Invalid environment configuration:\n  - ${details}\n\nSee .env.example at the root of the repo.`);
+		throw new Error(
+			`Invalid environment configuration:\n  - ${details}\n\nSee .env.example at the root of the repo.`,
+		);
 	}
 	validateProductionGroups(config);
 	return validated;
 }
 
 function validateProductionGroups(config: Record<string, unknown>) {
+	if (
+		config.IBL_LOCAL_PROVIDER_DOUBLE === "enabled" &&
+		config.NODE_ENV === NodeEnv.Production
+	) {
+		throw new Error(
+			"IBL_LOCAL_PROVIDER_DOUBLE cannot be enabled in production.",
+		);
+	}
 	if (config.NODE_ENV !== NodeEnv.Production) return;
 	for (const inline of [
 		"MIAB_MAILBOX_CREDENTIALS_JSON",
@@ -183,7 +197,9 @@ function validateProductionGroups(config: Record<string, unknown>) {
 		"OBJECT_STORAGE_SECRET_KEY",
 	]) {
 		if (typeof config[inline] === "string" && String(config[inline]).trim()) {
-			throw new Error(`${inline} must be supplied through a file secret in production.`);
+			throw new Error(
+				`${inline} must be supplied through a file secret in production.`,
+			);
 		}
 	}
 	const identity = String(config.IBL_DATABASE_IDENTITY ?? "");
@@ -193,7 +209,9 @@ function validateProductionGroups(config: Record<string, unknown>) {
 				typeof config[name] !== "string" || !String(config[name]).trim(),
 		);
 		if (missing.length) {
-			throw new Error(`${label} configuration is incomplete: ${missing.join(", ")}`);
+			throw new Error(
+				`${label} configuration is incomplete: ${missing.join(", ")}`,
+			);
 		}
 	};
 	if (identity === "api") {
@@ -203,10 +221,7 @@ function validateProductionGroups(config: Record<string, unknown>) {
 		);
 	}
 	if (identity === "worker") {
-		requireGroup(
-			["MIAB_IMAP_HOST", "MIAB_MAILBOX_CREDENTIALS_FILE"],
-			"MIAB",
-		);
+		requireGroup(["MIAB_IMAP_HOST", "MIAB_MAILBOX_CREDENTIALS_FILE"], "MIAB");
 		requireGroup(
 			[
 				"RESEND_API_KEY_FILE",

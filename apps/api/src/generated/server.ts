@@ -27,8 +27,8 @@ import { fieldListInput, fieldByKeyInput, fieldIdInput, fieldCreateInput, fieldU
 import { mailboxIdInput, updateOwnedMailboxIdentityInput, mailboxThreadInput, mailboxEventInput } from "../mailbox/mailbox.contracts";
 import { invitationIdInput, acceptInvitationInput, pendingInvitationsInput, inviteMemberInput } from "../onboarding/onboarding.contracts";
 import { allocationTargetInput, allocationPolicyCreateInput, allocationPolicyActivateInput, allocationEnqueueInput, allocationOverrideInput } from "../operations/allocation.contracts";
-import { operationsListInput, footballProfileInput, organizationProfileInput, representationCreateInput, representationTransitionInput, contactRouteCreateInput, contactRouteShareInput, leadCreateInput, taskCreateInput, taskTransitionInput, noteCreateInput, assignmentCreateInput, researchRequestCreateInput, templateCreateInput, draftCreateInput, approvalRequestInput, approvalDecisionInput, draftApproveInput, proposalCreateInput, proofCreateInput } from "../operations/operations.contracts";
-import { routeConsentInput, followUpPlanCreateInput, followUpCancelInput } from "../operations/outreach.contracts";
+import { operationsListInput, footballProfileInput, organizationProfileInput, representationCreateInput, representationTransitionInput, contactRouteCreateInput, contactRouteShareInput, leadCreateInput, taskCreateInput, taskTransitionInput, noteCreateInput, assignmentCreateInput, researchRequestCreateInput, templateCreateInput, draftCreateInput, draftUpdateInput, approvalRequestInput, approvalDecisionInput, draftApproveInput, proposalCreateInput, proofCreateInput } from "../operations/operations.contracts";
+import { routeConsentInput, followUpPlanCreateInput, followUpCancelInput, localReplyInput } from "../operations/outreach.contracts";
 import { updateOwnProfileInput } from "../profile/profile.contracts";
 import { setAgentModelInput, setResearchKeyInput } from "../settings/settings.contracts";
 import { ssoProviderListInput, registerSsoProviderInput, deleteSsoProviderInput } from "../sso/sso.contracts";
@@ -427,6 +427,8 @@ const appRouter = t.router({
   operations: t.router({
     overview: publicProcedure
       .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OperationsRouter["overview"]>>),
+    outreachWorkspace: publicProcedure
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OperationsRouter["outreachWorkspace"]>>),
     selectors: publicProcedure
       .input(operationsListInput)
       .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OperationsRouter["selectors"]>>),
@@ -478,6 +480,9 @@ const appRouter = t.router({
     createDraft: publicProcedure
       .input(draftCreateInput)
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OperationsRouter["createDraft"]>>),
+    updateDraft: publicProcedure
+      .input(draftUpdateInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OperationsRouter["updateDraft"]>>),
     requestApproval: publicProcedure
       .input(approvalRequestInput)
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OperationsRouter["requestApproval"]>>),
@@ -505,7 +510,10 @@ const appRouter = t.router({
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OutreachLifecycleRouter["createFollowUpPlan"]>>),
     cancelFollowUpPlan: publicProcedure
       .input(followUpCancelInput)
-      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OutreachLifecycleRouter["cancelFollowUpPlan"]>>)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OutreachLifecycleRouter["cancelFollowUpPlan"]>>),
+    simulateLocalReply: publicProcedure
+      .input(localReplyInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OutreachLifecycleRouter["simulateLocalReply"]>>)
     }),
   profile: t.router({
     get: publicProcedure

@@ -10,6 +10,7 @@ import {
 import { requireSession } from "@/lib/session";
 import { OperationsDirectory } from "../operations/directory-client";
 import { OutreachLifecycleControls } from "./outreach-lifecycle-controls";
+import { OutreachWorkbench } from "./outreach-workbench";
 export const instant = false;
 
 export const metadata: Metadata = { title: "Outreach" };
@@ -27,6 +28,7 @@ export default async function Page() {
 				</PageShellHeading>
 			</PageShellHeader>
 			<PageShellContent>
+				<OutreachWorkbench />
 				<OutreachLifecycleControls />
 				<OperationsDirectory kind="outreach" />
 			</PageShellContent>

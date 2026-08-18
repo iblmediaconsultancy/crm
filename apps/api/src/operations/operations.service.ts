@@ -1,13 +1,17 @@
-import type { Db, Prisma } from "@crm/db";
+import { type Db, Prisma } from "@crm/db";
 import { withPrincipal } from "@crm/db/security";
 import {
 	BadRequestException,
 	ForbiddenException,
 	Injectable,
 	NotFoundException,
+	Optional,
 } from "@nestjs/common";
 import type { z } from "zod";
+import { AgentTriggerService } from "../agent/agent-trigger.service";
+import { bridge } from "../agent/bridge";
 import { InjectDatabase } from "../database/database.constants";
+import { localProviderDoubleEnabled } from "../providers/local-provider-double";
 import type {
 	approvalDecisionInput,
 	approvalRequestInput,
@@ -15,6 +19,7 @@ import type {
 	contactRouteCreateInput,
 	contactRouteShareInput,
 	draftCreateInput,
+	draftUpdateInput,
 	footballProfileInput,
 	leadCreateInput,
 	noteCreateInput,
@@ -34,7 +39,10 @@ type Input<T extends z.ZodType> = z.infer<T>;
 
 @Injectable()
 export class OperationsService {
-	constructor(@InjectDatabase() private readonly db: Db) {}
+	constructor(
+		@InjectDatabase() private readonly db: Db,
+		@Optional() private readonly agentTrigger?: AgentTriggerService,
+	) {}
 
 	private run<T>(
 		userId: string,
@@ -64,7 +72,9 @@ export class OperationsService {
 			select: { role: true },
 		});
 		if (member?.role !== "admin" && member?.role !== "team") {
-			throw new ForbiddenException("This operation requires Team or Admin access.");
+			throw new ForbiddenException(
+				"This operation requires Team or Admin access.",
+			);
 		}
 	}
 	async overview(userId: string) {
@@ -127,21 +137,338 @@ export class OperationsService {
 		});
 	}
 
+	async outreachWorkspace(userId: string) {
+		return this.run(userId, async (tx) => {
+			const [
+				role,
+				capabilities,
+				mailboxes,
+				leads,
+				research,
+				drafts,
+				approvals,
+				deliveries,
+				threads,
+				audit,
+			] = await Promise.all([
+				this.roleOf(tx, userId),
+				tx.providerCapability.findMany({
+					select: { key: true, status: true, evidenceReference: true },
+				}),
+				tx.mailbox.findMany({
+					orderBy: { address: "asc" },
+					select: {
+						id: true,
+						ownerUserId: true,
+						address: true,
+						displayName: true,
+						status: true,
+						provider: true,
+					},
+				}),
+				tx.lead.findMany({
+					where: { status: { notIn: ["ARCHIVED", "DISQUALIFIED"] } },
+					orderBy: { updatedAt: "desc" },
+					take: 100,
+					select: {
+						id: true,
+						name: true,
+						status: true,
+						ownerUserId: true,
+						contact: {
+							select: {
+								id: true,
+								firstName: true,
+								lastName: true,
+								contactRoutes: {
+									where: { type: "EMAIL" },
+									select: {
+										id: true,
+										ownerUserId: true,
+										value: true,
+										label: true,
+									},
+								},
+							},
+						},
+					},
+				}),
+				tx.researchRequest.findMany({
+					orderBy: { createdAt: "desc" },
+					take: 100,
+					select: {
+						id: true,
+						targetType: true,
+						targetEntityId: true,
+						prompt: true,
+						status: true,
+						failureCode: true,
+						updatedAt: true,
+						findings: {
+							orderBy: { createdAt: "asc" },
+							select: {
+								id: true,
+								summary: true,
+								confidence: true,
+								status: true,
+								evidenceSource: {
+									select: { kind: true, title: true, locator: true },
+								},
+							},
+						},
+					},
+				}),
+				tx.draft.findMany({
+					orderBy: { updatedAt: "desc" },
+					take: 100,
+					select: {
+						id: true,
+						ownerUserId: true,
+						mailboxId: true,
+						recipientRouteId: true,
+						subject: true,
+						body: true,
+						status: true,
+						updatedAt: true,
+						owner: { select: { name: true } },
+						outreachApproval: {
+							select: {
+								id: true,
+								status: true,
+								requestedById: true,
+								decidedById: true,
+								decisionReason: true,
+								requestedAt: true,
+								decidedAt: true,
+							},
+						},
+					},
+				}),
+				tx.outreachApproval.findMany({
+					orderBy: { requestedAt: "desc" },
+					take: 100,
+					select: {
+						id: true,
+						status: true,
+						requestedById: true,
+						requestedBy: { select: { name: true } },
+						draft: { select: { id: true, subject: true, body: true } },
+					},
+				}),
+				tx.outboundDelivery.findMany({
+					orderBy: { createdAt: "desc" },
+					take: 100,
+					select: {
+						id: true,
+						draftId: true,
+						status: true,
+						providerMessageId: true,
+						lastErrorCode: true,
+						sentAt: true,
+					},
+				}),
+				tx.emailThread.findMany({
+					orderBy: { lastMessageAt: "desc" },
+					take: 100,
+					select: {
+						id: true,
+						mailboxId: true,
+						contactId: true,
+						subject: true,
+						messageCount: true,
+						lastMessageAt: true,
+						messages: {
+							orderBy: { sentAt: "desc" },
+							take: 1,
+							select: {
+								direction: true,
+								snippet: true,
+								body: true,
+								sentAt: true,
+							},
+						},
+					},
+				}),
+				tx.domainAuditEvent.findMany({
+					where: {
+						entityType: { in: ["RESEARCH_REQUEST", "DRAFT", "OUTREACH"] },
+					},
+					orderBy: { createdAt: "desc" },
+					take: 100,
+					select: {
+						id: true,
+						action: true,
+						entityType: true,
+						entityId: true,
+						outcome: true,
+						createdAt: true,
+						actor: { select: { name: true } },
+					},
+				}),
+			]);
+			const localProviderDouble = localProviderDoubleEnabled();
+			return {
+				viewer: { userId, role },
+				readiness: {
+					agent: bridge() ? "READY" : "UNCONFIGURED",
+					mailbox: mailboxes.some(
+						(mailbox) =>
+							mailbox.ownerUserId === userId && mailbox.status === "VERIFIED",
+					)
+						? "READY"
+						: "UNCONFIGURED",
+					delivery:
+						localProviderDouble ||
+						capabilities.some(
+							(capability) =>
+								capability.key === "RESEND_OUTBOUND" &&
+								capability.status === "VERIFIED",
+						)
+							? "READY"
+							: "BLOCKED",
+					localProviderDouble,
+				},
+				capabilities,
+				mailboxes,
+				leads,
+				research,
+				drafts,
+				approvals,
+				deliveries,
+				threads,
+				audit,
+			};
+		});
+	}
+
 	async selectors(userId: string, input: Input<typeof operationsListInput>) {
 		return this.run(userId, async (tx) => {
 			const term = input.q.trim();
-			const contains = term ? { contains: term, mode: "insensitive" as const } : undefined;
-			const [contacts, companies, members, mailboxes, routes, drafts, approvals, leads] = await Promise.all([
-				tx.contact.findMany({ where: { lifecycleState: "ACTIVE", ...(contains ? { OR: [{ firstName: contains }, { lastName: contains }, { email: contains }] } : {}) }, take: input.take, orderBy: [{ firstName: "asc" }, { lastName: "asc" }], select: { id: true, firstName: true, lastName: true, email: true, playerProfile: { select: { contactId: true } }, footballAgentProfile: { select: { contactId: true } } } }),
-				tx.company.findMany({ where: { lifecycleState: "ACTIVE", ...(contains ? { name: contains } : {}) }, take: input.take, orderBy: { name: "asc" }, select: { id: true, name: true, domain: true, agencyProfile: { select: { companyId: true } }, clubProfile: { select: { companyId: true } } } }),
-				tx.member.findMany({ where: { organizationId: "workspace", user: { profile: { status: "ACTIVE" } } }, take: input.take, orderBy: { user: { name: "asc" } }, select: { userId: true, role: true, user: { select: { name: true, email: true } } } }),
-				tx.mailbox.findMany({ where: { status: "VERIFIED" }, take: input.take, orderBy: { address: "asc" }, select: { id: true, address: true, displayName: true } }),
-				tx.contactRoute.findMany({ where: { OR: [{ ownerUserId: userId }, { visibility: "SHARED" }] }, take: input.take, orderBy: { updatedAt: "desc" }, select: { id: true, type: true, value: true, label: true, contact: { select: { id: true, firstName: true, lastName: true } }, company: { select: { name: true } } } }),
-				tx.draft.findMany({ where: { ownerUserId: userId, status: { in: ["DRAFT", "IN_REVIEW", "APPROVED"] } }, take: input.take, orderBy: { updatedAt: "desc" }, select: { id: true, subject: true, status: true, recipientRouteId: true } }),
-				tx.outreachApproval.findMany({ where: { status: "PENDING" }, take: input.take, orderBy: { requestedAt: "desc" }, select: { id: true, draft: { select: { subject: true } }, requestedBy: { select: { name: true } } } }),
-				tx.lead.findMany({ where: { status: { notIn: ["ARCHIVED", "DISQUALIFIED"] } }, take: input.take, orderBy: { updatedAt: "desc" }, select: { id: true, name: true, status: true } }),
+			const contains = term
+				? { contains: term, mode: "insensitive" as const }
+				: undefined;
+			const [
+				contacts,
+				companies,
+				members,
+				mailboxes,
+				routes,
+				drafts,
+				approvals,
+				leads,
+			] = await Promise.all([
+				tx.contact.findMany({
+					where: {
+						lifecycleState: "ACTIVE",
+						...(contains
+							? {
+									OR: [
+										{ firstName: contains },
+										{ lastName: contains },
+										{ email: contains },
+									],
+								}
+							: {}),
+					},
+					take: input.take,
+					orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
+					select: {
+						id: true,
+						firstName: true,
+						lastName: true,
+						email: true,
+						playerProfile: { select: { contactId: true } },
+						footballAgentProfile: { select: { contactId: true } },
+					},
+				}),
+				tx.company.findMany({
+					where: {
+						lifecycleState: "ACTIVE",
+						...(contains ? { name: contains } : {}),
+					},
+					take: input.take,
+					orderBy: { name: "asc" },
+					select: {
+						id: true,
+						name: true,
+						domain: true,
+						agencyProfile: { select: { companyId: true } },
+						clubProfile: { select: { companyId: true } },
+					},
+				}),
+				tx.member.findMany({
+					where: {
+						organizationId: "workspace",
+						user: { profile: { status: "ACTIVE" } },
+					},
+					take: input.take,
+					orderBy: { user: { name: "asc" } },
+					select: {
+						userId: true,
+						role: true,
+						user: { select: { name: true, email: true } },
+					},
+				}),
+				tx.mailbox.findMany({
+					where: { status: "VERIFIED" },
+					take: input.take,
+					orderBy: { address: "asc" },
+					select: { id: true, address: true, displayName: true },
+				}),
+				tx.contactRoute.findMany({
+					where: { OR: [{ ownerUserId: userId }, { visibility: "SHARED" }] },
+					take: input.take,
+					orderBy: { updatedAt: "desc" },
+					select: {
+						id: true,
+						type: true,
+						value: true,
+						label: true,
+						contact: { select: { id: true, firstName: true, lastName: true } },
+						company: { select: { name: true } },
+					},
+				}),
+				tx.draft.findMany({
+					where: {
+						ownerUserId: userId,
+						status: { in: ["DRAFT", "IN_REVIEW", "APPROVED"] },
+					},
+					take: input.take,
+					orderBy: { updatedAt: "desc" },
+					select: {
+						id: true,
+						subject: true,
+						status: true,
+						recipientRouteId: true,
+					},
+				}),
+				tx.outreachApproval.findMany({
+					where: { status: "PENDING" },
+					take: input.take,
+					orderBy: { requestedAt: "desc" },
+					select: {
+						id: true,
+						draft: { select: { subject: true } },
+						requestedBy: { select: { name: true } },
+					},
+				}),
+				tx.lead.findMany({
+					where: { status: { notIn: ["ARCHIVED", "DISQUALIFIED"] } },
+					take: input.take,
+					orderBy: { updatedAt: "desc" },
+					select: { id: true, name: true, status: true },
+				}),
 			]);
-			return { contacts, companies, members, mailboxes, routes, drafts, approvals, leads };
+			return {
+				contacts,
+				companies,
+				members,
+				mailboxes,
+				routes,
+				drafts,
+				approvals,
+				leads,
+			};
 		});
 	}
 
@@ -161,7 +488,7 @@ export class OperationsService {
 								}
 							: undefined,
 						skip: input.skip,
-					take: input.take,
+						take: input.take,
 						orderBy: { updatedAt: "desc" },
 						select: {
 							contactId: true,
@@ -178,7 +505,7 @@ export class OperationsService {
 								}
 							: undefined,
 						skip: input.skip,
-					take: input.take,
+						take: input.take,
 						orderBy: { updatedAt: "desc" },
 						select: {
 							contactId: true,
@@ -189,7 +516,7 @@ export class OperationsService {
 					tx.agency.findMany({
 						where: contains ? { company: { name: contains } } : undefined,
 						skip: input.skip,
-					take: input.take,
+						take: input.take,
 						orderBy: { updatedAt: "desc" },
 						select: {
 							companyId: true,
@@ -200,7 +527,7 @@ export class OperationsService {
 					tx.club.findMany({
 						where: contains ? { company: { name: contains } } : undefined,
 						skip: input.skip,
-					take: input.take,
+						take: input.take,
 						orderBy: { updatedAt: "desc" },
 						select: {
 							companyId: true,
@@ -210,7 +537,7 @@ export class OperationsService {
 					}),
 					tx.representation.findMany({
 						skip: input.skip,
-					take: input.take,
+						take: input.take,
 						orderBy: { updatedAt: "desc" },
 						select: {
 							id: true,
@@ -222,7 +549,7 @@ export class OperationsService {
 					}),
 					tx.contactRoute.findMany({
 						skip: input.skip,
-					take: input.take,
+						take: input.take,
 						orderBy: { updatedAt: "desc" },
 						select: {
 							id: true,
@@ -646,9 +973,11 @@ export class OperationsService {
 		userId: string,
 		input: Input<typeof researchRequestCreateInput>,
 	) {
-		return this.run(userId, (tx) =>
+		const request = await this.run(userId, (tx) =>
 			tx.researchRequest.create({ data: { ...input, ownerUserId: userId } }),
 		);
+		this.agentTrigger?.researchQueued();
+		return request;
 	}
 
 	async createTemplate(
@@ -669,10 +998,22 @@ export class OperationsService {
 			if (input.recipientRouteId) {
 				const route = await tx.contactRoute.findUnique({
 					where: { id: input.recipientRouteId },
-					select: { ownerUserId: true, type: true, contact: { select: { lifecycleState: true } } },
+					select: {
+						ownerUserId: true,
+						type: true,
+						contact: { select: { lifecycleState: true } },
+					},
 				});
-				const consent = await tx.contactRouteConsent.findUnique({ where: { routeId: input.recipientRouteId } });
-				if (!route || route.ownerUserId !== userId || route.type !== "EMAIL" || route.contact?.lifecycleState !== "ACTIVE" || consent?.status === "DO_NOT_CONTACT") {
+				const consent = await tx.contactRouteConsent.findUnique({
+					where: { routeId: input.recipientRouteId },
+				});
+				if (
+					!route ||
+					route.ownerUserId !== userId ||
+					route.type !== "EMAIL" ||
+					route.contact?.lifecycleState !== "ACTIVE" ||
+					consent?.status === "DO_NOT_CONTACT"
+				) {
 					throw new ForbiddenException("This route cannot receive outreach.");
 				}
 			}
@@ -680,27 +1021,148 @@ export class OperationsService {
 		});
 	}
 
-	async requestApproval(userId: string, input: Input<typeof approvalRequestInput>) {
+	async updateDraft(userId: string, input: Input<typeof draftUpdateInput>) {
 		return this.run(userId, async (tx) => {
-			const draft = await tx.draft.findUnique({ where: { id: input.draftId }, select: { ownerUserId: true, status: true, recipientRouteId: true, recipientRoute: { select: { contact: { select: { lifecycleState: true } } } } } });
-			const consent = draft?.recipientRouteId ? await tx.contactRouteConsent.findUnique({ where: { routeId: draft.recipientRouteId } }) : null;
-			if (!draft || draft.ownerUserId !== userId || draft.status !== "DRAFT" || draft.recipientRoute?.contact?.lifecycleState !== "ACTIVE" || consent?.status === "DO_NOT_CONTACT") throw new ForbiddenException("This draft cannot enter review.");
-			await tx.draft.update({ where: { id: input.draftId }, data: { status: "IN_REVIEW" } });
-			return tx.outreachApproval.create({ data: { ...input, requestedById: userId } });
+			const [draft, mailbox, route, consent] = await Promise.all([
+				tx.draft.findUnique({
+					where: { id: input.id },
+					select: { ownerUserId: true, status: true },
+				}),
+				tx.mailbox.findUnique({
+					where: { id: input.mailboxId },
+					select: { ownerUserId: true, status: true },
+				}),
+				tx.contactRoute.findUnique({
+					where: { id: input.recipientRouteId },
+					select: {
+						ownerUserId: true,
+						type: true,
+						contact: { select: { lifecycleState: true } },
+					},
+				}),
+				tx.contactRouteConsent.findUnique({
+					where: { routeId: input.recipientRouteId },
+					select: { status: true },
+				}),
+			]);
+			if (!draft || draft.ownerUserId !== userId || draft.status !== "DRAFT") {
+				throw new ForbiddenException(
+					"Only your editable drafts can be changed.",
+				);
+			}
+			if (
+				!mailbox ||
+				mailbox.ownerUserId !== userId ||
+				mailbox.status !== "VERIFIED"
+			) {
+				throw new ForbiddenException("Sending requires your verified mailbox.");
+			}
+			if (
+				!route ||
+				route.ownerUserId !== userId ||
+				route.type !== "EMAIL" ||
+				route.contact?.lifecycleState !== "ACTIVE" ||
+				consent?.status === "DO_NOT_CONTACT"
+			) {
+				throw new ForbiddenException("This route cannot receive outreach.");
+			}
+			const updated = await tx.draft.update({
+				where: { id: input.id },
+				data: {
+					mailboxId: input.mailboxId,
+					recipientRouteId: input.recipientRouteId,
+					subject: input.subject,
+					body: input.body,
+				},
+			});
+			await tx.domainAuditEvent.create({
+				data: {
+					actorUserId: userId,
+					action: "OUTREACH_DRAFT_EDITED",
+					entityType: "DRAFT",
+					entityId: input.id,
+					outcome: "DRAFT",
+					requestId: `draft-edit:${input.id}:${updated.updatedAt.toISOString()}`,
+				},
+			});
+			return updated;
 		});
 	}
 
-	async decideApproval(userId: string, input: Input<typeof approvalDecisionInput>) {
+	async requestApproval(
+		userId: string,
+		input: Input<typeof approvalRequestInput>,
+	) {
+		return this.run(userId, async (tx) => {
+			const draft = await tx.draft.findUnique({
+				where: { id: input.draftId },
+				select: {
+					ownerUserId: true,
+					status: true,
+					recipientRouteId: true,
+					recipientRoute: {
+						select: { contact: { select: { lifecycleState: true } } },
+					},
+				},
+			});
+			const consent = draft?.recipientRouteId
+				? await tx.contactRouteConsent.findUnique({
+						where: { routeId: draft.recipientRouteId },
+					})
+				: null;
+			if (
+				!draft ||
+				draft.ownerUserId !== userId ||
+				draft.status !== "DRAFT" ||
+				draft.recipientRoute?.contact?.lifecycleState !== "ACTIVE" ||
+				consent?.status === "DO_NOT_CONTACT"
+			)
+				throw new ForbiddenException("This draft cannot enter review.");
+			await tx.draft.update({
+				where: { id: input.draftId },
+				data: { status: "IN_REVIEW" },
+			});
+			const approval = await tx.outreachApproval.create({
+				data: { ...input, requestedById: userId },
+			});
+			await tx.domainAuditEvent.create({
+				data: {
+					actorUserId: userId,
+					action: "OUTREACH_APPROVAL_REQUESTED",
+					entityType: "DRAFT",
+					entityId: input.draftId,
+					outcome: "IN_REVIEW",
+					requestId: input.idempotencyKey,
+				},
+			});
+			return approval;
+		});
+	}
+
+	async decideApproval(
+		userId: string,
+		input: Input<typeof approvalDecisionInput>,
+	) {
 		return this.run(userId, async (tx) => {
 			await this.requireManager(tx, userId);
-			const approval = await tx.outreachApproval.findUniqueOrThrow({ where: { id: input.id }, select: { draftId: true, requestedById: true, status: true, draft: { select: { recipientRouteId: true, recipientRoute: { select: { contact: { select: { lifecycleState: true } } } } } } } });
-			const consent = approval.draft.recipientRouteId ? await tx.contactRouteConsent.findUnique({ where: { routeId: approval.draft.recipientRouteId } }) : null;
-			if (approval.requestedById === userId || approval.status !== "PENDING") throw new ForbiddenException("The requester cannot decide this approval.");
-			if (input.status === "APPROVED" && (approval.draft.recipientRoute?.contact?.lifecycleState !== "ACTIVE" || consent?.status === "DO_NOT_CONTACT")) throw new ForbiddenException("DNC or archive state prevents approval.");
+			const approval = await tx.outreachApproval.findUniqueOrThrow({
+				where: { id: input.id },
+				select: {
+					draftId: true,
+					requestedById: true,
+					status: true,
+					draft: { select: { recipientRouteId: true } },
+				},
+			});
+			if (approval.requestedById === userId || approval.status !== "PENDING")
+				throw new ForbiddenException(
+					"The requester cannot decide this approval.",
+				);
 			const decidedAt = new Date();
-			const result = await tx.outreachApproval.update({ where: { id: input.id }, data: { status: input.status, decidedById: userId, decidedAt, decisionReason: input.reason } });
-			await tx.draft.update({ where: { id: approval.draftId }, data: input.status === "APPROVED" ? { status: "APPROVED", approvedAt: decidedAt } : { status: "REJECTED", approvedAt: null } });
-			return result;
+			await tx.$executeRaw(
+				Prisma.sql`SELECT ibl_decide_outreach_approval(${input.id}, ${input.status}, ${input.reason}, ${decidedAt})`,
+			);
+			return tx.outreachApproval.findUniqueOrThrow({ where: { id: input.id } });
 		});
 	}
 
