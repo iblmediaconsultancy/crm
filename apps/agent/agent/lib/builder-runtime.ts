@@ -1,6 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
 import { db, type Prisma } from "@crm/db";
-import { readAgentModel } from "@crm/db/settings";
+import { DEFAULT_AGENT_MODEL } from "@crm/db/settings";
 
 const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
@@ -188,7 +188,7 @@ export async function saveBuilderDraft(
 		};
 	}
 
-	const model = await readAgentModel(db);
+	const model = DEFAULT_AGENT_MODEL;
 	const now = new Date();
 	const nextRunAt = scheduleDate(input.trigger, now);
 	const manifest = {

@@ -495,7 +495,8 @@ async function seedRates(): Promise<number> {
 			id: SETTINGS_ID,
 			reportingCurrency: DEFAULT_REPORTING_CURRENCY,
 		},
-				select: { id: true },
+		update: {},
+		select: { id: true },
 			});
 
 	seedBase = await readReportingCurrency(db);

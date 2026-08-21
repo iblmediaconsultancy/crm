@@ -77,6 +77,10 @@ export class EnvironmentVariables {
 
 	@IsOptional()
 	@IsString()
+	GOOGLE_GENERATIVE_AI_API_KEY?: string;
+
+	@IsOptional()
+	@IsString()
 	CRM_TELEMETRY_DISABLED?: string;
 
 	@IsOptional()

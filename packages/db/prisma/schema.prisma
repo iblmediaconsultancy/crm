@@ -1415,11 +1415,6 @@ model SuppressedContact {
 
 model AppSetting {
   id String @id
-
-  agentModelId String?
-
-  agentModelContextWindow Int?
-
   contextDevApiKey String?
 
   reportingCurrency String?

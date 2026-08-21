@@ -11,16 +11,14 @@ are in `docs/setup.md`.
 
 ## Model
 
-Default `zai/glm-5.2-fast`; `DEFAULT_AGENT_MODEL` in `@crm/db/settings` because the
-agent and the API both need it.
+Default `gemini-3.1-flash-lite`; `DEFAULT_AGENT_MODEL` in `@crm/db/settings` is shared by
+the agent and the API. The direct `@ai-sdk/google` provider uses
+`GOOGLE_GENERATIVE_AI_API_KEY` and the fixed model has a 1,048,576-token context window.
 
-- **A row (`AppSetting`), not an env var**, via `defineDynamic` on `session.started`.
-  Open conversations keep their model — prompt caches are per model.
-- **`lib/model.ts` always sends `modelContextWindowTokens`**; eve never inherits it.
-- **A failed read logs and keeps the compiled fallback.** Never throws.
-- **The chooser offers only `tool-use` models** (`ModelCatalogService`).
-- **Not a frontier model, deliberately** — refusing wrong answers is enforced by the
-  tools and evidence model, not model strength.
+- **The model is fixed for this release**; persisted legacy model IDs are audit history only.
+- **`lib/model.ts` creates the direct Google model** and every agent sends the fixed context window.
+- **New versions and runs record `gemini-3.1-flash-lite`** while existing rows remain unchanged.
+- **The Gemini API key is required for agent requests.**
 
 ## Pictures are copied, never linked
 
@@ -121,12 +119,12 @@ wrong in the direction that looks useful.
 - **A new fact field goes in `FIELDS` (`lib/facts.ts`) *and* `FACT_COLUMNS`**
   (`apps/api/src/contacts/contacts.service.ts`).
 
-## Optional by default
+## Optional integrations
 
 `lib/capabilities.ts` is the single place that knows what is set: prints it at boot,
 states it in the session instructions, and gives tools a shared "not configured,
 retrying will not help" result — **checked before the research budget is charged**. A
-missing key removes a place to look. **Never an error, never throws.**
+Missing integration keys remove places to look. **Never an error, never throws.**
 
 **`capabilities()` is async** because the Context key is a row;
 `capabilitiesFrom()`/`markdownFor()` are the pure halves. `contextDevKey()` is the only

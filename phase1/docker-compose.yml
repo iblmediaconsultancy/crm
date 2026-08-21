@@ -48,7 +48,10 @@ services:
       context: ..
       dockerfile: phase1/docker/Dockerfile
       target: api
-    environment: *runtime-environment
+    environment:
+      <<: *runtime-environment
+      AGENT_URL: http://agent:2000
+      AGENT_BRIDGE_SECRET: ${AGENT_BRIDGE_SECRET:-phase1-local-development-secret-change-me}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -82,6 +85,8 @@ services:
     environment:
       <<: *runtime-environment
       AGENT_URL: http://agent:2000
+      AGENT_BRIDGE_SECRET: ${AGENT_BRIDGE_SECRET:-phase1-local-development-secret-change-me}
+      GOOGLE_GENERATIVE_AI_API_KEY: ${GOOGLE_GENERATIVE_AI_API_KEY:?Set GOOGLE_GENERATIVE_AI_API_KEY in the ignored root .env}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -92,7 +97,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
-    networks: [private]
+    networks: [private, edge]
 
 networks:
   private:

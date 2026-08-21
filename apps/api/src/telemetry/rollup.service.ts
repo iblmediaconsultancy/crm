@@ -8,7 +8,7 @@ import {
 	RecordSource,
 } from "@crm/db";
 import { RETIRED_OUTCOME } from "@crm/db/agent-tasks";
-import { readAgentModel } from "@crm/db/settings";
+import { DEFAULT_AGENT_MODEL } from "@crm/db/settings";
 import { WORKSPACE_ID } from "@crm/db/workspace";
 import {
 	bucket,
@@ -133,9 +133,8 @@ export class RollupService {
 	}
 
 	private async shape(): Promise<Properties> {
-		const [model, members, ssoProviders, postgres, contextKey] =
+		const [members, ssoProviders, postgres, contextKey] =
 			await Promise.all([
-				readAgentModel(this.db).catch(() => null),
 				this.db.member.count({ where: { organizationId: WORKSPACE_ID } }),
 				this.db.ssoProvider.count(),
 				this.postgresMajor(),
@@ -154,12 +153,12 @@ export class RollupService {
 			cap_github: isSet("GITHUB_TOKEN"),
 			cap_agent_bridge: isSet("AGENT_BRIDGE_SECRET"),
 			cap_cron_secret: isSet("CRON_SECRET"),
-			cap_ai_gateway: isSet("AI_GATEWAY_API_KEY"),
+			cap_gemini_api: isSet("GOOGLE_GENERATIVE_AI_API_KEY"),
 			cap_sso_provider: ssoProviders > 0,
 			is_marketing: process.env.IS_MARKETING === "true",
 
-			agent_model_id: model?.id ?? null,
-			agent_model_context_window: model?.contextWindowTokens ?? null,
+			agent_model_id: DEFAULT_AGENT_MODEL.id,
+			agent_model_context_window: DEFAULT_AGENT_MODEL.contextWindowTokens,
 		};
 	}
 

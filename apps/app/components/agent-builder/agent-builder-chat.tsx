@@ -1012,11 +1012,11 @@ function BuilderFailureCard({
 }) {
 	const message =
 		failure.kind === "rate-limit"
-			? "Vercel AI Gateway rate-limited this model before it could start. Try again in a moment or add AI Gateway credits in Vercel."
+			? "Gemini is temporarily rate-limited. Try again in a moment."
 			: failure.kind === "restricted"
-				? "This model requires paid AI Gateway credits. Add credits in Vercel, then try again."
+				? "Gemini API access is not configured for this install. Set GOOGLE_GENERATIVE_AI_API_KEY, then try again."
 				: failure.kind === "credits"
-					? "Vercel AI Gateway has no available credits. Add credits in Vercel, then try again."
+					? "Gemini API quota is unavailable. Check the Google AI project and try again."
 					: "The builder could not finish this request. Try again.";
 
 	return (

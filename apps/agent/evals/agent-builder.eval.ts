@@ -12,10 +12,10 @@ export default defineEval({
 		if (
 			!process.env.DATABASE_URL ||
 			!secret ||
-			(!process.env.AI_GATEWAY_API_KEY && !process.env.VERCEL_OIDC_TOKEN)
+			!process.env.GOOGLE_GENERATIVE_AI_API_KEY
 		) {
 			t.skip(
-				"Requires DATABASE_URL, AGENT_BRIDGE_SECRET, and an AI Gateway credential.",
+				"Requires DATABASE_URL, AGENT_BRIDGE_SECRET, and a Google Generative AI credential.",
 			);
 			return;
 		}
@@ -70,6 +70,7 @@ export default defineEval({
 			const session = await t.target.attachSession(sessionId as string);
 			session.succeeded();
 			session.calledSubagent("agent_builder", { count: 1 });
+			session.calledTool("search_crm");
 			session.notCalledTool("record_fact");
 			session.notCalledTool("record_job_change");
 
@@ -82,7 +83,12 @@ export default defineEval({
 							versions: {
 								orderBy: { number: "desc" },
 								take: 1,
-								select: { status: true, manifest: true },
+								select: {
+									status: true,
+									modelId: true,
+									modelContextWindowTokens: true,
+									manifest: true,
+								},
 							},
 						},
 					},
@@ -94,6 +100,11 @@ export default defineEval({
 			});
 			t.check(saved.agent?.status, equals("DRAFT"));
 			t.check(saved.agent?.versions[0]?.status, equals("READY"));
+			t.check(saved.agent?.versions[0]?.modelId, equals("gemini-3.1-flash-lite"));
+			t.check(
+				saved.agent?.versions[0]?.modelContextWindowTokens,
+				equals(1_048_576),
+			);
 			t.check(saved.builderArtifacts.length, equals(3));
 			t.check(
 				saved.agent?.versions[0]?.manifest,

@@ -1,12 +1,138 @@
 import { createHash, randomUUID } from "node:crypto";
 import { db, type Prisma } from "@crm/db";
 import { withPrincipal } from "@crm/db/security";
+import type { IdentityEnvelope } from "@crm/db/security";
 import { APP_AUTH, type AppAuth } from "./app-auth";
 import { requireIblAgentIdentity } from "./ibl-agent-policy";
 import type { PurposeContext } from "./session-purpose";
 
 const LEASE_MS = 30 * 60_000;
 const MAX_ATTEMPTS = 4;
+
+export type ResearchInspectionInput = {
+	identity: IdentityEnvelope;
+	request: {
+		id: string;
+		prompt: string;
+		status: string;
+		targetType: string;
+		targetEntityId: string;
+	};
+	findings: Array<{
+		id: string;
+		field: string | null;
+		summary: string;
+		value: Prisma.JsonValue | null;
+		confidence: Prisma.Decimal | number | string;
+		status: string;
+		evidenceSource: {
+			kind: string;
+			locator: string;
+			title: string | null;
+			capturedAt: Date | null;
+		};
+	}>;
+};
+
+export type ResearchInspectionDto = {
+	identity: {
+		principal: IdentityEnvelope["principal"];
+		profile: {
+			preferredLanguage: string;
+			locale: string;
+			timeZone: string;
+			workingPreferences: Prisma.JsonValue;
+		};
+		mailbox: IdentityEnvelope["mailbox"];
+		crmTarget: IdentityEnvelope["crmTarget"];
+	};
+	request: ResearchInspectionInput["request"];
+	findings: Array<{
+		id: string;
+		field: string | null;
+		summary: string;
+		value: Prisma.JsonValue | null;
+		confidence: number;
+		status: string;
+		evidenceSource: {
+			kind: string;
+			locator: string;
+			title: string | null;
+			capturedAt: string | null;
+		};
+	}>;
+};
+
+export function normalizeResearchInspection(
+	input: ResearchInspectionInput,
+): ResearchInspectionDto {
+	return {
+		identity: {
+			principal: input.identity.principal,
+			profile: {
+				preferredLanguage: input.identity.profile.preferredLanguage,
+				locale: input.identity.profile.locale,
+				timeZone: input.identity.profile.timeZone,
+				workingPreferences: normalizeJsonValue(
+					input.identity.profile.workingPreferences,
+				),
+			},
+			mailbox: input.identity.mailbox,
+			crmTarget: input.identity.crmTarget,
+		},
+		request: input.request,
+		findings: input.findings.map((finding) => {
+			const confidence = Number(finding.confidence);
+			if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
+				throw new Error("Research finding confidence is not JSON-safe.");
+			}
+			return {
+				id: finding.id,
+				field: finding.field,
+				summary: finding.summary,
+				value:
+					finding.value === null
+						? null
+						: normalizeJsonValue(finding.value),
+				confidence,
+				status: finding.status,
+				evidenceSource: {
+					kind: finding.evidenceSource.kind,
+					locator: finding.evidenceSource.locator,
+					title: finding.evidenceSource.title,
+					capturedAt: finding.evidenceSource.capturedAt
+						? finding.evidenceSource.capturedAt.toISOString()
+						: null,
+				},
+			};
+		}),
+	};
+}
+
+function normalizeJsonValue(value: unknown): Prisma.JsonValue {
+	if (value === null || typeof value === "string" || typeof value === "boolean") {
+		return value;
+	}
+	if (typeof value === "number") {
+		if (!Number.isFinite(value)) throw new Error("Research JSON contains a non-finite number.");
+		return value;
+	}
+	if (Array.isArray(value)) return value.map(normalizeJsonValue);
+	if (typeof value === "object") {
+		if (value instanceof Date || Object.getPrototypeOf(value) !== Object.prototype) {
+			throw new Error("Research JSON contains a non-plain object.");
+		}
+		const result: { [key: string]: Prisma.JsonValue } = {};
+		for (const [key, child] of Object.entries(value)) {
+			if (child === undefined) {
+				throw new Error(`Research JSON field ${key} is undefined.`);
+			}
+			result[key] = normalizeJsonValue(child);
+		}
+		return result;
+	}
+	throw new Error("Research JSON contains a non-serializable value.");
+}
 
 export type ClaimedResearchRequest = {
 	id: string;
@@ -29,7 +155,7 @@ export async function inspectResearchRequest(ctx: PurposeContext) {
 		},
 		async (tx) => {
 			const request = await ownedRequest(tx, identity);
-			return {
+			return normalizeResearchInspection({
 				identity: identity.envelope,
 				request: {
 					id: request.id,
@@ -58,7 +184,7 @@ export async function inspectResearchRequest(ctx: PurposeContext) {
 					},
 					orderBy: { createdAt: "asc" },
 				}),
-			};
+			});
 		},
 	);
 }

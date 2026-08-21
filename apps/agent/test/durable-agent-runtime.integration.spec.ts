@@ -172,13 +172,14 @@ describe("durable custom-agent runtime", () => {
 			db.agentTrigger.findUniqueOrThrow({ where: { id: triggerId } }),
 			db.agentRun.findMany({
 				where: { triggerId },
-				select: { id: true, status: true, input: true },
+				select: { id: true, status: true, modelId: true, input: true },
 			}),
 		]);
 		expect(trigger.lastRunAt).not.toBeNull();
 		expect(trigger.nextRunAt?.getTime()).toBeGreaterThan(now.getTime());
 		expect(scheduledRuns).toHaveLength(1);
 		expect(scheduledRuns[0]?.status).toBe("QUEUED");
+		expect(scheduledRuns[0]?.modelId).toBe("gemini-3.1-flash-lite");
 	});
 
 	it("recovers only sessionless runs with an expired delivery lease", async () => {

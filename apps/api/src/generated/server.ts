@@ -30,7 +30,7 @@ import { allocationTargetInput, allocationPolicyCreateInput, allocationPolicyAct
 import { operationsListInput, footballProfileInput, organizationProfileInput, representationCreateInput, representationTransitionInput, contactRouteCreateInput, contactRouteShareInput, leadCreateInput, taskCreateInput, taskTransitionInput, noteCreateInput, assignmentCreateInput, researchRequestCreateInput, templateCreateInput, draftCreateInput, draftUpdateInput, approvalRequestInput, approvalDecisionInput, draftApproveInput, proposalCreateInput, proofCreateInput } from "../operations/operations.contracts";
 import { routeConsentInput, followUpPlanCreateInput, followUpCancelInput, localReplyInput } from "../operations/outreach.contracts";
 import { updateOwnProfileInput } from "../profile/profile.contracts";
-import { setAgentModelInput, setResearchKeyInput } from "../settings/settings.contracts";
+import { setResearchKeyInput } from "../settings/settings.contracts";
 import { ssoProviderListInput, registerSsoProviderInput, deleteSsoProviderInput } from "../sso/sso.contracts";
 import { memberListInput, updateWorkspaceInput, setMemberRoleInput, setMemberStatusInput, removeMemberInput, transferAdminInput } from "../workspace/workspace.contracts";
 import type { ActivitiesRouter } from "../activities/activities.router";
@@ -534,13 +534,6 @@ const appRouter = t.router({
       .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<SearchRouter["quick"]>>)
     }),
   settings: t.router({
-    agentModel: publicProcedure
-      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<SettingsRouter["agentModel"]>>),
-    modelCatalog: publicProcedure
-      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<SettingsRouter["modelCatalog"]>>),
-    setAgentModel: publicProcedure
-      .input(setAgentModelInput)
-      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<SettingsRouter["setAgentModel"]>>),
     researchKey: publicProcedure
       .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<SettingsRouter["researchKey"]>>),
     setResearchKey: publicProcedure
