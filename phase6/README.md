@@ -1,7 +1,8 @@
 # V1 to V2 migration
 
 The migration is dry-run first and reads V1 through a dedicated read-only
-connection. Raw exports are written under `phase6/artifacts/`, which is ignored
+connection. The exporter enforces the 75-table migration matrix and selects only
+its approved columns. Raw exports are written under `phase6/artifacts/`, which is ignored
 because those files may contain personal or mailbox data. Only redacted counts,
 checksums, reason codes, and hashed source identifiers are emitted in reports.
 
@@ -15,7 +16,10 @@ Commands are `bun run migration:v1:inventory`, `export`, `plan`, `apply`, and
 `reconcile`. Sanitized fixture verification uses `fixture-apply` and
 `fixture-reconcile`. `apply` refuses to run unless `--confirm-apply` is present. Exports
 use a repeatable-read, read-only transaction and record its transaction,
-database-snapshot, and capture-time watermarks. The operational safety layer
+database-snapshot, and capture-time watermarks. Unknown tables or columns fail
+closed, and secret-bearing columns are omitted from SQL selection entirely. The
+manifest records exported and excluded columns without secret values. The
+operational safety layer
 creates deterministic SHA-256 fingerprints for source snapshots, deltas, plans,
 and applied results. Sanitized delta artifacts use `fixture-delta`; interruption
 and replay checks use `fixture-safety-apply`, with `--updated` replaying a

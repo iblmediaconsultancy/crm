@@ -17,6 +17,10 @@ require the explicit `--confirm-apply` switch.
    The export transaction records `txid_current()`, `pg_current_snapshot()`,
    and capture time as one immutable snapshot boundary.
 2. Run `inventory`, then `export` under a repeatable-read read-only transaction.
+   Export validates the complete 75-table matrix and explicit source columns
+   before selecting data. Unknown tables or columns fail closed. Secret-bearing
+   columns are omitted from the SQL projection; `mailbox_credentials` exports
+   only safe mailbox metadata.
 3. Run `plan`; inspect `reconciliation.json`. A source row is always `MAPPED`,
    `REJECTED`, or `DUPLICATE_CANDIDATE`. Unsupported or unsafe records remain
    explicit rejections and are never silently discarded.

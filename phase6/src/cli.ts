@@ -24,6 +24,13 @@ import {
 	reconciliationPassed,
 	snapshotBoundary,
 } from "./operational-safety";
+import {
+	buildExportPolicy,
+	manifestFingerprint,
+	projectExportRow,
+	validateExportSchema,
+	type ExportDisposition,
+} from "./export-policy";
 
 const { Client } = pg;
 const root = resolve(import.meta.dir, "..");
@@ -139,6 +146,9 @@ const inventory = async () => {
 
 const exportSource = async () => {
 	await mkdir(artifactsRoot, { recursive: true });
+	const policy = buildExportPolicy(
+		await readFile(resolve(root, "..", "docs/ibl/migration-coverage-matrix.md"), "utf8"),
+	);
 	const client = await connect(required("V1_DATABASE_URL"));
 	try {
 		await client.query(
@@ -154,26 +164,55 @@ const exportSource = async () => {
 				"SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename",
 			)
 		).rows as Array<{ tablename: string }>;
+		const columns = (
+			await client.query(
+				"SELECT table_name, column_name FROM information_schema.columns WHERE table_schema = 'public' ORDER BY table_name, ordinal_position",
+			)
+		).rows as Array<{ table_name: string; column_name: string }>;
+		validateExportSchema(
+			policy,
+			columns.map((column) => ({ table: column.table_name, column: column.column_name })),
+		);
+		const actualTableNames = new Set(tables.map((table) => table.tablename));
+		if (actualTableNames.size !== Object.keys(policy).length || [...actualTableNames].some((table) => !policy[table])) {
+			throw new Error("V1 export table policy does not cover the actual public schema");
+		}
 		const files = [] as Array<{
 			table: string;
 			file: string;
 			rowCount: number;
+			sourceRowCount: number;
 			checksum: string;
+			columns: string[];
+			excludedColumns: Record<string, string>;
+			disposition: ExportDisposition;
 		}>;
 		for (const { tablename } of tables) {
-			const result = await client.query(
-				`SELECT * FROM public.${safeIdentifier(tablename)} ORDER BY 1`,
-			);
-			const content =
-				result.rows.map((row) => JSON.stringify(row)).join("\n") +
-				(result.rows.length ? "\n" : "");
+			const tablePolicy = policy[tablename];
+			if (!tablePolicy) throw new Error(`Missing V1 export policy for table ${tablename}`);
+			const sourceRowCount = Number((await client.query(
+				`SELECT count(*)::int AS count FROM public.${safeIdentifier(tablename)}`,
+			)).rows[0]?.count ?? 0);
+			const result = tablePolicy.columns.length
+				? await client.query(
+						`SELECT ${tablePolicy.columns.map(safeIdentifier).join(",")} FROM public.${safeIdentifier(tablename)} ORDER BY 1`,
+					)
+				: { rows: [] as Array<Record<string, unknown>> };
+			const projectedRows = result.rows.map((row) => projectExportRow(policy, tablename, row));
+			const content = projectedRows.length
+				? `${projectedRows.map((row) => JSON.stringify(row)).join("\n")}\n`
+				: "";
 			const file = `${tablename}.jsonl`;
 			await writeFile(resolve(artifactsRoot, file), content, { mode: 0o600 });
 			files.push({
 				table: tablename,
 				file,
-				rowCount: result.rows.length,
+				rowCount: projectedRows.length,
+				sourceRowCount,
 				checksum: sha256(content),
+				columns: tablePolicy.columns,
+				excludedColumns: tablePolicy.excludedColumns,
+				disposition: tablePolicy.disposition,
 			});
 		}
 		await client.query("COMMIT");
@@ -183,6 +222,7 @@ const exportSource = async () => {
 			mode: "SNAPSHOT" as const,
 			watermark,
 			boundary: snapshotBoundary(watermark.transaction_id, watermark.captured_at, watermark.snapshot_id),
+			policyFingerprint: manifestFingerprint(policy),
 			files,
 		};
 		const manifest = {
@@ -195,6 +235,8 @@ const exportSource = async () => {
 				{
 					tables: files.length,
 					rows: files.reduce((sum, item) => sum + item.rowCount, 0),
+					sourceRows: files.reduce((sum, item) => sum + item.sourceRowCount, 0),
+					redactedColumns: files.reduce((sum, item) => sum + Object.keys(item.excludedColumns).length, 0),
 					watermark,
 					checksum: manifest.checksum,
 				},
@@ -215,11 +257,16 @@ interface ExportManifest {
 	mode?: "SNAPSHOT" | "DELTA";
 	watermark: { transaction_id: string; captured_at: string; snapshot_id?: string };
 	boundary?: ReturnType<typeof snapshotBoundary>;
+	policyFingerprint?: string;
 	files: Array<{
 		table: string;
 		file: string;
 		rowCount: number;
+		sourceRowCount?: number;
 		checksum: string;
+		columns?: string[];
+		excludedColumns?: Record<string, string>;
+		disposition?: ExportDisposition;
 	}>;
 	checksum: string;
 }
