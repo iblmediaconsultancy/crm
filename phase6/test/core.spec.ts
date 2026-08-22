@@ -14,7 +14,7 @@ describe("V1 migration planner", () => {
 		);
 	});
 
-	test("maps supported rows and explicitly rejects every unsupported row", () => {
+	test("maps supported rows and explicitly excludes credential material", () => {
 		const outcomes = planRows(
 			[
 				{
@@ -34,17 +34,22 @@ describe("V1 migration planner", () => {
 			accounted: 3,
 			byOutcome: {
 				MAPPED: 2,
-				REJECTED: 1,
+				REJECTED: 0,
 				DUPLICATE_CANDIDATE: 0,
-				EXCLUDED: 0,
+				EXCLUDED: 1,
 			},
-			byReason: { UNSUPPORTED_SOURCE_TABLE: 1 },
+			byReason: { SECRET_NOT_MIGRATED: 1 },
 			platformInternalRows: 0,
+			controlOnlyRows: 1,
 			intentionallyExcludedBusinessRows: 0,
-			unresolvedBusinessRows: 1,
-			complete: false,
+			unresolvedBusinessRows: 0,
+			fieldCoverageComplete: true,
+			complete: true,
 		});
-		expect(JSON.stringify(outcomes)).not.toContain("never copied");
+		expect(outcomes[2]?.fieldCoverage?.intentionallyExcluded).toEqual({
+			id: "SECRET_NOT_MIGRATED",
+			encrypted_secret: "SECRET_NOT_MIGRATED",
+		});
 	});
 
 	test("surfaces normalized duplicates without merging", () => {
@@ -84,7 +89,7 @@ describe("V1 migration planner", () => {
 				reasonCode: "INTENTIONALLY_EXCLUDED",
 			},
 		]);
-		expect(summary.platformInternalRows).toBe(1);
+		expect(summary.platformInternalRows).toBe(0);
 		expect(summary.intentionallyExcludedBusinessRows).toBe(1);
 		expect(summary.complete).toBe(false);
 	});

@@ -12,10 +12,13 @@ Required environment variables:
 - `V2_OWNER_USER_ID`: an existing V2 user that owns imported CRM rows.
 
 Commands are `bun run migration:v1:inventory`, `export`, `plan`, `apply`, and
-`reconcile`. `apply` refuses to run unless `--confirm-apply` is present. Exports
+`reconcile`. Sanitized fixture verification uses `fixture-apply` and
+`fixture-reconcile`. `apply` refuses to run unless `--confirm-apply` is present. Exports
 use a repeatable-read, read-only transaction and record its transaction
-watermark. The plan is resumable by stable SHA-256 idempotency keys. Duplicate
-candidates are surfaced, never merged. Freeze-and-delta procedure and rollback
-commands are documented in `docs/ibl/migration-runbook.md`.
+watermark. The plan and apply are resumable by stable SHA-256 idempotency keys.
+The migration-owner-only field ledger stores source snapshots, payloads, field
+coverage, and post-write target snapshots. Duplicate candidates are surfaced,
+never merged. Freeze-and-delta procedure and rollback commands are documented
+in `docs/ibl/migration-runbook.md`.
 
 Unsupported business rows, rejected rows, and unresolved duplicate candidates never satisfy completeness. Reconciliation requires the V2 migration-owner connection and verifies both the legacy ID map and target-row existence. Rollback checks target fingerprints and foreign-key dependencies before deleting only rows inserted by that run.
