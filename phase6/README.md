@@ -10,6 +10,9 @@ Run `phase6/v1-readonly-role.sql` once in the V1 Supabase SQL Editor to create t
 restricted export role. Run `phase6/v1-readonly-role-verification.sql` through a
 connection authenticated as that role before adding `V1_DATABASE_URL`. The role
 grants explicit columns only; no auth schema access or table-wide grant is used.
+Inherited PUBLIC `TEMPORARY` is reported as an informational platform privilege;
+the setup does not revoke it globally, and the exporter creates no temporary
+objects. Persistent-data write paths remain fail-closed.
 
 Required environment variables:
 

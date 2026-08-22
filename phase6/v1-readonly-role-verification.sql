@@ -13,7 +13,8 @@ WHERE rolname = current_user;
 
 SELECT
   has_database_privilege(current_user, current_database(), 'CREATE') AS can_create_database_objects,
-  has_database_privilege(current_user, current_database(), 'TEMP') AS can_create_temp,
+  has_database_privilege(current_user, current_database(), 'TEMP') AS inherited_temp_allowed,
+  has_database_privilege('public'::name, current_database(), 'TEMP') AS public_temp_informational,
   has_schema_privilege(current_user, 'public', 'CREATE') AS can_create_public_objects,
   has_schema_privilege(current_user, 'auth', 'USAGE') AS can_use_auth_schema;
 

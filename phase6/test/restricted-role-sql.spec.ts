@@ -5,6 +5,7 @@ const matrix = await Bun.file("docs/ibl/migration-coverage-matrix.md").text();
 const policy = buildExportPolicy(matrix);
 const setupSql = await Bun.file("phase6/v1-readonly-role.sql").text();
 const verificationSql = await Bun.file("phase6/v1-readonly-role-verification.sql").text();
+const cliSource = await Bun.file("phase6/src/cli.ts").text();
 const grantMatches = [...setupSql.matchAll(/^GRANT SELECT \((.*?)\) ON TABLE public\.([a-z_][a-z0-9_]*) TO ibl_v1_migration_exporter;$/gm)];
 const sensitiveColumnPattern = /(^|_)(password|password_hash|encrypted_password|encrypted_secret|api_key|secret|session|token|oauth_token|access_token|refresh_token|iv|auth_tag|credential|credentials|encryption_key|encryption_material)(_|$)/i;
 const additionalSensitiveColumns: Record<string, string[]> = {
@@ -58,6 +59,12 @@ describe("restricted V1 role SQL", () => {
 		expect(setupSql).not.toContain("GRANT USAGE ON SCHEMA auth");
 		expect(setupSql).toContain("has_schema_privilege('public'::name, 'auth', 'USAGE')");
 		expect(setupSql).toContain("has_sequence_privilege('public'::name");
+		expect(setupSql).toContain("public_can_create_temp_informational");
+		expect(setupSql).toContain("PUBLIC_EXECUTABLE_USER_DEFINED_FUNCTION");
+		expect(setupSql).not.toContain("REVOKE ALL PRIVILEGES ON DATABASE postgres FROM PUBLIC");
+		const blockingSection = setupSql.slice(setupSql.indexOf("DO $$"), setupSql.indexOf("CREATE ROLE"));
+		expect(blockingSection).not.toContain("current_database(), 'TEMP'");
+		expect(cliSource).not.toMatch(/CREATE\s+TEMP|TEMPORARY\s+TABLE/i);
 	});
 
 	test("verification block checks role attributes, inherited privileges, reads, secrets, and RLS", () => {
@@ -72,5 +79,7 @@ describe("restricted V1 role SQL", () => {
 		expect(verificationSql).toContain("encrypted_password");
 		expect(verificationSql).toContain("has_column_privilege");
 		expect(verificationSql).toContain("has_sequence_privilege");
+		expect(verificationSql).toContain("inherited_temp_allowed");
+		expect(verificationSql).toContain("public_temp_informational");
 	});
 });

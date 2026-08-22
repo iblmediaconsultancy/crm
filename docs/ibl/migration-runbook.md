@@ -13,6 +13,9 @@ run `phase6/v1-readonly-role-verification.sql` through that role and require
 zero dangerous inherited privileges. The exporter reads table and column names
 from PostgreSQL catalogs, not `information_schema.columns`, so secret columns
 remain ungranted while schema drift is still detected.
+Inherited PUBLIC `TEMPORARY` is reported but is not treated as a persistent-data
+write path; no global PUBLIC privilege is changed. Any PUBLIC-executable
+user-defined function remains a fail-closed review blocker.
 
 The V2 connection must be the migration owner, not an API or worker identity.
 The control ledger is inaccessible to runtime roles. `apply` and `rollback`

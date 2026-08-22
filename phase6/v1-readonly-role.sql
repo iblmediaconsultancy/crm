@@ -1,7 +1,7 @@
 SELECT
   has_schema_privilege('public'::name, 'public', 'CREATE') AS public_can_create_schema,
   has_database_privilege('public'::name, current_database(), 'CREATE') AS public_can_create_database_objects,
-  has_database_privilege('public'::name, current_database(), 'TEMP') AS public_can_create_temp;
+  has_database_privilege('public'::name, current_database(), 'TEMP') AS public_can_create_temp_informational;
 
 SELECT
   n.nspname AS schema_name,
@@ -43,19 +43,20 @@ ORDER BY n.nspname, c.relname;
 SELECT
   n.nspname AS schema_name,
   p.proname AS function_name,
-  pg_catalog.pg_get_function_identity_arguments(p.oid) AS arguments
+  pg_catalog.pg_get_function_identity_arguments(p.oid) AS arguments,
+  p.prosecdef AS security_definer,
+  'PUBLIC_EXECUTABLE_USER_DEFINED_FUNCTION' AS risk
 FROM pg_catalog.pg_proc p
 JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
-WHERE n.nspname = 'public'
-  AND p.prosecdef
+WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+  AND has_schema_privilege('public'::name, n.oid, 'USAGE')
   AND has_function_privilege('public'::name, p.oid, 'EXECUTE')
-ORDER BY p.proname;
+ORDER BY n.nspname, p.proname;
 
 DO $$
 BEGIN
   IF has_schema_privilege('public'::name, 'public', 'CREATE')
     OR has_database_privilege('public'::name, current_database(), 'CREATE')
-    OR has_database_privilege('public'::name, current_database(), 'TEMP')
   THEN
     RAISE EXCEPTION 'PUBLIC has a dangerous database or schema privilege; no role was created';
   END IF;
@@ -127,12 +128,12 @@ BEGIN
     SELECT 1
     FROM pg_catalog.pg_proc p
     JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
-    WHERE n.nspname = 'public'
-      AND p.prosecdef
+    WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+      AND has_schema_privilege('public'::name, n.oid, 'USAGE')
       AND has_function_privilege('public'::name, p.oid, 'EXECUTE')
   )
   THEN
-    RAISE EXCEPTION 'PUBLIC can execute a SECURITY DEFINER function in public; no role was created';
+    RAISE EXCEPTION 'PUBLIC can execute a user-defined function; review the function before creating the role';
   END IF;
 END $$;
 
