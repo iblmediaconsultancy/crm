@@ -25,17 +25,35 @@
     "ownershipMismatches": 0,
     "foreignKeyViolations": 0,
     "relationshipRows": 8,
-    "lifecycleHistoryRows": 12
+    "lifecycleHistoryRows": 12,
+    "initialReconciliationPassed": true,
+    "deltaReconciliationPassed": true,
+    "rollbackReconciliationPassed": true,
+    "reapplyReconciliationPassed": true,
+    "deltaRows": 1,
+    "deltaReplayRows": 69,
+    "deltaChecksum": "3be15e0c95ebb29a2ab7116322997b727b8f4e30c76d5ec0479bff9ad754807d",
+    "deltaBaseChecksum": "e4f2778294044bb32b9ed85776ca8a16dc2c3dd6f16427f3e7d887d9cfefa9b3",
+    "deltaReplayMatchesUpdatedFixture": true,
+    "rollbackEntries": 117,
+    "createdTargetsRemainingAfterRollback": 0,
+    "preservedAppendOnlyRows": 10,
+    "retainedDurableTargets": 8,
+    "beforeImageEntries": 1,
+    "beforeImagesRolledBack": 1,
+    "fingerprintGuardRefusedTamperedRollback": true,
+    "reapplyDistinctOutcomes": 69,
+    "reapplyDuplicateRecords": 0
   },
   "targets": [
     "activity",
+    "agency",
     "allocationRequest",
     "calendarEvent",
     "canonicalAlias",
+    "club",
     "company",
-    "companyEnrichment",
     "contact",
-    "contactFact",
     "contactRoute",
     "contactRouteConsent",
     "domainAuditEvent",
@@ -44,6 +62,8 @@
     "emailMessage",
     "emailThread",
     "evidenceSource",
+    "footballAgent",
+    "footballPlayer",
     "lead",
     "legacyIdMap",
     "lifecycleEvent",
@@ -65,9 +85,21 @@
     "user",
     "userProfile"
   ],
+  "writerCoverage": {
+    "companyEnrichment": {
+      "writerExists": true,
+      "currentlyReachableFromEffectiveV1Mappings": false,
+      "reason": "football_organization_details dynamically maps to agency or club based on organization_type",
+      "requiredForCurrentMigrationCoverage": false
+    },
+    "contactFact": {
+      "writerExists": true,
+      "currentlyReachableFromEffectiveV1Mappings": false,
+      "reason": "football_person_details and football_player_details dynamically map to footballAgent or footballPlayer",
+      "requiredForCurrentMigrationCoverage": false
+    }
+  },
   "deferred": [
-    "freeze-delta",
-    "rollback-reapply",
     "production-migration",
     "cutover"
   ]

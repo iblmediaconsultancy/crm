@@ -31,9 +31,15 @@ The fixture apply now persists all 37 reachable V2 target types and an internal
 source field ledger. A second apply reuses the same run and source keys without
 duplicating rows. Fixture reconciliation verifies target rows, ownership,
 foreign keys, relationships, lifecycle/history, and source coverage with zero
-unexplained loss. `saved_searches` remains unsupported because no V2 destination
-exists. Freeze/delta, rollback/reapply, production access, and cutover remain
-deferred. No migration-specific frontend was added.
+unexplained loss. The operational fixture proves snapshot watermarks,
+deterministic deltas, interruption recovery, before-image rollback, created-row
+rollback, and clean reapply. `companyEnrichment` and `contactFact` remain
+writer-only branches: the effective current mappings always route organization
+rows to `agency`/`club` and person rows to `footballPlayer`/`footballAgent`, so
+no current V1 source table can produce either target. `saved_searches` remains
+unsupported because no V2 destination exists. Production access, rehearsal
+against a copied real export, and cutover remain deferred. No
+migration-specific frontend was added.
 
 ## Disposition legend
 

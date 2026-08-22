@@ -12,14 +12,27 @@ import {
 	summarize,
 	targetIdForTest as targetIdFor,
 } from "./core";
-import { businessV1Rows } from "../fixtures/business-v1";
+import { businessV1Rows, businessV1UpdatedRows } from "../fixtures/business-v1";
+import { operationalSafetyRows, operationalSafetyUpdatedRows } from "../fixtures/operational-safety-v1";
 import { orderMigrationOutcomes } from "./apply-order";
+import {
+	buildDelta,
+	deltaBoundary,
+	fingerprintAppliedResult,
+	fingerprintPlan,
+	fingerprintSnapshot,
+	reconciliationPassed,
+	snapshotBoundary,
+} from "./operational-safety";
 
 const { Client } = pg;
 const root = resolve(import.meta.dir, "..");
 const artifactsRoot = resolve(root, "artifacts");
 const command = process.argv[2];
 const confirmApply = process.argv.includes("--confirm-apply");
+const interruptAfter = Number(
+	process.argv.find((value) => value.startsWith("--interrupt-after="))?.split("=")[1] ?? 0,
+);
 
 const required = (name: string) => {
 	const value = process.env[name];
@@ -69,7 +82,7 @@ const inventorySource = async () => {
 			"SELECT version FROM supabase_migrations.schema_migrations ORDER BY version",
 		);
 		const watermark = await client.query(
-			"SELECT txid_current()::text AS transaction_id, statement_timestamp()::text AS captured_at",
+			"SELECT txid_current()::text AS transaction_id, statement_timestamp()::text AS captured_at, pg_current_snapshot()::text AS snapshot_id",
 		);
 		const counts: Record<string, number> = {};
 		for (const { tablename } of tables.rows as Array<{ tablename: string }>) {
@@ -83,6 +96,7 @@ const inventorySource = async () => {
 			formatVersion: 1,
 			sourceSystem: "ibl-v1-development-supabase",
 			watermark: watermark.rows[0],
+			boundary: snapshotBoundary(watermark.rows[0].transaction_id, watermark.rows[0].captured_at, watermark.rows[0].snapshot_id),
 			tables: tables.rows,
 			columns: columns.rows,
 			policies: policies.rows,
@@ -132,7 +146,7 @@ const exportSource = async () => {
 		);
 		const watermark = (
 			await client.query(
-				"SELECT txid_current()::text AS transaction_id, statement_timestamp()::text AS captured_at",
+				"SELECT txid_current()::text AS transaction_id, statement_timestamp()::text AS captured_at, pg_current_snapshot()::text AS snapshot_id",
 			)
 		).rows[0];
 		const tables = (
@@ -166,7 +180,9 @@ const exportSource = async () => {
 		const manifestBase = {
 			formatVersion: 1,
 			sourceSystem: "ibl-v1-development-supabase",
+			mode: "SNAPSHOT" as const,
 			watermark,
+			boundary: snapshotBoundary(watermark.transaction_id, watermark.captured_at, watermark.snapshot_id),
 			files,
 		};
 		const manifest = {
@@ -196,7 +212,9 @@ const exportSource = async () => {
 
 interface ExportManifest {
 	sourceSystem: string;
-	watermark: { transaction_id: string; captured_at: string };
+	mode?: "SNAPSHOT" | "DELTA";
+	watermark: { transaction_id: string; captured_at: string; snapshot_id?: string };
+	boundary?: ReturnType<typeof snapshotBoundary>;
 	files: Array<{
 		table: string;
 		file: string;
@@ -366,10 +384,17 @@ const plan = async () => {
 		formatVersion: 1,
 		sourceManifestChecksum: manifest.checksum,
 		sourceWatermark: manifest.watermark,
+		sourceFingerprint: fingerprintSnapshot(
+			rows,
+			manifest.boundary ?? snapshotBoundary(manifest.watermark.transaction_id, manifest.watermark.captured_at, manifest.watermark.snapshot_id),
+		),
 		complete: summary.complete,
 		outcomes,
 	};
-	await writeJson(resolve(artifactsRoot, "plan.private.json"), privatePlan);
+	await writeJson(resolve(artifactsRoot, "plan.private.json"), {
+		...privatePlan,
+		planFingerprint: fingerprintPlan(privatePlan),
+	});
 	const report = {
 		formatVersion: 1,
 		sourceManifestChecksum: manifest.checksum,
@@ -418,6 +443,9 @@ const asNumber = (value: unknown, fallback = 0) => {
 const jsonValue = (value: unknown) =>
 	value === undefined || value === null ? null : JSON.stringify(value);
 
+type CreatedTarget = { targetTable: string; targetId: string; targetKeyColumn: string };
+const createdTargets = new WeakMap<pg.Client, CreatedTarget[]>();
+
 const firstArrayValue = (value: unknown) =>
 	Array.isArray(value) ? value[0] : undefined;
 
@@ -454,10 +482,22 @@ const insertRow = async (
 	const entries = Object.entries(values);
 	const columns = entries.map(([key]) => safeIdentifier(key)).join(",");
 	const placeholders = entries.map((_, index) => `$${index + 1}`).join(",");
-	await client.query(
-		`INSERT INTO ${safeIdentifier(table)} (${columns}) VALUES (${placeholders}) ON CONFLICT ${conflict}`,
+	const result = await client.query(
+		`INSERT INTO ${safeIdentifier(table)} (${columns}) VALUES (${placeholders}) ON CONFLICT ${conflict} RETURNING to_jsonb(${safeIdentifier(table)}) AS row`,
 		entries.map(([, value]) => value),
 	);
+	if (result.rowCount === 1) {
+		const row = asRecord(result.rows[0].row);
+		const key = targetKeyColumn(table);
+		const targetId = row[key] ?? row.id;
+		if (targetId !== undefined) {
+			const records = createdTargets.get(client) ?? [];
+			if (!records.some((item) => item.targetTable === table && item.targetId === String(targetId))) {
+				records.push({ targetTable: table, targetId: String(targetId), targetKeyColumn: key });
+				createdTargets.set(client, records);
+			}
+		}
+	}
 };
 
 const ensureContact = async (
@@ -1364,6 +1404,98 @@ const targetKeyColumn = (targetTable: string) => {
 	return "id";
 };
 
+const immutableTargetTables = new Set([
+	"canonicalAlias",
+	"domainAuditEvent",
+	"lifecycleEvent",
+	"representationHistory",
+]);
+
+const durableEntityTypes: Record<string, string> = {
+	company: "COMPANY",
+	contact: "CONTACT",
+	footballPlayer: "PLAYER",
+	footballAgent: "FOOTBALL_AGENT",
+	agency: "AGENCY",
+	club: "CLUB",
+	representation: "REPRESENTATION",
+	lead: "LEAD",
+	operationalTask: "TASK",
+	note: "NOTE",
+	proofItem: "PROOF_ITEM",
+	template: "TEMPLATE",
+	draft: "DRAFT",
+	proposal: "PROPOSAL",
+	researchRequest: "RESEARCH_REQUEST",
+};
+
+const hasDurableHistory = async (
+	client: pg.Client,
+	targetTable: string,
+	targetId: string,
+) => {
+	const entityType = durableEntityTypes[targetTable];
+	if (!entityType) return false;
+	const result = await client.query(
+		`SELECT EXISTS (
+			SELECT 1 WHERE EXISTS (SELECT 1 FROM "assignment" WHERE "entityType"=$1::"DomainEntityType" AND "entityId"=$2)
+			OR EXISTS (SELECT 1 FROM "lifecycleEvent" WHERE "entityType"=$1::"DomainEntityType" AND "entityId"=$2)
+			OR EXISTS (SELECT 1 FROM "researchRequest" WHERE "targetType"=$1::"DomainEntityType" AND "targetEntityId"=$2)
+			OR EXISTS (SELECT 1 FROM "duplicateCandidate" WHERE "entityType"=$1::"DomainEntityType" AND ("leftEntityId"=$2 OR "rightEntityId"=$2))
+			OR EXISTS (SELECT 1 FROM "domainAuditEvent" WHERE "entityType"=$1::"DomainEntityType" AND "entityId"=$2)
+			OR EXISTS (
+				SELECT 1 FROM "mergeDecision" m
+				JOIN "duplicateCandidate" c ON c."id"=m."candidateId"
+				WHERE c."entityType"=$1::"DomainEntityType" AND (m."survivorEntityId"=$2 OR m."duplicateEntityId"=$2)
+			)
+		) AS "referenced"`,
+		[entityType, targetId],
+	);
+	return Boolean(result.rows[0]?.referenced);
+};
+
+const hasRetainedDependency = async (
+	client: pg.Client,
+	runId: string,
+	entry: { targetTable: string; targetId: string; targetKeyColumn: string },
+) => {
+	const references = (
+		await client.query(
+			`SELECT child.relname AS "childTable", child_column.attname AS "childColumn"
+			 FROM pg_constraint constraint_row
+			 JOIN pg_class parent ON parent.oid = constraint_row.confrelid
+			 JOIN pg_namespace parent_ns ON parent_ns.oid = parent.relnamespace
+			 JOIN pg_class child ON child.oid = constraint_row.conrelid
+			 JOIN pg_namespace child_ns ON child_ns.oid = child.relnamespace
+			 JOIN unnest(constraint_row.conkey) WITH ORDINALITY AS child_key(attnum, ordinality) ON TRUE
+			 JOIN unnest(constraint_row.confkey) WITH ORDINALITY AS parent_key(attnum, ordinality)
+			   ON parent_key.ordinality = child_key.ordinality
+			 JOIN pg_attribute child_column ON child_column.attrelid = child.oid AND child_column.attnum = child_key.attnum
+			 JOIN pg_attribute parent_column ON parent_column.attrelid = parent.oid AND parent_column.attnum = parent_key.attnum
+			 WHERE constraint_row.contype='f'
+			   AND parent_ns.nspname='public'
+			   AND child_ns.nspname='public'
+			   AND parent.relname=$1
+			   AND parent_column.attname=$2`,
+			[entry.targetTable, entry.targetKeyColumn],
+		)
+	).rows as Array<{ childTable: string; childColumn: string }>;
+	for (const reference of references) {
+		const childKey = targetKeyColumn(reference.childTable);
+		const childKeyExists = await client.query(
+			`SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name=$1 AND column_name=$2`,
+			[reference.childTable, childKey],
+		);
+		if (!childKeyExists.rowCount) continue;
+		const count = await client.query(
+			`SELECT count(*)::int AS count FROM ${safeIdentifier(reference.childTable)} child JOIN "legacyRollbackEntry" retained ON retained."runId"=$1 AND retained."operation"='PRESERVE_DURABLE_PARENT' AND retained."targetTable"=$2 AND retained."targetId"=child.${safeIdentifier(childKey)} WHERE child.${safeIdentifier(reference.childColumn)}=$3`,
+			[runId, reference.childTable, entry.targetId],
+		);
+		if (Number(count.rows[0]?.count ?? 0) > 0) return true;
+	}
+	return false;
+};
+
 const targetRow = async (
 	client: pg.Client,
 	targetTable: string,
@@ -1374,6 +1506,48 @@ const targetRow = async (
 	const result = await client.query(
 		`SELECT to_jsonb(t) AS row FROM ${safeIdentifier(targetTable)} t WHERE ${safeIdentifier(key)}=$1`,
 		[targetId],
+	);
+	return result.rows[0]?.row ?? null;
+};
+
+const drainCreatedTargets = (client: pg.Client) => {
+	const records = createdTargets.get(client) ?? [];
+	createdTargets.delete(client);
+	return records;
+};
+
+const updateTargetFromPayload = async (
+	client: pg.Client,
+	targetTable: string,
+	targetId: string,
+	payload: JsonRecord,
+) => {
+	const key = targetKeyColumn(targetTable);
+	const columns = (
+		await client.query(
+			`SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name=$1`,
+			[targetTable],
+		)
+	).rows.map((row) => String(row.column_name));
+	const updates = Object.entries(payload).filter(
+		([column, value]) =>
+			columns.includes(column) &&
+			column !== key &&
+			column !== "id" &&
+			column !== "createdAt" &&
+			value !== undefined,
+	);
+	if (!updates.length) return targetRow(client, targetTable, targetId);
+	const assignments = updates.map(([column], index) => `${safeIdentifier(column)}=$${index + 1}`);
+	const values = updates.map(([, value]) =>
+		value && typeof value === "object" && !(value instanceof Date)
+			? JSON.stringify(value)
+			: value,
+	);
+	values.push(targetId);
+	const result = await client.query(
+		`UPDATE ${safeIdentifier(targetTable)} AS target SET ${assignments.join(",")} WHERE target.${safeIdentifier(key)}=$${values.length} RETURNING to_jsonb(target) AS row`,
+		values,
 	);
 	return result.rows[0]?.row ?? null;
 };
@@ -1401,7 +1575,7 @@ const persistOutcomeLedger = async (
 		],
 	);
 	await client.query(
-		`INSERT INTO "legacyMigrationFieldLedger" ("idempotencyKey","runId","sourceTable","sourceIdHash","targetTable","targetId","sourceSnapshot","payload","fieldCoverage","targetSnapshot") VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10::jsonb) ON CONFLICT ("idempotencyKey") DO UPDATE SET "targetSnapshot"=EXCLUDED."targetSnapshot","updatedAt"=CURRENT_TIMESTAMP`,
+		`INSERT INTO "legacyMigrationFieldLedger" ("idempotencyKey","runId","sourceTable","sourceIdHash","targetTable","targetId","sourceSnapshot","payload","fieldCoverage","targetSnapshot","targetFingerprint") VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10::jsonb,$11) ON CONFLICT ("idempotencyKey") DO UPDATE SET "targetSnapshot"=EXCLUDED."targetSnapshot","targetFingerprint"=EXCLUDED."targetFingerprint","updatedAt"=CURRENT_TIMESTAMP`,
 		[
 			outcome.idempotencyKey,
 			runId,
@@ -1413,13 +1587,16 @@ const persistOutcomeLedger = async (
 			JSON.stringify(outcome.payload ?? {}),
 			JSON.stringify(outcome.fieldCoverage ?? { mapped: [], intentionallyExcluded: {}, unsupported: {} }),
 			targetSnapshot === null || targetSnapshot === undefined ? null : JSON.stringify(targetSnapshot),
+			targetSnapshot === null || targetSnapshot === undefined ? null : stableHash(canonicalJson(targetSnapshot)),
 		],
 	);
 };
 
 	type PlanDocument = {
 		sourceManifestChecksum: string;
-		sourceWatermark: { transaction_id: string };
+		sourceWatermark: { transaction_id: string; captured_at?: string; snapshot_id?: string };
+		sourceFingerprint?: string;
+		planFingerprint?: string;
 		outcomes: MigrationOutcome[];
 		complete: boolean;
 	};
@@ -1437,38 +1614,63 @@ const applyPlanDocument = async (
 				.rowCount !== 1
 		)
 			throw new Error("V2_OWNER_USER_ID does not exist");
+		const unsignedPlan = { ...planDocument } as Record<string, unknown>;
+		delete unsignedPlan.planFingerprint;
 		await client.query(
-			`INSERT INTO "legacyMigrationRun" ("id","sourceSystem","sourceWatermark","manifestChecksum","mode","status") VALUES ($1,'ibl-v1-development-supabase',$2,$3,'APPLY','RUNNING') ON CONFLICT ("id") DO UPDATE SET "status"='RUNNING', "completedAt"=NULL`,
+			`INSERT INTO "legacyMigrationRun" ("id","sourceSystem","sourceWatermark","manifestChecksum","sourceFingerprint","planFingerprint","mode","status") VALUES ($1,'ibl-v1-development-supabase',$2,$3,$4,$5,'APPLY','RUNNING') ON CONFLICT ("id") DO UPDATE SET "status"='RUNNING', "completedAt"=NULL, "sourceFingerprint"=EXCLUDED."sourceFingerprint", "planFingerprint"=EXCLUDED."planFingerprint"`,
 			[
 				runId,
 				planDocument.sourceWatermark.transaction_id,
 				planDocument.sourceManifestChecksum,
+				planDocument.sourceFingerprint ?? planDocument.sourceManifestChecksum,
+				planDocument.planFingerprint ?? fingerprintPlan(unsignedPlan),
 			],
 		);
+		let processed = 0;
 		for (const outcome of orderMigrationOutcomes(planDocument.outcomes)) {
+			processed += 1;
+			if (interruptAfter > 0 && processed === interruptAfter)
+				throw new Error(`Intentional interruption after ${interruptAfter} outcomes`);
 			const already = await client.query(
-				'SELECT 1 FROM "legacyMigrationOutcome" WHERE "idempotencyKey"=$1',
+				'SELECT "sourceSnapshot" FROM "legacyMigrationFieldLedger" WHERE "idempotencyKey"=$1',
 				[outcome.idempotencyKey],
 			);
 			if (already.rowCount) {
+				const sameSource = canonicalJson(already.rows[0].sourceSnapshot) === canonicalJson(outcome.payload?.sourceSnapshot ?? {});
 				const targetAlreadyExists =
 					outcome.outcome !== "MAPPED" ||
 					!outcome.targetTable ||
 					!outcome.targetId ||
 					outcome.targetTable === "legacyIdMap" ||
 					(await targetRow(client, outcome.targetTable, outcome.targetId)) !== null;
-				if (targetAlreadyExists) continue;
+				if (targetAlreadyExists && sameSource) continue;
 			}
-			let inserted = false;
+			let updated = false;
 			if (
 				outcome.outcome === "MAPPED" &&
 				outcome.targetTable &&
 				outcome.targetId
 			) {
 				const before = await targetRow(client, outcome.targetTable, outcome.targetId);
-				await insertMapped(client, outcome, ownerUserId);
+				if (before && already.rowCount) {
+					await updateTargetFromPayload(client, outcome.targetTable, outcome.targetId, outcome.payload ?? {});
+					updated = true;
+				} else {
+					await insertMapped(client, outcome, ownerUserId);
+				}
 				const after = await targetRow(client, outcome.targetTable, outcome.targetId);
-				inserted = before === null && after !== null;
+				for (const created of drainCreatedTargets(client)) {
+					const createdSnapshot = await targetRow(client, created.targetTable, created.targetId);
+					if (createdSnapshot) {
+						const operation = immutableTargetTables.has(created.targetTable)
+							? "PRESERVE_APPEND_ONLY"
+							: "DELETE_INSERTED_ROW";
+						await client.query(
+							`INSERT INTO "legacyRollbackEntry" ("runId","targetTable","targetId","targetKeyColumn","operation","targetFingerprint","createdByRun") VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+							[runId, created.targetTable, created.targetId, created.targetKeyColumn, operation, stableHash(canonicalJson(createdSnapshot)), operation === "DELETE_INSERTED_ROW"],
+						);
+					}
+				}
 				const mappedTargetTable =
 					outcome.targetTable === "legacyIdMap"
 						? asString(outcome.payload?.parentTargetId ? "football_entities" : "legacyIdMap")
@@ -1487,11 +1689,10 @@ const applyPlanDocument = async (
 						mappedTargetId,
 					],
 				);
-				if (inserted) {
-					const targetFingerprint = stableHash(canonicalJson(after));
+				if (updated && before && after) {
 					await client.query(
-						`INSERT INTO "legacyRollbackEntry" ("runId","targetTable","targetId","operation","targetFingerprint") VALUES ($1,$2,$3,'DELETE_INSERTED_ROW',$4)`,
-						[runId, outcome.targetTable, outcome.targetId, targetFingerprint],
+						`INSERT INTO "legacyRollbackEntry" ("runId","targetTable","targetId","targetKeyColumn","operation","targetFingerprint","beforeImage","createdByRun") VALUES ($1,$2,$3,$4,'RESTORE_BEFORE_IMAGE',$5,$6::jsonb,FALSE)`,
+						[runId, outcome.targetTable, outcome.targetId, targetKeyColumn(outcome.targetTable), stableHash(canonicalJson(after)), JSON.stringify(before)],
 					);
 				}
 			}
@@ -1505,9 +1706,10 @@ const applyPlanDocument = async (
 			);
 		}
 		const report = summarize(planDocument.outcomes);
+		const resultFingerprint = fingerprintAppliedResult({ runId, report });
 		await client.query(
-			`UPDATE "legacyMigrationRun" SET "status"='COMPLETED', "completedAt"=NOW(), "report"=$2::jsonb WHERE "id"=$1`,
-			[runId, JSON.stringify(report)],
+			`UPDATE "legacyMigrationRun" SET "status"='COMPLETED', "completedAt"=NOW(), "report"=$2::jsonb, "resultFingerprint"=$3 WHERE "id"=$1`,
+			[runId, JSON.stringify({ ...report, resultFingerprint }), resultFingerprint],
 		);
 	await client.query("COMMIT");
 	return { runId, ...report };
@@ -1534,20 +1736,23 @@ const apply = async () => {
 	}
 };
 
-const fixtureApply = async () => {
+const applyFixtureRows = async (rows: ExportRow[], runPrefix: string) => {
 	if (!confirmApply) throw new Error("Fixture apply requires --confirm-apply");
 	const ownerUserId = required("V2_OWNER_USER_ID");
-	const outcomes = planRows(businessV1Rows, { ownerUserId });
+	const outcomes = planRows(rows, { ownerUserId });
 	const summary = summarize(outcomes);
 	if (!summary.complete) throw new Error("Sanitized fixture plan is incomplete");
 	const planDocument: PlanDocument = {
-		sourceManifestChecksum: stableHash(canonicalJson(businessV1Rows)),
-		sourceWatermark: { transaction_id: "sanitized-fixture" },
+		sourceManifestChecksum: stableHash(canonicalJson(rows)),
+		sourceWatermark: { transaction_id: "sanitized-fixture", captured_at: "2026-08-22T12:00:00.000Z", snapshot_id: "sanitized-fixture:1" },
+		sourceFingerprint: fingerprintSnapshot(rows, snapshotBoundary("sanitized-fixture", "2026-08-22T12:00:00.000Z", "sanitized-fixture:1")),
 		outcomes,
 		complete: summary.complete,
 	};
+	const { planFingerprint: _unusedPlanFingerprint, ...unsignedFixturePlan } = planDocument;
+	planDocument.planFingerprint = fingerprintPlan(unsignedFixturePlan);
 	const client = await connect(required("DATABASE_URL"));
-	const runId = `v1_fixture_apply_${stableHash(`${planDocument.sourceManifestChecksum}:${ownerUserId}`).slice(0, 24)}`;
+	const runId = process.env.V1_MIGRATION_RUN_ID ?? `${runPrefix}_${stableHash(`${planDocument.sourceManifestChecksum}:${ownerUserId}`).slice(0, 24)}`;
 	try {
 		console.log(JSON.stringify(await applyPlanDocument(planDocument, ownerUserId, client, runId), null, 2));
 	} catch (error) {
@@ -1556,6 +1761,31 @@ const fixtureApply = async () => {
 	} finally {
 		await client.end();
 	}
+};
+
+const fixtureApply = async () =>
+	applyFixtureRows(
+		process.argv.includes("--updated") ? businessV1UpdatedRows : businessV1Rows,
+		"v1_fixture_apply",
+	);
+
+const fixtureSafetyApply = async () =>
+	applyFixtureRows(
+		process.argv.includes("--updated") ? operationalSafetyUpdatedRows : operationalSafetyRows,
+		"v1_fixture_safety_apply",
+	);
+
+const fixtureDelta = async () => {
+	await mkdir(artifactsRoot, { recursive: true });
+	const baseBoundary = snapshotBoundary("sanitized-fixture-1", "2026-08-22T12:00:00.000Z", "sanitized-fixture-1:1");
+	const baseChecksum = fingerprintSnapshot(businessV1Rows, baseBoundary);
+	const delta = buildDelta(
+		businessV1Rows,
+		businessV1UpdatedRows,
+		deltaBoundary(baseBoundary.toWatermark, { transaction_id: "sanitized-fixture-2", captured_at: "2026-08-22T13:00:00.000Z", snapshot_id: "sanitized-fixture-2:1" }, baseChecksum),
+	);
+	await writeJson(resolve(artifactsRoot, "fixture-delta.json"), delta);
+	console.log(JSON.stringify({ rows: delta.rows.length, checksum: delta.checksum, baseChecksum }, null, 2));
 };
 
 const mappedTargetFor = (outcome: MigrationOutcome) => {
@@ -1596,6 +1826,12 @@ const reconcilePersisted = async (
 	client: pg.Client,
 	planDocument: PlanDocument,
 ) => {
+	const runId = (
+		await client.query(
+			`SELECT "runId" FROM "legacyMigrationOutcome" WHERE "idempotencyKey"=$1`,
+			[planDocument.outcomes[0]?.idempotencyKey ?? ""],
+		)
+	).rows[0]?.runId;
 	let missingIdMaps = 0;
 	let missingTargets = 0;
 	let targetMismatches = 0;
@@ -1634,20 +1870,24 @@ const reconcilePersisted = async (
 		if (expectedOwner && actualOwner && expectedOwner !== actualOwner) ownershipMismatches += 1;
 	}
 	const ledgerCount = await client.query(
-		`SELECT count(*)::int AS count FROM "legacyMigrationFieldLedger" WHERE "runId"=(SELECT "runId" FROM "legacyMigrationOutcome" WHERE "idempotencyKey"=$1)`,
-		[planDocument.outcomes[0]?.idempotencyKey ?? ""],
+		`SELECT count(*)::int AS count FROM "legacyMigrationFieldLedger" WHERE "runId"=$1`,
+		[runId ?? ""],
 	);
 	const fieldCoverage = await client.query(
-		`SELECT count(*)::int AS count FROM "legacyMigrationFieldLedger" WHERE EXISTS (SELECT 1 FROM jsonb_each("fieldCoverage"->'unsupported'))`,
+		`SELECT count(*)::int AS count FROM "legacyMigrationFieldLedger" WHERE "runId"=$1 AND EXISTS (SELECT 1 FROM jsonb_each("fieldCoverage"->'unsupported'))`,
+		[runId ?? ""],
 	);
 	const persistedTargets = await client.query(
-		`SELECT count(*)::int AS count FROM "legacyMigrationFieldLedger" WHERE "targetTable" IS NOT NULL AND "targetTable" <> 'legacyIdMap' AND "targetSnapshot" IS NOT NULL`,
+		`SELECT count(*)::int AS count FROM "legacyMigrationFieldLedger" WHERE "runId"=$1 AND "targetTable" IS NOT NULL AND "targetTable" <> 'legacyIdMap' AND "targetSnapshot" IS NOT NULL`,
+		[runId ?? ""],
 	);
 	const relationshipRows = await client.query(
-		`SELECT count(*)::int AS count FROM "legacyMigrationFieldLedger" WHERE "targetTable" IN ('representation','contactRoute','sharedRoutePolicy','emailThread','emailMessage') AND "targetSnapshot" IS NOT NULL`,
+		`SELECT count(*)::int AS count FROM "legacyMigrationFieldLedger" WHERE "runId"=$1 AND "targetTable" IN ('representation','contactRoute','sharedRoutePolicy','emailThread','emailMessage') AND "targetSnapshot" IS NOT NULL`,
+		[runId ?? ""],
 	);
 	const lifecycleRows = await client.query(
-		`SELECT count(*)::int AS count FROM "legacyMigrationFieldLedger" WHERE "targetTable" IN ('lifecycleEvent','activity','mergeDecision') AND "targetSnapshot" IS NOT NULL`,
+		`SELECT count(*)::int AS count FROM "legacyMigrationFieldLedger" WHERE "runId"=$1 AND "targetTable" IN ('lifecycleEvent','activity','mergeDecision') AND "targetSnapshot" IS NOT NULL`,
+		[runId ?? ""],
 	);
 	return {
 		missingIdMaps,
@@ -1684,7 +1924,7 @@ const reconcilePlanDocument = async (
 			targetReconciled: persisted.missingIdMaps === 0 && persisted.missingTargets === 0 && persisted.targetMismatches === 0 && persisted.missingFieldLedgers === 0 && persisted.ownershipMismatches === 0 && persisted.fieldCoverageUnsupportedRows === 0 && persisted.foreignKeyViolations === 0,
 		};
 		console.log(JSON.stringify(checks, null, 2));
-		if (!checks.manifestChecksumMatches || !checks.classificationComplete || !checks.zeroUnexplainedLoss || !checks.targetReconciled) process.exitCode = 1;
+		if (!reconciliationPassed(checks)) process.exitCode = 1;
 		return checks;
 	} finally {
 		await client.end();
@@ -1700,32 +1940,121 @@ const reconcile = async () => {
 	await reconcilePlanDocument(planDocument, rows.length, manifest.checksum, report);
 };
 
-const fixtureReconcile = async () => {
+const reconcileFixtureRows = async (rows: ExportRow[]) => {
 	const ownerUserId = required("V2_OWNER_USER_ID");
-	const outcomes = planRows(businessV1Rows, { ownerUserId });
+	const outcomes = planRows(rows, { ownerUserId });
 	const summary = summarize(outcomes);
 	const planDocument: PlanDocument = {
-		sourceManifestChecksum: stableHash(canonicalJson(businessV1Rows)),
-		sourceWatermark: { transaction_id: "sanitized-fixture" },
+		sourceManifestChecksum: stableHash(canonicalJson(rows)),
+		sourceWatermark: { transaction_id: "sanitized-fixture", captured_at: "2026-08-22T12:00:00.000Z", snapshot_id: "sanitized-fixture:1" },
+		sourceFingerprint: fingerprintSnapshot(rows, snapshotBoundary("sanitized-fixture", "2026-08-22T12:00:00.000Z", "sanitized-fixture:1")),
 		outcomes,
 		complete: summary.complete,
 	};
-	await reconcilePlanDocument(planDocument, businessV1Rows.length, planDocument.sourceManifestChecksum, {
-		total: businessV1Rows.length,
-		accounted: businessV1Rows.length,
+	await reconcilePlanDocument(planDocument, rows.length, planDocument.sourceManifestChecksum, {
+		total: rows.length,
+		accounted: rows.length,
 		zeroUnexplainedLoss: summary.complete,
 	});
 };
 
+const fixtureReconcile = async () =>
+	reconcileFixtureRows(process.argv.includes("--updated") ? businessV1UpdatedRows : businessV1Rows);
+
+const fixtureSafetyReconcile = async () => reconcileFixtureRows(operationalSafetyUpdatedRows);
+
+const fixtureRollbackReconcile = async () => {
+	const ownerUserId = required("V2_OWNER_USER_ID");
+	const runId = required("V1_MIGRATION_RUN_ID");
+	const outcomes = planRows(businessV1Rows, { ownerUserId });
+	const summary = summarize(outcomes);
+	const client = await connect(required("DATABASE_URL"));
+	try {
+		const activeOutcomes = Number((await client.query(
+			`SELECT count(*)::int AS count FROM "legacyMigrationOutcome" WHERE "runId"=$1`,
+			[runId],
+		)).rows[0]?.count ?? 0);
+		const activeMaps = Number((await client.query(
+			`SELECT count(*)::int AS count FROM "legacyIdMap" m WHERE EXISTS (SELECT 1 FROM "legacyMigrationOutcome" o WHERE o."runId"=$1 AND o."idempotencyKey"=m."idempotencyKey")`,
+			[runId],
+		)).rows[0]?.count ?? 0);
+		const activeLedgers = Number((await client.query(
+			`SELECT count(*)::int AS count FROM "legacyMigrationFieldLedger" WHERE "runId"=$1`,
+			[runId],
+		)).rows[0]?.count ?? 0);
+		const entries = (await client.query(
+			`SELECT "targetTable","targetId","operation","createdByRun","rolledBackAt" FROM "legacyRollbackEntry" WHERE "runId"=$1 ORDER BY "sequence"`,
+			[runId],
+		)).rows as Array<{ targetTable: string; targetId: string; operation: string; createdByRun: boolean; rolledBackAt: Date | null }>;
+		let createdTargetsRemaining = 0;
+		let preservedAppendOnlyRows = 0;
+		let missingAppendOnlyRows = 0;
+		let retainedDurableTargets = 0;
+		let missingDurableTargets = 0;
+		let beforeImageEntries = 0;
+		let beforeImagesRolledBack = 0;
+		for (const entry of entries) {
+			if (entry.operation === "DELETE_INSERTED_ROW" && entry.createdByRun && await targetRow(client, entry.targetTable, entry.targetId)) {
+				createdTargetsRemaining += 1;
+			}
+			if (entry.operation === "PRESERVE_APPEND_ONLY") {
+				if (await targetRow(client, entry.targetTable, entry.targetId)) preservedAppendOnlyRows += 1;
+				else missingAppendOnlyRows += 1;
+			}
+			if (entry.operation === "PRESERVE_DURABLE_PARENT") {
+				if (await targetRow(client, entry.targetTable, entry.targetId)) retainedDurableTargets += 1;
+				else missingDurableTargets += 1;
+			}
+			if (entry.operation === "RESTORE_BEFORE_IMAGE") {
+				beforeImageEntries += 1;
+				if (entry.rolledBackAt) beforeImagesRolledBack += 1;
+			}
+		}
+		const status = (await client.query(
+			`SELECT "status" FROM "legacyMigrationRun" WHERE "id"=$1`,
+			[runId],
+		)).rows[0]?.status;
+		const foreignKeyViolationCount = await foreignKeyViolations(client);
+		const checks = {
+			manifestChecksumMatches: true,
+			classificationComplete: summary.complete,
+			zeroUnexplainedLoss: status === "ROLLED_BACK" && activeOutcomes === 0 && activeMaps === 0 && activeLedgers === 0 && createdTargetsRemaining === 0 && missingAppendOnlyRows === 0 && missingDurableTargets === 0 && entries.length > 0 && entries.every((entry) => Boolean(entry.rolledBackAt)),
+			targetReconciled: activeOutcomes === 0 && activeMaps === 0 && activeLedgers === 0 && createdTargetsRemaining === 0 && missingAppendOnlyRows === 0 && missingDurableTargets === 0 && foreignKeyViolationCount === 0,
+			sourceRows: businessV1Rows.length,
+			outcomes: outcomes.length,
+			accounted: outcomes.length,
+			status,
+			activeOutcomes,
+			activeMaps,
+			activeLedgers,
+			rollbackEntries: entries.length,
+			createdTargetsRemaining,
+			preservedAppendOnlyRows,
+			missingAppendOnlyRows,
+			retainedDurableTargets,
+			missingDurableTargets,
+			beforeImageEntries,
+			beforeImagesRolledBack,
+			foreignKeyViolations: foreignKeyViolationCount,
+		};
+		console.log(JSON.stringify(checks, null, 2));
+		if (!reconciliationPassed(checks)) process.exitCode = 1;
+		return checks;
+	} finally {
+		await client.end();
+	}
+};
+
 const assertRollbackSafe = async (
 	client: pg.Client,
-	entry: { targetTable: string; targetId: string; targetFingerprint: string | null },
+	entry: { targetTable: string; targetId: string; targetKeyColumn: string; targetFingerprint: string | null },
+	checkDependencies = true,
 ) => {
 	if (!entry.targetFingerprint) {
 		throw new Error("Rollback entry predates target fingerprints and requires manual review.");
 	}
 	const current = await client.query(
-		`SELECT to_jsonb(t) AS row FROM ${safeIdentifier(entry.targetTable)} t WHERE id=$1 FOR UPDATE`,
+		`SELECT to_jsonb(t) AS row FROM ${safeIdentifier(entry.targetTable)} t WHERE t.${safeIdentifier(entry.targetKeyColumn)}=$1 FOR UPDATE`,
 		[entry.targetId],
 	);
 	if (!current.rowCount) return;
@@ -1735,6 +2064,7 @@ const assertRollbackSafe = async (
 			`Rollback blocked: ${entry.targetTable}/${entry.targetId} changed after migration.`,
 		);
 	}
+	if (!checkDependencies) return;
 	const references = (
 		await client.query(
 			`SELECT child.relname AS "childTable", child_column.attname AS "childColumn"
@@ -1752,8 +2082,8 @@ const assertRollbackSafe = async (
 			   AND parent_ns.nspname='public'
 			   AND child_ns.nspname='public'
 			   AND parent.relname=$1
-			   AND parent_column.attname='id'`,
-			[entry.targetTable],
+			   AND parent_column.attname=$2`,
+			[entry.targetTable, entry.targetKeyColumn],
 		)
 	).rows as Array<{ childTable: string; childColumn: string }>;
 	for (const reference of references) {
@@ -1773,34 +2103,61 @@ const rollback = async () => {
 	if (!confirmApply) throw new Error("Rollback requires --confirm-apply");
 	const client = await connect(required("DATABASE_URL"));
 	const runId = required("V1_MIGRATION_RUN_ID");
-	const allowed = new Set([
-		"lead",
-		"template",
-		"proofItem",
-		"company",
-		"contact",
-	]);
 	try {
 		await client.query("BEGIN");
 		const entries = (
 			await client.query(
-				`SELECT "sequence","targetTable","targetId","targetFingerprint" FROM "legacyRollbackEntry" WHERE "runId"=$1 AND "rolledBackAt" IS NULL ORDER BY "sequence" DESC`,
+				`SELECT "sequence","targetTable","targetId","targetKeyColumn","operation","targetFingerprint","beforeImage","createdByRun" FROM "legacyRollbackEntry" WHERE "runId"=$1 AND "rolledBackAt" IS NULL ORDER BY "sequence" DESC`,
 				[runId],
 			)
-		).rows;
+		).rows.map((entry) => ({
+			...entry,
+			targetKeyColumn: entry.targetKeyColumn === "id"
+				? targetKeyColumn(entry.targetTable)
+				: entry.targetKeyColumn,
+		}));
 		for (const entry of entries) {
-			if (!allowed.has(entry.targetTable))
-				throw new Error("Rollback target is not allowlisted");
-			await assertRollbackSafe(client, entry);
-			await client.query(
-				`DELETE FROM ${safeIdentifier(entry.targetTable)} WHERE id=$1`,
-				[entry.targetId],
-			);
+			if (entry.operation === "DELETE_INSERTED_ROW" && (await hasDurableHistory(client, entry.targetTable, entry.targetId) || await hasRetainedDependency(client, runId, entry))) {
+				await client.query(
+					`UPDATE "legacyRollbackEntry" SET "operation"='PRESERVE_DURABLE_PARENT', "createdByRun"=FALSE, "rolledBackAt"=NOW() WHERE "runId"=$1 AND "sequence"=$2`,
+					[runId, entry.sequence],
+				);
+				continue;
+			}
+			await assertRollbackSafe(client, entry, entry.operation === "DELETE_INSERTED_ROW");
+			if (entry.operation === "PRESERVE_APPEND_ONLY") {
+				await client.query(
+					`UPDATE "legacyRollbackEntry" SET "rolledBackAt"=NOW() WHERE "runId"=$1 AND "sequence"=$2`,
+					[runId, entry.sequence],
+				);
+				continue;
+			} else if (entry.operation === "PRESERVE_DURABLE_PARENT") {
+				await client.query(
+					`UPDATE "legacyRollbackEntry" SET "rolledBackAt"=NOW() WHERE "runId"=$1 AND "sequence"=$2`,
+					[runId, entry.sequence],
+				);
+				continue;
+			} else if (entry.operation === "DELETE_INSERTED_ROW") {
+				if (!entry.createdByRun) throw new Error("Rollback entry is not owned by this migration run");
+				await client.query(
+					`DELETE FROM ${safeIdentifier(entry.targetTable)} WHERE ${safeIdentifier(entry.targetKeyColumn)}=$1`,
+					[entry.targetId],
+				);
+			} else if (entry.operation === "RESTORE_BEFORE_IMAGE") {
+				if (!entry.beforeImage) throw new Error("Rollback before-image is missing");
+				await updateTargetFromPayload(client, entry.targetTable, entry.targetId, entry.beforeImage);
+			} else {
+				throw new Error(`Rollback operation is not supported: ${entry.operation}`);
+			}
 			await client.query(
 				`UPDATE "legacyRollbackEntry" SET "rolledBackAt"=NOW() WHERE "runId"=$1 AND "sequence"=$2`,
 				[runId, entry.sequence],
 			);
 		}
+		await client.query(
+			`DELETE FROM "legacyMigrationFieldLedger" WHERE "runId"=$1`,
+			[runId],
+		);
 		await client.query(
 			`DELETE FROM "legacyIdMap" m USING "legacyMigrationOutcome" o WHERE o."runId"=$1 AND m."idempotencyKey"=o."idempotencyKey"`,
 			[runId],
@@ -1810,8 +2167,8 @@ const rollback = async () => {
 			[runId],
 		);
 		await client.query(
-			`UPDATE "legacyMigrationRun" SET "status"='ROLLED_BACK', "completedAt"=NOW() WHERE "id"=$1`,
-			[runId],
+			`UPDATE "legacyMigrationRun" SET "status"='ROLLED_BACK', "completedAt"=NOW(), "resultFingerprint"=$2 WHERE "id"=$1`,
+			[runId, fingerprintAppliedResult({ runId, rolledBack: entries.length })],
 		);
 		await client.query("COMMIT");
 		console.log(JSON.stringify({ runId, rolledBack: entries.length }, null, 2));
@@ -1823,15 +2180,19 @@ const rollback = async () => {
 	}
 };
 
-const commands: Record<string, () => Promise<void>> = {
+const commands: Record<string, () => Promise<unknown>> = {
 	inventory,
 	classify,
 	export: exportSource,
 	plan,
 	apply,
 	"fixture-apply": fixtureApply,
+	"fixture-safety-apply": fixtureSafetyApply,
+	"fixture-delta": fixtureDelta,
 	reconcile,
 	"fixture-reconcile": fixtureReconcile,
+	"fixture-safety-reconcile": fixtureSafetyReconcile,
+	"fixture-rollback-reconcile": fixtureRollbackReconcile,
 	rollback,
 };
 if (!command || !commands[command])

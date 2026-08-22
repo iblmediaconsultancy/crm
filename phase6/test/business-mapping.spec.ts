@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { businessV1Rows } from "../fixtures/business-v1";
 import {
+	mappingTargetForTest,
 	planRows,
 	summarize,
 	targetIdForTest,
@@ -57,5 +58,22 @@ describe("V1 business mapping coverage", () => {
 		expect(second?.reasonCode).toBe("NORMALIZED_IDENTITY_COLLISION");
 		expect(unsupported?.outcome).toBe("REJECTED");
 		expect(unsupported?.reasonCode).toBe("UNSUPPORTED_SOURCE_TABLE");
+	});
+
+	test("proves companyEnrichment and contactFact are unreachable from current V1 mappings", () => {
+		const dynamicRows = [
+			{ table: "football_organization_details", row: { entity_id: "agency-1", organization_type: "AGENCY" } },
+			{ table: "football_organization_details", row: { entity_id: "club-1", organization_type: "CLUB" } },
+			{ table: "football_person_details", row: { entity_id: "player-1", role_title: "Player" } },
+			{ table: "football_person_details", row: { entity_id: "agent-1", role_title: "Agent" } },
+			{ table: "football_player_details", row: { entity_id: "player-1" } },
+		];
+		const currentTargets = new Set([
+			...businessV1Rows.map((item) => mappingTargetForTest(item.table, item.row)),
+			...dynamicRows.map((item) => mappingTargetForTest(item.table, item.row)),
+		]);
+		expect(currentTargets.has("companyEnrichment")).toBe(false);
+		expect(currentTargets.has("contactFact")).toBe(false);
+		expect(currentTargets).toEqual(expect.not.arrayContaining(["companyEnrichment", "contactFact"]));
 	});
 });

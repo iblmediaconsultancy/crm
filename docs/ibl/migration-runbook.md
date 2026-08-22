@@ -14,6 +14,8 @@ require the explicit `--confirm-apply` switch.
 ## Full rehearsal
 
 1. Freeze V1 writes or record a start watermark and announce the delta window.
+   The export transaction records `txid_current()`, `pg_current_snapshot()`,
+   and capture time as one immutable snapshot boundary.
 2. Run `inventory`, then `export` under a repeatable-read read-only transaction.
 3. Run `plan`; inspect `reconciliation.json`. A source row is always `MAPPED`,
    `REJECTED`, or `DUPLICATE_CANDIDATE`. Unsupported or unsafe records remain
@@ -24,15 +26,20 @@ require the explicit `--confirm-apply` switch.
 6. Back up V2, set `DATABASE_URL` to the migration-owner connection, and run
    `apply --confirm-apply`. Stable source keys make interrupted reruns resumable.
 7. Reconcile ledger counts and target foreign keys. Keep the generated run ID.
-8. At cutover, freeze V1 writes, export a final snapshot/delta, repeat the dry
+8. For each post-snapshot window, export a deterministic delta containing
+   ordered upserts and deletes, tied to the prior manifest checksum and both
+   watermarks. Replay deltas in dependency order and reconcile after every
+   replay. At cutover, freeze V1 writes, export a final delta, repeat the dry
    run and apply, then switch traffic only after application smoke tests.
 
 ## Rollback
 
 Set `V1_MIGRATION_RUN_ID` to the apply run ID and invoke `rollback
---confirm-apply`. The rollback manifest deletes only rows inserted by that run,
-in reverse order, and marks each action. Restore the pre-apply V2 backup if any
-post-cutover writer has created dependencies that make targeted rollback unsafe.
+--confirm-apply`. The rollback ledger covers the complete mapped target set,
+restores updated rows from before-images, and deletes only rows inserted by
+that run in reverse dependency order. If a post-cutover writer changed a
+fingerprinted row, rollback stops and requires review. Append-only audit and
+history rows are retained and marked as preserved rather than mutated.
 
 ## Production limitations
 

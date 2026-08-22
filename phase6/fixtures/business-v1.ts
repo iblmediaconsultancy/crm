@@ -536,6 +536,19 @@ export const businessV1Rows: ExportRow[] = [
 	})),
 ];
 
+export const businessV1UpdatedRows: ExportRow[] = businessV1Rows.map((item) =>
+	item.table === "leads"
+		? {
+				...item,
+				row: {
+					...item.row,
+					name: "Fixture Lead Updated",
+					updated_at: "2026-08-22T13:00:00.000Z",
+				},
+			}
+		: item,
+);
+
 export const businessFixtureTables = new Set(
 	businessV1Rows.map((item) => item.table),
 );

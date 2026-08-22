@@ -217,6 +217,9 @@ const mappingFor = (table: string, row: Record<string, unknown>) => {
 	return STATIC_MAPPINGS[table];
 };
 
+export const mappingTargetForTest = (table: string, row: Record<string, unknown>) =>
+	mappingFor(table, row)?.targetTable;
+
 const parentTargetId = (row: Record<string, unknown>) => {
 	const parentId = row.entity_id ?? row.canonical_entity_id ?? row.lead_id;
 	return parentId ? targetIdFor("football_entities", String(parentId)) : null;
@@ -314,7 +317,7 @@ const targetFieldsFor = (
 			status: leadStatus(row.status),
 			ownerUserId: ownerId,
 			assignedToUserId: context.ownerMap?.[String(row.assigned_to ?? "")] ?? null,
-			source: row.source ?? "IMPORT",
+			source: "IMPORT",
 			tags: row.tags ?? [],
 			notes: row.notes ?? null,
 			lastContactAt: row.last_contact_at ?? null,

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { businessV1Rows } from "../fixtures/business-v1";
-import { orderMigrationOutcomes } from "../src/apply-order";
+import { migrationApplyOrder, orderMigrationOutcomes } from "../src/apply-order";
 import { planRows } from "../src/core";
 
 describe("V1 persistence apply contract", () => {
@@ -26,5 +26,14 @@ describe("V1 persistence apply contract", () => {
 				fieldCoverage: outcome.fieldCoverage,
 			})).not.toThrow();
 		}
+	});
+
+	test("gives every currently mapped target a dependency order", () => {
+		const targets = new Set(
+			planRows(businessV1Rows, { ownerUserId: "fixture-owner" })
+				.filter((outcome) => outcome.outcome === "MAPPED")
+				.map((outcome) => outcome.targetTable),
+		);
+		for (const target of targets) expect(target && migrationApplyOrder[target]).toBeDefined();
 	});
 });
