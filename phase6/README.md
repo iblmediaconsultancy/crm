@@ -6,6 +6,11 @@ its approved columns. Raw exports are written under `phase6/artifacts/`, which i
 because those files may contain personal or mailbox data. Only redacted counts,
 checksums, reason codes, and hashed source identifiers are emitted in reports.
 
+Run `phase6/v1-readonly-role.sql` once in the V1 Supabase SQL Editor to create the
+restricted export role. Run `phase6/v1-readonly-role-verification.sql` through a
+connection authenticated as that role before adding `V1_DATABASE_URL`. The role
+grants explicit columns only; no auth schema access or table-wide grant is used.
+
 Required environment variables:
 
 - `V1_DATABASE_URL`: read-only connection to the authorized V1 development Supabase database.

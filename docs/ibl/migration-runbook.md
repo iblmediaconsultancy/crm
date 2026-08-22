@@ -7,6 +7,13 @@ Use a V1 database role with `CONNECT`, `USAGE` on the required schemas, and
 `phase6/artifacts/` directory with owner-only permissions. Reports contain only
 counts, checksums, reason codes, watermarks, and hashed identifiers.
 
+Before connecting, run `phase6/v1-readonly-role.sql` in the V1 Supabase SQL
+Editor. It creates the restricted role from the 75-table export policy. Then
+run `phase6/v1-readonly-role-verification.sql` through that role and require
+zero dangerous inherited privileges. The exporter reads table and column names
+from PostgreSQL catalogs, not `information_schema.columns`, so secret columns
+remain ungranted while schema drift is still detected.
+
 The V2 connection must be the migration owner, not an API or worker identity.
 The control ledger is inaccessible to runtime roles. `apply` and `rollback`
 require the explicit `--confirm-apply` switch.

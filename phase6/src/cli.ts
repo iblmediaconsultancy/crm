@@ -31,6 +31,7 @@ import {
 	validateExportSchema,
 	type ExportDisposition,
 } from "./export-policy";
+import { publicColumnsQuery, publicTablesQuery } from "./source-schema";
 
 const { Client } = pg;
 const root = resolve(import.meta.dir, "..");
@@ -74,10 +75,10 @@ const inventorySource = async () => {
 			"BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY",
 		);
 		const tables = await client.query(
-			"SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename",
+			publicTablesQuery,
 		);
 		const columns = await client.query(
-			"SELECT table_name, column_name, data_type, is_nullable FROM information_schema.columns WHERE table_schema = 'public' ORDER BY table_name, ordinal_position",
+			publicColumnsQuery,
 		);
 		const policies = await client.query(
 			"SELECT tablename, policyname, cmd, roles FROM pg_policies WHERE schemaname = 'public' ORDER BY tablename, policyname",
@@ -161,12 +162,12 @@ const exportSource = async () => {
 		).rows[0];
 		const tables = (
 			await client.query(
-				"SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename",
+				publicTablesQuery,
 			)
 		).rows as Array<{ tablename: string }>;
 		const columns = (
 			await client.query(
-				"SELECT table_name, column_name FROM information_schema.columns WHERE table_schema = 'public' ORDER BY table_name, ordinal_position",
+				publicColumnsQuery,
 			)
 		).rows as Array<{ table_name: string; column_name: string }>;
 		validateExportSchema(
