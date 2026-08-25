@@ -4,6 +4,14 @@ FROM pg_catalog.pg_class c
 JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
 WHERE n.nspname = 'public'
   AND c.relkind IN ('r', 'p', 'f')
+  AND EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_attribute granted
+    WHERE granted.attrelid = c.oid
+      AND granted.attnum > 0
+      AND NOT granted.attisdropped
+      AND has_column_privilege(current_user, c.oid, granted.attnum, 'SELECT')
+  )
 ORDER BY c.relname
 `;
 
@@ -18,8 +26,17 @@ JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
 JOIN pg_catalog.pg_attribute a ON a.attrelid = c.oid
 WHERE n.nspname = 'public'
   AND c.relkind IN ('r', 'p', 'f')
+  AND EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_attribute granted
+    WHERE granted.attrelid = c.oid
+      AND granted.attnum > 0
+      AND NOT granted.attisdropped
+      AND has_column_privilege(current_user, c.oid, granted.attnum, 'SELECT')
+  )
   AND a.attnum > 0
   AND NOT a.attisdropped
   AND a.atttypid <> 0
+  AND has_column_privilege(current_user, c.oid, a.attnum, 'SELECT')
 ORDER BY c.relname, a.attnum
 `;

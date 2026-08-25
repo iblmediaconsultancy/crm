@@ -81,7 +81,7 @@ BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY;
 SELECT current_setting('transaction_read_only') AS transaction_read_only_in_transaction;
 SELECT count(*) FROM public.templates;
 SELECT id, name, channel, body, active FROM public.templates ORDER BY id LIMIT 1;
-SELECT id, mailbox_id, updated_at FROM public.mailbox_credentials ORDER BY mailbox_id LIMIT 1;
+SELECT mailbox_id, updated_at FROM public.mailbox_credentials ORDER BY mailbox_id LIMIT 1;
 ROLLBACK;
 
 SELECT

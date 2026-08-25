@@ -11,7 +11,7 @@ const matrix = await Bun.file("docs/ibl/migration-coverage-matrix.md").text();
 const policy = buildExportPolicy(matrix);
 
 const schemaColumns = Object.entries(policy).flatMap(([table, tablePolicy]) =>
-	[...tablePolicy.columns, ...Object.keys(tablePolicy.excludedColumns)].map((column) => ({ table, column })),
+	tablePolicy.columns.map((column) => ({ table, column })),
 );
 
 describe("V1 export policy", () => {

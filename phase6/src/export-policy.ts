@@ -186,9 +186,9 @@ export const validateExportSchema = (
 		const tablePolicy = policy[table];
 		if (!tablePolicy) throw new Error(`Missing V1 export policy for table ${table}`);
 		const actualColumns = new Set(actual.filter((item) => item.table === table).map((item) => item.column));
-		const expectedColumns = new Set([...tablePolicy.columns, ...Object.keys(tablePolicy.excludedColumns)]);
-		const unknownColumns = [...actualColumns].filter((column) => !expectedColumns.has(column));
-		const missingColumns = [...expectedColumns].filter((column) => !actualColumns.has(column));
+		const allowedColumns = new Set([...tablePolicy.columns, ...Object.keys(tablePolicy.excludedColumns)]);
+		const unknownColumns = [...actualColumns].filter((column) => !allowedColumns.has(column));
+		const missingColumns = tablePolicy.columns.filter((column) => !actualColumns.has(column));
 		if (unknownColumns.length || missingColumns.length) {
 			throw new Error(`V1 export column policy mismatch for ${table}. Unknown: ${unknownColumns.join(",")}. Missing: ${missingColumns.join(",")}.`);
 		}
