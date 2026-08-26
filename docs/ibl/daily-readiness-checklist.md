@@ -9,7 +9,7 @@ Status recorded 2026-08-26 after the completed V1 migration rehearsal at commit 
 - Outreach showed CRM AI ready after the local API and Eve bridge were started with disposable local credentials. Live MIAB and Resend remained fail-closed.
 - Local provider status remained `UNVERIFIED`; no mailbox identity was added and no provider call was made.
 - Focused boundary, provider-double, MIME/mailbox, agent-auth, model, bridge, and system-email tests passed: 87 passed, 0 failed.
-- Local API liveness and readiness returned HTTP 200. The production-shaped compose file validated with synthetic image digests and secret paths. Production-config validation passed with HTTPS URLs, PostgreSQL coordination, no Redis dependency, and the required provider settings.
+- Clean production-target Docker builds passed for migration, API, worker, agent, and app. The application TypeScript phase completed in 93 seconds inside the Next production build. Production-config validation and Compose validation passed with immutable image digests, HTTPS URLs, PostgreSQL coordination, no Redis dependency, and the required provider settings.
 - A fresh local PostgreSQL backup restored into a fresh database with checksum verification, 64 migrations, 4 users, 15 companies, 45 contacts, 159 activities, zero unvalidated foreign keys, and exit-on-error restore. Zero football-player and email-thread rows reflected the local seed.
 
 ## Required before controlled real-email proof
@@ -21,7 +21,7 @@ Status recorded 2026-08-26 after the completed V1 migration rehearsal at commit 
 
 ## Required before production deployment or cutover
 
-- Build and publish immutable API, app, worker, agent, migration, and Postgres image references by digest. The local Docker image check reached the application typecheck stage but stalled, so a clean CI or release-host build is still required.
+- Publish the verified local runtime images to the release registry by digest. The local build blocker was fixed by excluding host incremental TypeScript state and restoring the filtered migration dependency install; local immutable image IDs are recorded in `docs/ibl/docker-build-verification.md`.
 - Provide encrypted off-host backup storage and complete a restore verification using the production backup procedure. Local restore and checksum verification passed; off-host encryption was not available on this machine.
 - Complete DNS, TLS, secret-file provisioning, provider evidence, monitoring, alert routing, release-owner approval, and post-deploy smoke checks from the deployment runbook.
 - Keep V2 runtime configuration independent of V1 and remove the V1 export credential from any runtime deployment environment.

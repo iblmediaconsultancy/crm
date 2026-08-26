@@ -11,6 +11,7 @@ node_modules
 **/.output
 **/coverage
 **/dist
+**/tsconfig.tsbuildinfo
 phase6/artifacts
 phase7/.rehearsal-secrets
 ibl-v2-review.zip
