@@ -8,14 +8,17 @@ Use a V1 database role with `CONNECT`, `USAGE` on the required schemas, and
 counts, checksums, reason codes, watermarks, and hashed identifiers.
 
 Before connecting, run `phase6/v1-readonly-role.sql` in the V1 Supabase SQL
-Editor. It creates the restricted role from the 75-table export policy. Then
+Editor. It creates the restricted role from the 82-table export policy. Then
 run `phase6/v1-readonly-role-verification.sql` through that role and require
 zero dangerous inherited privileges. The exporter reads table and column names
 from PostgreSQL catalogs, not `information_schema.columns`, so secret columns
 remain ungranted while schema drift is still detected.
 Inherited PUBLIC `TEMPORARY` is reported but is not treated as a persistent-data
-write path; no global PUBLIC privilege is changed. Any PUBLIC-executable
-user-defined function remains a fail-closed review blocker.
+write path. Existing policies formerly targeted to PUBLIC are scoped to the
+normal `anon` and `authenticated` roles, preserving normal application behavior
+while excluding the exporter. Public function execution is likewise retained
+for `anon`, `authenticated`, and `service_role`, but not inherited by the
+exporter.
 
 The V2 connection must be the migration owner, not an API or worker identity.
 The control ledger is inaccessible to runtime roles. `apply` and `rollback`
@@ -27,7 +30,7 @@ require the explicit `--confirm-apply` switch.
    The export transaction records `txid_current()`, `pg_current_snapshot()`,
    and capture time as one immutable snapshot boundary.
 2. Run `inventory`, then `export` under a repeatable-read read-only transaction.
-   Export validates the complete 75-table matrix and explicit source columns
+   Export validates the complete 82-table matrix and explicit source columns
    before selecting data. Unknown tables or columns fail closed. Secret-bearing
    columns are omitted from the SQL projection; `mailbox_credentials` exports
    only safe mailbox metadata.
@@ -42,7 +45,8 @@ require the explicit `--confirm-apply` switch.
 7. Reconcile ledger counts and target foreign keys. Keep the generated run ID.
 8. For each post-snapshot window, export a deterministic delta containing
    ordered upserts and deletes, tied to the prior manifest checksum and both
-   watermarks. Replay deltas in dependency order and reconcile after every
+   watermarks. Run `delta` and `delta-replay` to validate the window and its
+   replay fingerprint. Replay deltas in dependency order and reconcile after every
    replay. At cutover, freeze V1 writes, export a final delta, repeat the dry
    run and apply, then switch traffic only after application smoke tests.
 
@@ -53,7 +57,9 @@ Set `V1_MIGRATION_RUN_ID` to the apply run ID and invoke `rollback
 restores updated rows from before-images, and deletes only rows inserted by
 that run in reverse dependency order. If a post-cutover writer changed a
 fingerprinted row, rollback stops and requires review. Append-only audit and
-history rows are retained and marked as preserved rather than mutated.
+history rows are retained and marked as preserved rather than mutated. Run
+`rollback-reconcile` afterward to verify the ledger, preserved durable rows,
+and foreign-key integrity.
 
 ## Production limitations
 

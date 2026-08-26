@@ -33,6 +33,9 @@ export interface PlanContext {
 	ownerUserId: string;
 	existingFingerprints?: Set<string>;
 	ownerMap?: Record<string, string>;
+	routeOwners?: Record<string, string[]>;
+	clubTargets?: Record<string, string>;
+	proposalItemPositions?: Record<string, number>;
 }
 
 type MappingDefinition = {
@@ -74,10 +77,11 @@ const STATIC_MAPPINGS: Record<string, MappingDefinition> = {
 	football_person_details: { targetTable: "contactFact" },
 	football_player_details: { targetTable: "contactFact" },
 	football_promotion_audit: { targetTable: "lifecycleEvent" },
-	football_relationships: { targetTable: "representation", ownerRequired: true },
+	football_relationships: { targetTable: "lifecycleEvent", ownerRequired: true },
 	football_route_external_ids: { targetTable: "contactRoute", ownerRequired: true },
 	football_shared_contact_routes: { targetTable: "sharedRoutePolicy", ownerRequired: true },
 	football_source_records: { targetTable: "evidenceSource" },
+	lead_outreach_state: { targetTable: "lifecycleEvent" },
 	lead_activity_events: { targetTable: "lifecycleEvent" },
 	lead_allocation_runs: { targetTable: "allocationRequest" },
 	lead_candidate_scores: { targetTable: "allocationRequest" },
@@ -86,9 +90,10 @@ const STATIC_MAPPINGS: Record<string, MappingDefinition> = {
 	lead_pack_item_actions: { targetTable: "lifecycleEvent" },
 	lead_pack_items: { targetTable: "allocationRequest" },
 	lead_packs: { targetTable: "allocationRequest" },
+	outreach_events: { targetTable: "lifecycleEvent" },
 	leads: { targetTable: "lead", ownerRequired: true },
 	mailbox_connections: { targetTable: "mailbox", ownerRequired: true },
-	mailbox_sync_runs: { targetTable: "mailboxSync", ownerRequired: true },
+	mailbox_sync_runs: { targetTable: "activity", ownerRequired: true },
 	manual_communication_drafts: { targetTable: "draft", ownerRequired: true },
 	notification_preferences: { targetTable: "userProfile" },
 	phone_call_notes: { targetTable: "activity", ownerRequired: true },
@@ -105,7 +110,7 @@ const STATIC_MAPPINGS: Record<string, MappingDefinition> = {
 	user_work_preferences: { targetTable: "userProfile" },
 };
 
-const PLATFORM_EXCLUSIONS: Record<string, string> = {
+export const PLATFORM_EXCLUSIONS: Record<string, string> = {
 	analytics_events: "DERIVED_TELEMETRY",
 	app_schema_capabilities: "PLATFORM_SCHEMA_STATE",
 	dashboard_metric_snapshots: "DERIVED_METRICS",
@@ -113,10 +118,13 @@ const PLATFORM_EXCLUSIONS: Record<string, string> = {
 	duplicate_scan_state: "REBUILDABLE_DEDUP_SCAN_STATE",
 	entity_fingerprints: "REBUILDABLE_ENTITY_FINGERPRINTS",
 	football_import_batches: "SOURCE_IMPORT_CONTROL_ONLY",
+	football_import_jobs: "SOURCE_IMPORT_CONTROL_ONLY",
 	football_import_ledger: "SOURCE_IMPORT_CONTROL_ONLY",
+	football_import_worker_state: "SOURCE_IMPORT_CONTROL_ONLY",
 	in_app_notifications: "TRANSIENT_UI_NOTIFICATION",
 	imports: "SOURCE_IMPORT_CONTROL_ONLY",
 	mailbox_credentials: "SECRET_NOT_MIGRATED",
+	outreach_reconciliation_jobs: "OUTREACH_RECONCILIATION_CONTROL_ONLY",
 };
 
 export const stableHash = (value: string) =>
@@ -175,14 +183,29 @@ const splitName = (value: unknown) => {
 
 const leadStatus = (value: unknown) => {
 	const status = String(value ?? "").toUpperCase();
-	if (
-		["NEW", "QUALIFIED", "CONTACTED", "CONVERTED", "DISQUALIFIED"].includes(
-			status,
-		)
-	)
-		return status;
-	if (status === "LOST") return "DISQUALIFIED";
-	return "NEW";
+	const mappings: Record<string, string> = {
+		NEW: "NEW",
+		QUALIFIED: "QUALIFIED",
+		CONTACTED: "NURTURING",
+		CONVERTED: "CONVERTED",
+		DISQUALIFIED: "DISQUALIFIED",
+		LOST: "DISQUALIFIED",
+		"CONTACT ROUTE NEEDED": "NEW",
+		"WAITING REPLY": "NURTURING",
+		"ON HOLD": "NURTURING",
+		"NOT CONTACTED": "NEW",
+		"NOT NOW": "NURTURING",
+		"CONTACT INVALID": "DISQUALIFIED",
+		"WARM LEAD": "QUALIFIED",
+	};
+	return mappings[status] ?? "NEW";
+};
+
+const draftStatus = (value: unknown) => {
+	const status = String(value ?? "").toUpperCase();
+	return ["DRAFT", "IN_REVIEW", "REJECTED", "FAILED", "CANCELLED"].includes(status)
+		? status
+		: "DRAFT";
 };
 
 const mappingFor = (table: string, row: Record<string, unknown>) => {
@@ -205,6 +228,9 @@ const mappingFor = (table: string, row: Record<string, unknown>) => {
 	}
 	if (table === "football_player_details") {
 		return { targetTable: "footballPlayer", ownerRequired: false };
+	}
+	if (table === "football_relationships") {
+		return { targetTable: "lifecycleEvent", ownerRequired: true };
 	}
 	if (table === "football_organization_details") {
 		return {
@@ -325,6 +351,18 @@ const targetFieldsFor = (
 			...timestamps,
 		};
 	}
+	if (table === "football_player_details") {
+		return {
+			currentClubId: row.club ? context.clubTargets?.[normalizeName(row.club)] ?? null : null,
+			...timestamps,
+		};
+	}
+	if (table === "ai_proposal_items") {
+		return {
+			position: context.proposalItemPositions?.[sourceId(row)] ?? Math.max(0, Math.trunc(Number(row.position ?? 0))),
+			...timestamps,
+		};
+	}
 	if (table === "football_entities") {
 		const kind = String(row.entity_kind ?? "").toLowerCase();
 		const name = splitName(row.display_name);
@@ -345,19 +383,13 @@ const targetFieldsFor = (
 	}
 	if (table === "football_relationships") {
 		return {
-			playerContactId: row.to_entity_id
-				? targetIdFor("football_entities", String(row.to_entity_id))
-				: null,
-			agentContactId: row.from_entity_id
+			ownerUserId: ownerId,
+			parentTargetId: row.from_entity_id
 				? targetIdFor("football_entities", String(row.from_entity_id))
-				: null,
-			agencyCompanyId: row.agency_entity_id
-				? targetIdFor("football_entities", String(row.agency_entity_id))
-				: null,
-			status: String(row.relationship_type ?? "PENDING").toUpperCase(),
-			createdByUserId: ownerId,
-			startedAt: row.started_at ?? null,
-			endedAt: row.ended_at ?? null,
+				: row.to_entity_id
+					? targetIdFor("football_entities", String(row.to_entity_id))
+					: null,
+			...timestamps,
 		};
 	}
 	if (table === "contact_routes" || table === "football_contact_routes") {
@@ -475,7 +507,7 @@ const targetFieldsFor = (
 			recipientRouteId: row.route_id ? targetIdFor("contact_routes", String(row.route_id)) : null,
 			subject: row.subject ?? null,
 			body: row.body ?? row.phone_script ?? "",
-			status: String(row.status ?? "DRAFT").toUpperCase(),
+			status: draftStatus(row.status),
 			createdAt: row.created_at ?? null,
 			updatedAt: row.updated_at ?? row.created_at ?? null,
 		};
@@ -494,7 +526,7 @@ const mappedCoverage = (row: Record<string, unknown>): FieldCoverage => ({
 	unsupported: {},
 });
 
-const excludedCoverage = (
+export const excludedCoverage = (
 	row: Record<string, unknown>,
 	reason: string,
 ): FieldCoverage => ({
@@ -517,14 +549,19 @@ const duplicateFingerprint = (
 	table: string,
 	row: Record<string, unknown>,
 	targetTable: string,
+	context: PlanContext,
 ) => {
 	if (table.startsWith("duplicate_") || table.includes("merge")) return null;
 	if (table === "leads")
 		return `lead:${normalizeName(row.name)}:${normalizeName(row.organization)}`;
 	if (table === "football_entities")
-		return `${targetTable}:${normalizeName(row.display_name)}`;
-	if (table === "contact_routes" || table === "football_contact_routes")
-		return `route:${String(row.route_type ?? "").toLowerCase()}:${normalizeName(row.value ?? row.route_value)}`;
+		return `${targetTable}:${normalizeName(row.display_name)}:${normalizeName(row.country_region)}`;
+	if (table === "contact_routes")
+		return `route:${String(row.route_type ?? "").toLowerCase()}:${normalizeName(row.value)}:lead:${String(row.lead_id ?? "unowned")}`;
+	if (table === "football_contact_routes") {
+		const owners = [...(context.routeOwners?.[String(row.id)] ?? [])].sort();
+		return `route:${String(row.route_type ?? "").toLowerCase()}:${normalizeName(row.route_value)}:${owners.length ? owners.join("|") : "unowned"}`;
+	}
 	if (table === "profiles") return `profile:${normalizeName(row.email)}`;
 	return null;
 };
@@ -577,7 +614,7 @@ export const planRow = (
 		return mappingReject(identity, table, "MISSING_REQUIRED_NAME", row);
 
 	const targetTable = definition.targetTable;
-	const fingerprint = duplicateFingerprint(table, row, targetTable);
+	const fingerprint = duplicateFingerprint(table, row, targetTable, context);
 	if (fingerprint && context.existingFingerprints?.has(fingerprint)) {
 		return {
 			...identity,
@@ -610,13 +647,65 @@ export const planRow = (
 export const planRows = (rows: ExportRow[], context: PlanContext) => {
 	const fingerprints = context.existingFingerprints ?? new Set<string>();
 	const ownerMap = { ...(context.ownerMap ?? {}) };
+	const routeOwners: Record<string, string[]> = Object.fromEntries(
+		Object.entries(context.routeOwners ?? {}).map(([routeId, owners]) => [routeId, [...owners]]),
+	);
+	const entityNames = new Map<string, string>();
+	for (const item of rows.filter((candidate) => candidate.table === "football_entities")) {
+		const id = item.row.id;
+		const name = item.row.display_name;
+		if (id !== undefined && name !== undefined && String(name).trim()) {
+			entityNames.set(String(id), normalizeName(name));
+		}
+	}
+	const clubTargetGroups = new Map<string, string[]>();
+	for (const item of rows.filter((candidate) => candidate.table === "football_organization_details")) {
+		if (!String(item.row.organization_type ?? "").toLowerCase().includes("club")) continue;
+		const entityId = item.row.entity_id;
+		const name = entityId === undefined ? undefined : entityNames.get(String(entityId));
+		if (!name) continue;
+		const targets = clubTargetGroups.get(name) ?? [];
+		targets.push(targetIdFor("football_entities", String(entityId)));
+		clubTargetGroups.set(name, targets);
+	}
+	const clubTargets = Object.fromEntries(
+		[...clubTargetGroups.entries()]
+			.filter(([, targets]) => new Set(targets).size === 1)
+			.map(([name, targets]) => [name, targets[0] as string]),
+	);
+	const proposalItemPositions: Record<string, number> = {};
+	const proposalItemGroups = new Map<string, Array<{ source: string; base: number }>>();
+	for (const item of rows.filter((candidate) => candidate.table === "ai_proposal_items")) {
+		const proposal = String(item.row.proposal_id ?? "");
+		const group = proposalItemGroups.get(proposal) ?? [];
+		group.push({ source: sourceId(item.row), base: Math.max(0, Math.trunc(Number(item.row.position ?? 0))) });
+		proposalItemGroups.set(proposal, group);
+	}
+	for (const group of proposalItemGroups.values()) {
+		const used = new Set<number>();
+		for (const item of [...group].sort((left, right) => left.base - right.base || left.source.localeCompare(right.source))) {
+			let position = item.base;
+			while (used.has(position)) position += 1;
+			used.add(position);
+			proposalItemPositions[item.source] = position;
+		}
+	}
 	for (const item of rows.filter((candidate) => candidate.table === "profiles")) {
 		ownerMap[String(sourceId(item.row))] = targetIdFor("profiles", sourceId(item.row));
+	}
+	for (const item of rows.filter((candidate) => candidate.table === "football_entity_contact_routes")) {
+		const routeId = String(item.row.contact_route_id ?? "");
+		const entityId = item.row.entity_id;
+		if (!routeId || entityId === undefined || entityId === null) continue;
+		routeOwners[routeId] = [...new Set([...(routeOwners[routeId] ?? []), `entity:${String(entityId)}`])];
 	}
 	const planningContext = {
 		...context,
 		existingFingerprints: fingerprints,
 		ownerMap,
+		routeOwners,
+		clubTargets,
+		proposalItemPositions,
 	};
 	return rows.map((row) => planRow(row, planningContext));
 };

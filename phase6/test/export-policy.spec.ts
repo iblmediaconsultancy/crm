@@ -16,7 +16,7 @@ const schemaColumns = Object.entries(policy).flatMap(([table, tablePolicy]) =>
 
 describe("V1 export policy", () => {
 	test("covers every authoritative table and never exports secret columns", () => {
-		expect(Object.keys(policy)).toHaveLength(75);
+		expect(Object.keys(policy)).toHaveLength(82);
 		expect(Object.keys(policy)).toEqual([...EXPECTED_V1_TABLES]);
 		expect(policy.mailbox_credentials?.columns).toEqual(["mailbox_id", "updated_at"]);
 		expect(policy.mailbox_credentials?.columns).not.toContain("encrypted_password");

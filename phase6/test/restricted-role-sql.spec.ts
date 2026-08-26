@@ -25,7 +25,7 @@ const grantedColumns = new Map<string, string[]>(grantMatches.map((match) => {
 
 describe("restricted V1 role SQL", () => {
 	test("has one explicit public-table grant for every inventoried table", () => {
-		expect(grantMatches).toHaveLength(75);
+		expect(grantMatches).toHaveLength(82);
 		expect([...grantedColumns.keys()].sort()).toEqual(Object.keys(policy).sort());
 	});
 

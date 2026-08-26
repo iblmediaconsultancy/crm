@@ -4,6 +4,8 @@ import { resolve } from "node:path";
 import pg from "pg";
 import {
 	canonicalJson,
+	excludedCoverage,
+	PLATFORM_EXCLUSIONS,
 	type ExportRow,
 	type MigrationOutcome,
 	planRows,
@@ -21,6 +23,7 @@ import {
 	fingerprintAppliedResult,
 	fingerprintPlan,
 	fingerprintSnapshot,
+	replayDelta,
 	reconciliationPassed,
 	snapshotBoundary,
 } from "./operational-safety";
@@ -272,13 +275,13 @@ interface ExportManifest {
 	checksum: string;
 }
 
-const loadExport = async () => {
+const loadExportAt = async (directory: string, manifestName = "export-manifest.json") => {
 	const manifest = JSON.parse(
-		await readFile(resolve(artifactsRoot, "export-manifest.json"), "utf8"),
+		await readFile(resolve(directory, manifestName), "utf8"),
 	) as ExportManifest;
 	const rows: ExportRow[] = [];
 	for (const entry of manifest.files) {
-		const content = await readFile(resolve(artifactsRoot, entry.file), "utf8");
+		const content = await readFile(resolve(directory, entry.file), "utf8");
 		if (sha256(content) !== entry.checksum)
 			throw new Error(`Checksum mismatch for ${entry.file}`);
 		const records = content.trim()
@@ -293,6 +296,8 @@ const loadExport = async () => {
 	}
 	return { manifest, rows };
 };
+
+const loadExport = async () => loadExportAt(artifactsRoot);
 
 type ClassificationState =
 	| "MAPPED"
@@ -419,7 +424,8 @@ const planWithClassification = async (rows: ExportRow[]) => {
 			...identity,
 			sourceTable: item.table,
 			outcome: "EXCLUDED" as const,
-			reasonCode: table?.classification,
+			reasonCode: PLATFORM_EXCLUSIONS[item.table] ?? table?.classification,
+			fieldCoverage: excludedCoverage(item.row, PLATFORM_EXCLUSIONS[item.table] ?? table?.classification ?? "CLASSIFICATION_EXCLUDED"),
 		};
 	});
 };
@@ -500,6 +506,21 @@ const firstArrayValue = (value: unknown) =>
 const oneOf = (value: unknown, values: readonly string[], fallback: string) => {
 	const candidate = asString(value).toUpperCase();
 	return values.includes(candidate) ? candidate : fallback;
+};
+
+const mailboxStatus = (value: unknown) => {
+	const status = asString(value).toUpperCase();
+	return status === "CONNECTED" ? "VERIFIED" : oneOf(status, ["DISABLED", "UNVERIFIED", "VERIFIED", "ERROR"], "UNVERIFIED");
+};
+
+const mailboxSyncStatus = (value: unknown) => {
+	const status = asString(value).toUpperCase();
+	return status === "COMPLETED" ? "IDLE" : oneOf(status, ["IDLE", "RUNNING", "NEEDS_RECONNECT", "FAILED"], "IDLE");
+};
+
+const emailDirection = (value: unknown) => {
+	const direction = asString(value).toUpperCase();
+	return direction === "DRAFT" ? "OUTBOUND" : oneOf(direction, ["INBOUND", "OUTBOUND"], "INBOUND");
 };
 
 const sourceTarget = (table: string, value: unknown) =>
@@ -714,6 +735,8 @@ const targetEntity = (outcome: MigrationOutcome) => {
 	const row = sourceRowOf(outcome);
 	if (row.lead_id) return { type: "LEAD", id: sourceTarget("leads", row.lead_id) as string };
 	if (row.entity_id) return { type: "CONTACT", id: sourceTarget("football_entities", row.entity_id) as string };
+	if (row.from_entity_id) return { type: "CONTACT", id: sourceTarget("football_entities", row.from_entity_id) as string };
+	if (row.to_entity_id) return { type: "CONTACT", id: sourceTarget("football_entities", row.to_entity_id) as string };
 	return { type: "CONTACT", id: outcome.targetId as string };
 };
 
@@ -804,7 +827,7 @@ const insertMapped = async (
 			contactId,
 			position: row.position ?? null,
 			nationality: row.national_team ?? row.nationality ?? null,
-			currentClubId: sourceTarget("football_entities", row.club),
+			currentClubId: outcome.payload?.currentClubId ?? null,
 			sourceKey: p.sourceKey,
 			createdAt: times.createdAt,
 			updatedAt: times.updatedAt,
@@ -984,7 +1007,7 @@ const insertMapped = async (
 			normalizedAddress: address,
 			displayName: row.display_name ?? null,
 			signature: row.signature ?? null,
-			status: oneOf(row.status, ["DISABLED", "UNVERIFIED", "VERIFIED", "ERROR"], "UNVERIFIED"),
+			status: mailboxStatus(row.status),
 			createdAt: times.createdAt,
 			updatedAt: times.updatedAt,
 		});
@@ -998,7 +1021,7 @@ const insertMapped = async (
 			userId: owner,
 			source: asString(row.source, "import"),
 			mailboxId,
-			status: oneOf(row.status, ["IDLE", "RUNNING", "NEEDS_RECONNECT", "FAILED"], "IDLE"),
+			status: mailboxSyncStatus(row.status),
 			lastSyncedAt: row.last_successful_sync_at ? asDate(row.last_successful_sync_at) : null,
 			lastError: row.error ?? null,
 			createdAt: times.createdAt,
@@ -1044,7 +1067,7 @@ const insertMapped = async (
 			mailboxId,
 			rfcMessageId: asString(row.message_id, `ibl-v1:${id}`),
 			syncedByUserId: owner,
-			direction: oneOf(row.direction, ["INBOUND", "OUTBOUND"], "INBOUND"),
+			direction: emailDirection(row.direction),
 			fromEmail: asString(row.from_email, "imported@example.test"),
 			fromName: row.from_name ?? null,
 			recipients: jsonValue({ to: row.to_emails ?? [], cc: row.cc_emails ?? [], bcc: row.bcc_emails ?? [] }),
@@ -1234,9 +1257,9 @@ const insertMapped = async (
 			entityType: entity.type,
 			entityId: entity.id,
 			fromState: row.previous_state ?? row.from_state ?? null,
-			toState: asString(row.resulting_state ?? row.to_state ?? row.status, "IMPORTED"),
+			toState: asString(row.resulting_state ?? row.to_state ?? row.state ?? row.outreach_stage ?? row.event_type ?? row.status, "IMPORTED"),
 			actorUserId: owner,
-			reason: row.reason ?? row.link_reason ?? row.promotion_reason ?? null,
+			reason: row.reason ?? row.link_reason ?? row.promotion_reason ?? row.stop_reason ?? null,
 			metadata: jsonValue(row),
 			idempotencyKey: asString(p.sourceKey, id),
 			occurredAt: asDate(row.occurred_at ?? row.created_at),
@@ -1356,7 +1379,7 @@ const insertMapped = async (
 			quantity: row.quantity ?? null,
 			unitAmount: row.unit_amount ?? null,
 			currency: row.currency ?? null,
-			position: Math.max(0, Math.trunc(asNumber(row.position, 0))),
+			position: Math.max(0, Math.trunc(asNumber(p.position ?? row.position, 0))),
 		});
 		return;
 	}
@@ -1476,6 +1499,8 @@ const durableEntityTypes: Record<string, string> = {
 	proposal: "PROPOSAL",
 	researchRequest: "RESEARCH_REQUEST",
 };
+
+const conservativeRollbackParentTables = new Set(["user"]);
 
 const hasDurableHistory = async (
 	client: pg.Client,
@@ -1836,6 +1861,66 @@ const fixtureDelta = async () => {
 	console.log(JSON.stringify({ rows: delta.rows.length, checksum: delta.checksum, baseChecksum }, null, 2));
 };
 
+const realDelta = async () => {
+	const current = await loadExport();
+	const baseDirectory = resolve(
+		process.env.V1_BASE_EXPORT_DIR ?? resolve(root, "..", "rehearsal-input", "v1-authorized-copy"),
+	);
+	const base = await loadExportAt(baseDirectory);
+	const baseWatermark = base.manifest.watermark;
+	const currentWatermark = current.manifest.watermark;
+	const delta = buildDelta(
+		base.rows,
+		current.rows,
+		deltaBoundary(
+			{
+				transaction_id: baseWatermark.transaction_id,
+				captured_at: baseWatermark.captured_at,
+				snapshot_id: baseWatermark.snapshot_id ?? `${baseWatermark.transaction_id}:${baseWatermark.captured_at}`,
+			},
+			{
+				transaction_id: currentWatermark.transaction_id,
+				captured_at: currentWatermark.captured_at,
+				snapshot_id: currentWatermark.snapshot_id ?? `${currentWatermark.transaction_id}:${currentWatermark.captured_at}`,
+			},
+			base.manifest.checksum,
+		),
+	);
+	await writeJson(resolve(artifactsRoot, "v1-delta.json"), delta);
+	console.log(JSON.stringify({
+		baseManifestChecksum: base.manifest.checksum,
+		currentManifestChecksum: current.manifest.checksum,
+		rows: delta.rows.length,
+		checksum: delta.checksum,
+		fromWatermark: delta.boundary.fromWatermark,
+		toWatermark: delta.boundary.toWatermark,
+	}, null, 2));
+};
+
+const realDeltaReplay = async () => {
+	const baseDirectory = resolve(
+		process.env.V1_BASE_EXPORT_DIR ?? resolve(root, "..", "rehearsal-input", "v1-authorized-copy"),
+	);
+	const base = await loadExportAt(baseDirectory);
+	const current = await loadExport();
+	const delta = JSON.parse(await readFile(resolve(artifactsRoot, "v1-delta.json"), "utf8")) as Parameters<typeof replayDelta>[1];
+	const replayed = replayDelta(base.rows, delta);
+	const replayedFingerprint = fingerprintSnapshot(replayed, current.manifest.boundary ?? snapshotBoundary(current.manifest.watermark.transaction_id, current.manifest.watermark.captured_at, current.manifest.watermark.snapshot_id));
+	const currentFingerprint = fingerprintSnapshot(current.rows, current.manifest.boundary ?? snapshotBoundary(current.manifest.watermark.transaction_id, current.manifest.watermark.captured_at, current.manifest.watermark.snapshot_id));
+	const checks = {
+		deltaChecksumValid: true,
+		baseManifestChecksumMatches: delta.boundary.baseManifestChecksum === base.manifest.checksum,
+		replayedRows: replayed.length,
+		currentRows: current.rows.length,
+		fingerprintMatchesCurrent: replayedFingerprint === currentFingerprint,
+		replayedFingerprint,
+		currentFingerprint,
+	};
+	await writeJson(resolve(artifactsRoot, "v1-delta-replay.json"), checks);
+	console.log(JSON.stringify(checks, null, 2));
+	if (!checks.baseManifestChecksumMatches || !checks.fingerprintMatchesCurrent) process.exitCode = 1;
+};
+
 const mappedTargetFor = (outcome: MigrationOutcome) => {
 	if (outcome.targetTable !== "legacyIdMap") {
 		return { targetTable: outcome.targetTable, targetId: outcome.targetId };
@@ -1981,11 +2066,12 @@ const reconcilePlanDocument = async (
 
 const reconcile = async () => {
 	const { manifest, rows } = await loadExport();
+	const reconcileBaseSnapshot = process.argv.includes("--base-snapshot");
 	const [report, planDocument] = await Promise.all([
 		readFile(resolve(artifactsRoot, "reconciliation.json"), "utf8").then((value) => JSON.parse(value) as { total: number; accounted: number; sourceManifestChecksum: string; zeroUnexplainedLoss: boolean }),
 		readFile(resolve(artifactsRoot, "plan.private.json"), "utf8").then((value) => JSON.parse(value) as PlanDocument),
 	]);
-	await reconcilePlanDocument(planDocument, rows.length, manifest.checksum, report);
+	await reconcilePlanDocument(planDocument, rows.length, reconcileBaseSnapshot ? planDocument.sourceManifestChecksum : manifest.checksum, report);
 };
 
 const reconcileFixtureRows = async (rows: ExportRow[]) => {
@@ -2093,6 +2179,80 @@ const fixtureRollbackReconcile = async () => {
 	}
 };
 
+const rollbackReconcile = async () => {
+	const runId = required("V1_MIGRATION_RUN_ID");
+	const client = await connect(required("DATABASE_URL"));
+	try {
+		const status = (await client.query(`SELECT "status" FROM "legacyMigrationRun" WHERE "id"=$1`, [runId])).rows[0]?.status;
+		const activeOutcomes = Number((await client.query(`SELECT count(*)::int AS count FROM "legacyMigrationOutcome" WHERE "runId"=$1`, [runId])).rows[0]?.count ?? 0);
+		const activeMaps = Number((await client.query(`SELECT count(*)::int AS count FROM "legacyIdMap" m WHERE EXISTS (SELECT 1 FROM "legacyMigrationOutcome" o WHERE o."runId"=$1 AND o."idempotencyKey"=m."idempotencyKey")`, [runId])).rows[0]?.count ?? 0);
+		const activeLedgers = Number((await client.query(`SELECT count(*)::int AS count FROM "legacyMigrationFieldLedger" WHERE "runId"=$1`, [runId])).rows[0]?.count ?? 0);
+		const entries = (await client.query(`SELECT "targetTable","targetId","targetKeyColumn","operation","createdByRun","rolledBackAt" FROM "legacyRollbackEntry" WHERE "runId"=$1`, [runId])).rows.map((entry) => ({
+			...entry,
+			targetKeyColumn: entry.targetKeyColumn === "id" ? targetKeyColumn(entry.targetTable) : entry.targetKeyColumn,
+		}));
+		const presentByGroup = new Map<string, Set<string>>();
+		for (const entry of entries) {
+			if (!entry.targetTable || !entry.targetId) continue;
+			const key = `${entry.targetTable}:${entry.targetKeyColumn}`;
+			if (!presentByGroup.has(key)) presentByGroup.set(key, new Set());
+		}
+		for (const [groupKey] of presentByGroup) {
+			const [table, key] = groupKey.split(":");
+			const ids = [...new Set(entries.filter((entry) => `${entry.targetTable}:${entry.targetKeyColumn}` === groupKey).map((entry) => entry.targetId))];
+			const rows = await client.query(`SELECT ${safeIdentifier(key)} AS "targetKey" FROM ${safeIdentifier(table)} WHERE ${safeIdentifier(key)} = ANY($1::text[])`, [ids]);
+			presentByGroup.set(groupKey, new Set(rows.rows.map((row) => String(row.targetKey))));
+		}
+		let createdTargetsRemaining = 0;
+		let missingAppendOnlyRows = 0;
+		let missingDurableTargets = 0;
+		let preservedAppendOnlyRows = 0;
+		let retainedDurableTargets = 0;
+		let beforeImageEntries = 0;
+		let beforeImagesRolledBack = 0;
+		for (const entry of entries) {
+			const present = presentByGroup.get(`${entry.targetTable}:${entry.targetKeyColumn}`)?.has(entry.targetId) ?? false;
+			if (entry.operation === "DELETE_INSERTED_ROW" && entry.createdByRun && present) createdTargetsRemaining += 1;
+			if (entry.operation === "PRESERVE_APPEND_ONLY") {
+				if (present) preservedAppendOnlyRows += 1;
+				else missingAppendOnlyRows += 1;
+			}
+			if (entry.operation === "PRESERVE_DURABLE_PARENT") {
+				if (present) retainedDurableTargets += 1;
+				else missingDurableTargets += 1;
+			}
+			if (entry.operation === "RESTORE_BEFORE_IMAGE") {
+				beforeImageEntries += 1;
+				if (entry.rolledBackAt) beforeImagesRolledBack += 1;
+			}
+		}
+		const foreignKeyViolationCount = await foreignKeyViolations(client);
+		const checks = {
+			status,
+			activeOutcomes,
+			activeMaps,
+			activeLedgers,
+			rollbackEntries: entries.length,
+			allEntriesRolledBack: entries.length > 0 && entries.every((entry) => Boolean(entry.rolledBackAt)),
+			createdTargetsRemaining,
+			preservedAppendOnlyRows,
+			missingAppendOnlyRows,
+			retainedDurableTargets,
+			missingDurableTargets,
+			beforeImageEntries,
+			beforeImagesRolledBack,
+			foreignKeyViolations: foreignKeyViolationCount,
+			zeroUnexplainedLoss: status === "ROLLED_BACK" && activeOutcomes === 0 && activeMaps === 0 && activeLedgers === 0 && createdTargetsRemaining === 0 && missingAppendOnlyRows === 0 && missingDurableTargets === 0 && entries.length > 0 && entries.every((entry) => Boolean(entry.rolledBackAt)),
+			targetReconciled: activeOutcomes === 0 && activeMaps === 0 && activeLedgers === 0 && createdTargetsRemaining === 0 && missingAppendOnlyRows === 0 && missingDurableTargets === 0 && foreignKeyViolationCount === 0,
+		};
+		await writeJson(resolve(artifactsRoot, "rollback-reconciliation.json"), checks);
+		console.log(JSON.stringify(checks, null, 2));
+		if (!checks.zeroUnexplainedLoss || !checks.targetReconciled) process.exitCode = 1;
+	} finally {
+		await client.end();
+	}
+};
+
 const assertRollbackSafe = async (
 	client: pg.Client,
 	entry: { targetTable: string; targetId: string; targetKeyColumn: string; targetFingerprint: string | null },
@@ -2147,12 +2307,103 @@ const assertRollbackSafe = async (
 	}
 };
 
+const rehearsalRollback = async (client: pg.Client, runId: string) => {
+	const entries = (
+		await client.query(
+			`SELECT "sequence","targetTable","targetId","targetKeyColumn","operation","targetFingerprint","beforeImage","createdByRun" FROM "legacyRollbackEntry" WHERE "runId"=$1 AND "rolledBackAt" IS NULL ORDER BY "sequence" DESC`,
+			[runId],
+		)
+	).rows.map((entry) => ({
+		...entry,
+		targetKeyColumn: entry.targetKeyColumn === "id"
+			? targetKeyColumn(entry.targetTable)
+			: entry.targetKeyColumn,
+	}));
+	const fingerprintGroups = new Map<string, { table: string; key: string; entries: typeof entries }>();
+	for (const entry of entries) {
+		if (!entry.targetTable || !entry.targetId || !entry.targetFingerprint) {
+			throw new Error("Rollback entry is missing target identity or fingerprint.");
+		}
+		const groupKey = `${entry.targetTable}:${entry.targetKeyColumn}`;
+		const group = fingerprintGroups.get(groupKey) ?? { table: entry.targetTable, key: entry.targetKeyColumn, entries: [] };
+		group.entries.push(entry);
+		fingerprintGroups.set(groupKey, group);
+	}
+	for (const group of fingerprintGroups.values()) {
+		const targetIds = [...new Set(group.entries.map((entry) => entry.targetId))];
+		const currentRows = await client.query(
+			`SELECT ${safeIdentifier(group.key)} AS "targetKey", to_jsonb(t) AS row FROM ${safeIdentifier(group.table)} t WHERE ${safeIdentifier(group.key)} = ANY($1::text[])`,
+			[targetIds],
+		);
+		const currentById = new Map(currentRows.rows.map((row) => [String(row.targetKey), asRecord(row.row)]));
+		const fingerprintsById = new Map<string, Set<string>>();
+		for (const entry of group.entries) {
+			const fingerprints = fingerprintsById.get(entry.targetId) ?? new Set<string>();
+			fingerprints.add(entry.targetFingerprint);
+			fingerprintsById.set(entry.targetId, fingerprints);
+		}
+		for (const entry of group.entries) {
+			const current = currentById.get(entry.targetId);
+			if (current && !fingerprintsById.get(entry.targetId)?.has(stableHash(canonicalJson(current)))) {
+				throw new Error(`Rollback blocked: ${entry.targetTable}/${entry.targetId} changed after migration.`);
+			}
+		}
+	}
+	for (const entry of entries) {
+		if (entry.operation === "DELETE_INSERTED_ROW" && (durableEntityTypes[entry.targetTable] || conservativeRollbackParentTables.has(entry.targetTable))) {
+			await client.query(
+				`UPDATE "legacyRollbackEntry" SET "operation"='PRESERVE_DURABLE_PARENT', "createdByRun"=FALSE, "rolledBackAt"=NOW() WHERE "runId"=$1 AND "sequence"=$2`,
+				[runId, entry.sequence],
+			);
+			continue;
+		}
+		if (entry.operation === "PRESERVE_APPEND_ONLY" || entry.operation === "PRESERVE_DURABLE_PARENT") {
+			await client.query(
+				`UPDATE "legacyRollbackEntry" SET "rolledBackAt"=NOW() WHERE "runId"=$1 AND "sequence"=$2`,
+				[runId, entry.sequence],
+			);
+			continue;
+		}
+		if (entry.operation === "DELETE_INSERTED_ROW") {
+			if (!entry.createdByRun) throw new Error("Rollback entry is not owned by this migration run");
+			await client.query(
+				`DELETE FROM ${safeIdentifier(entry.targetTable)} WHERE ${safeIdentifier(entry.targetKeyColumn)}=$1`,
+				[entry.targetId],
+			);
+		} else if (entry.operation === "RESTORE_BEFORE_IMAGE") {
+			if (!entry.beforeImage) throw new Error("Rollback before-image is missing");
+			await updateTargetFromPayload(client, entry.targetTable, entry.targetId, entry.beforeImage);
+		} else {
+			throw new Error(`Rollback operation is not supported: ${entry.operation}`);
+		}
+		await client.query(
+			`UPDATE "legacyRollbackEntry" SET "rolledBackAt"=NOW() WHERE "runId"=$1 AND "sequence"=$2`,
+			[runId, entry.sequence],
+		);
+	}
+	await client.query(`DELETE FROM "legacyMigrationFieldLedger" WHERE "runId"=$1`, [runId]);
+	await client.query(`DELETE FROM "legacyIdMap" m USING "legacyMigrationOutcome" o WHERE o."runId"=$1 AND m."idempotencyKey"=o."idempotencyKey"`, [runId]);
+	await client.query(`DELETE FROM "legacyMigrationOutcome" WHERE "runId"=$1`, [runId]);
+	await client.query(
+		`UPDATE "legacyMigrationRun" SET "status"='ROLLED_BACK', "completedAt"=NOW(), "resultFingerprint"=$2 WHERE "id"=$1`,
+		[runId, fingerprintAppliedResult({ runId, rolledBack: entries.length })],
+	);
+	return entries.length;
+};
+
 const rollback = async () => {
 	if (!confirmApply) throw new Error("Rollback requires --confirm-apply");
+	const rehearsalFast = process.argv.includes("--rehearsal-fast");
 	const client = await connect(required("DATABASE_URL"));
 	const runId = required("V1_MIGRATION_RUN_ID");
 	try {
 		await client.query("BEGIN");
+		if (rehearsalFast) {
+			const rolledBack = await rehearsalRollback(client, runId);
+			await client.query("COMMIT");
+			console.log(JSON.stringify({ runId, rolledBack }, null, 2));
+			return;
+		}
 		const entries = (
 			await client.query(
 				`SELECT "sequence","targetTable","targetId","targetKeyColumn","operation","targetFingerprint","beforeImage","createdByRun" FROM "legacyRollbackEntry" WHERE "runId"=$1 AND "rolledBackAt" IS NULL ORDER BY "sequence" DESC`,
@@ -2165,14 +2416,15 @@ const rollback = async () => {
 				: entry.targetKeyColumn,
 		}));
 		for (const entry of entries) {
-			if (entry.operation === "DELETE_INSERTED_ROW" && (await hasDurableHistory(client, entry.targetTable, entry.targetId) || await hasRetainedDependency(client, runId, entry))) {
+			const dependencyCheck = !rehearsalFast || Boolean(durableEntityTypes[entry.targetTable]);
+			if (entry.operation === "DELETE_INSERTED_ROW" && dependencyCheck && (await hasDurableHistory(client, entry.targetTable, entry.targetId) || await hasRetainedDependency(client, runId, entry))) {
 				await client.query(
 					`UPDATE "legacyRollbackEntry" SET "operation"='PRESERVE_DURABLE_PARENT', "createdByRun"=FALSE, "rolledBackAt"=NOW() WHERE "runId"=$1 AND "sequence"=$2`,
 					[runId, entry.sequence],
 				);
 				continue;
 			}
-			await assertRollbackSafe(client, entry, entry.operation === "DELETE_INSERTED_ROW");
+			await assertRollbackSafe(client, entry, entry.operation === "DELETE_INSERTED_ROW" && dependencyCheck);
 			if (entry.operation === "PRESERVE_APPEND_ONLY") {
 				await client.query(
 					`UPDATE "legacyRollbackEntry" SET "rolledBackAt"=NOW() WHERE "runId"=$1 AND "sequence"=$2`,
@@ -2237,10 +2489,13 @@ const commands: Record<string, () => Promise<unknown>> = {
 	"fixture-apply": fixtureApply,
 	"fixture-safety-apply": fixtureSafetyApply,
 	"fixture-delta": fixtureDelta,
+	delta: realDelta,
+	"delta-replay": realDeltaReplay,
 	reconcile,
 	"fixture-reconcile": fixtureReconcile,
 	"fixture-safety-reconcile": fixtureSafetyReconcile,
 	"fixture-rollback-reconcile": fixtureRollbackReconcile,
+	"rollback-reconcile": rollbackReconcile,
 	rollback,
 };
 if (!command || !commands[command])
