@@ -7,14 +7,16 @@ export {
 	canRenameWorkspace,
 	DEFAULT_WORKSPACE_NAME,
 	ensureWorkspaceMembership,
+	FINANCE_PERMISSIONS,
+	type FinancePermission,
 	hasWorkspacePermission,
 	isWorkspaceAdmin,
 	isWorkspaceRole,
 	WORKSPACE_ID,
-	WORKSPACE_ROLES,
-	type WorkspaceRole,
-	type WorkspacePermission,
 	WORKSPACE_PERMISSIONS,
+	WORKSPACE_ROLES,
+	type WorkspacePermission,
+	type WorkspaceRole,
 } from "./organization";
 export { onSignedIn, type SignedInHandler } from "./signed-in";
 export {
@@ -24,9 +26,9 @@ export {
 	ssoProviderName,
 } from "./sso";
 export {
+	enqueueSystemEmail,
 	type SystemEmail,
 	type SystemEmailDependencies,
-	enqueueSystemEmail,
 	sendSystemEmail,
 	stableSystemEmailKey,
 } from "./system-email";

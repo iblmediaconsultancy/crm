@@ -11,7 +11,9 @@ import {
 	EntityLogo,
 	type EntityLogoTone,
 } from "@crm/ui/components/entity-logo";
+import { Field, FieldLabel } from "@crm/ui/components/field";
 import { Icon } from "@crm/ui/components/icon";
+import { Input } from "@crm/ui/components/input";
 import { PersonAvatar } from "@crm/ui/components/person-avatar";
 import { SimpleTable, SimpleTableRow } from "@crm/ui/components/simple-table";
 import { TableCell } from "@crm/ui/components/table";
@@ -22,6 +24,7 @@ import {
 } from "@crm/ui/components/tooltip";
 import { formatMoney } from "@crm/ui/lib/format";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { toast } from "sonner";
 import { AgentPanel } from "@/components/crm/agent-panel";
 import { contactName } from "@/components/crm/contact-name";
@@ -151,6 +154,11 @@ export function DealSheet({ dealId }: { dealId: string }) {
 							onDone={() => setAdding(null)}
 						/>
 					),
+				},
+				{
+					value: "finance",
+					label: "Finance",
+					content: <DealFinance dealId={deal.id} />,
 				},
 				{
 					value: "activity",
@@ -320,6 +328,61 @@ function DealOverview({ deal }: { deal: Deal }) {
 							formatMoney(Math.round(Number(value) * 100), currency)
 						}
 					/>
+					<InlineField
+						label="Proposed package"
+						value={deal.potentialPackageName ?? null}
+						placeholder="Monthly representation"
+						saving={isSaving("potentialPackageName")}
+						onSave={(next) =>
+							save({ potentialPackageName: next.trim() || null })
+						}
+					/>
+					<InlineField
+						label="Potential monthly MRR"
+						value={
+							deal.potentialMonthlyRevenueCents === null
+								? null
+								: String(deal.potentialMonthlyRevenueCents / 100)
+						}
+						placeholder="1000"
+						saving={isSaving("potentialMonthlyRevenueCents")}
+						onSave={(next) => {
+							if (next === "")
+								return save({ potentialMonthlyRevenueCents: null });
+							const parsed = Number.parseFloat(next);
+							if (!Number.isFinite(parsed) || parsed < 0)
+								return toast.error(
+									"Potential MRR has to be a positive number.",
+								);
+							save({ potentialMonthlyRevenueCents: Math.round(parsed * 100) });
+						}}
+						render={(value) =>
+							formatMoney(Math.round(Number(value) * 100), currency)
+						}
+					/>
+					<InlineField
+						label="Potential one-off revenue"
+						value={
+							deal.potentialOneOffRevenueCents === null
+								? null
+								: String(deal.potentialOneOffRevenueCents / 100)
+						}
+						placeholder="0"
+						saving={isSaving("potentialOneOffRevenueCents")}
+						onSave={(next) => {
+							if (next === "")
+								return save({ potentialOneOffRevenueCents: null });
+							const parsed = Number.parseFloat(next);
+							if (!Number.isFinite(parsed) || parsed < 0)
+								return toast.error(
+									"Potential one-off revenue has to be a positive number.",
+								);
+							save({ potentialOneOffRevenueCents: Math.round(parsed * 100) });
+						}}
+						render={(value) =>
+							formatMoney(Math.round(Number(value) * 100), currency)
+						}
+					/>
 					<InlineSelectField
 						label="Currency"
 						value={currency}
@@ -371,6 +434,519 @@ function DealOverview({ deal }: { deal: Deal }) {
 
 			<WhereItStands deal={deal} />
 		</DetailSheetBody>
+	);
+}
+
+function DealFinance({ dealId }: { dealId: string }) {
+	const trpc = useTRPC();
+	const cache = useCrmCache();
+	const profile = useQuery(trpc.finance.profile.queryOptions({ dealId }));
+	const workspace = useQuery(trpc.workspace.get.queryOptions());
+	const data = profile.data;
+
+	if (profile.isPending)
+		return (
+			<DetailSheetBody>
+				<DetailSheetSection title="Financial profile">
+					Loading financial details…
+				</DetailSheetSection>
+			</DetailSheetBody>
+		);
+	if (!data)
+		return (
+			<DetailSheetBody>
+				{workspace.data?.viewerRole === "admin" ? (
+					<DealFinanceEditor
+						dealId={dealId}
+						profile={null}
+						onSaved={() => cache.finance()}
+					/>
+				) : (
+					<DetailSheetSection title="Financial profile">
+						<p className="text-muted-foreground text-sm">
+							No financial profile has been recorded for this relationship.
+						</p>
+					</DetailSheetSection>
+				)}
+			</DetailSheetBody>
+		);
+
+	const money = (value: number | null) =>
+		value === null ? (
+			<EmptyCellValue />
+		) : (
+			<span className="tabular-nums">{formatMoney(value, data.currency)}</span>
+		);
+	return (
+		<DetailSheetBody>
+			{workspace.data?.viewerRole === "admin" ? (
+				<DealFinanceEditor
+					dealId={dealId}
+					profile={data}
+					onSaved={() => cache.finance()}
+				/>
+			) : null}
+			<DetailSheetSection title="Financial profile">
+				<DetailSheetProperties>
+					<DetailSheetProperty label="Package">
+						{data.packageName ?? <EmptyCellValue />}
+					</DetailSheetProperty>
+					<DetailSheetProperty label="Billing">
+						{data.billingStatus.replaceAll("_", " ")}
+					</DetailSheetProperty>
+					<DetailSheetProperty label="Monthly fee">
+						{money(data.monthlyFeeCents)}
+					</DetailSheetProperty>
+					<DetailSheetProperty label="Outstanding">
+						{money(data.outstandingAmountCents)}
+					</DetailSheetProperty>
+					<DetailSheetProperty label="Direct recurring cost">
+						{money(data.directMonthlyCostCents)}
+					</DetailSheetProperty>
+					<DetailSheetProperty label="Editor cost">
+						{money(data.editorMonthlyCostCents)}
+					</DetailSheetProperty>
+					<DetailSheetProperty label="Other recurring cost">
+						{money(data.otherRecurringCostCents)}
+					</DetailSheetProperty>
+					<DetailSheetProperty label="Onboarding fee">
+						{money(data.onboardingFeeCents)}
+					</DetailSheetProperty>
+					<DetailSheetProperty label="One-off work">
+						{money(data.oneOffRevenueCents)}
+					</DetailSheetProperty>
+					<DetailSheetProperty label="Additional charges">
+						{money(data.additionalChargesCents)}
+					</DetailSheetProperty>
+					<DetailSheetProperty label="Commissions" wide>
+						{data.commissions.length ? (
+							<div className="grid gap-1">
+								{data.commissions.map((commission) => (
+									<div key={commission.id} className="flex flex-wrap gap-x-2">
+										<span>{commission.userName}</span>
+										<span className="text-muted-foreground">
+											{commission.type === "PERCENTAGE"
+												? `${commission.percentage ?? 0}%`
+												: commission.fixedAmountCents === null
+													? "Fixed amount not available"
+													: formatMoney(
+															commission.fixedAmountCents,
+															commission.currency,
+														)}{" "}
+											{commission.recurring ? "recurring" : "one-off"}
+										</span>
+									</div>
+								))}
+							</div>
+						) : (
+							<EmptyCellValue />
+						)}
+					</DetailSheetProperty>
+					<DetailSheetProperty label="Estimated monthly profit">
+						{money(data.estimatedMonthlyProfitCents)}
+					</DetailSheetProperty>
+					<DetailSheetProperty label="Estimated margin">
+						{data.estimatedMargin === null ? (
+							<EmptyCellValue />
+						) : (
+							`${Math.round(data.estimatedMargin * 100)}%`
+						)}
+					</DetailSheetProperty>
+				</DetailSheetProperties>
+			</DetailSheetSection>
+		</DetailSheetBody>
+	);
+}
+
+function DealFinanceEditor({
+	dealId,
+	profile,
+	onSaved,
+}: {
+	dealId: string;
+	profile: NonNullable<RouterOutputs["finance"]["profile"]> | null;
+	onSaved: () => Promise<void>;
+}) {
+	const trpc = useTRPC();
+	const [billingStatus, setBillingStatus] = useState(
+		profile?.billingStatus ?? "NOT_STARTED",
+	);
+	const [paymentStatus, setPaymentStatus] = useState(
+		profile?.paymentStatus ?? "NOT_APPLICABLE",
+	);
+	const [commissionUserId, setCommissionUserId] = useState("");
+	const [commissionType, setCommissionType] = useState("PERCENTAGE");
+	const [commissionValue, setCommissionValue] = useState("");
+	const [commissionRecurring, setCommissionRecurring] = useState("true");
+	const save = useMutation(trpc.finance.upsertProfile.mutationOptions());
+	const saveCommission = useMutation(
+		trpc.finance.upsertCommission.mutationOptions(),
+	);
+	const users = useQuery(trpc.users.list.queryOptions());
+	const amount = (value: number | null) =>
+		value === null ? "" : String(value / 100);
+	const parse = (value: FormDataEntryValue | null) => {
+		const text = String(value ?? "").trim();
+		if (!text) return null;
+		const number = Number.parseFloat(text);
+		return Number.isFinite(number) ? Math.round(number * 100) : null;
+	};
+	const parseDate = (value: FormDataEntryValue | null) => {
+		const text = String(value ?? "").trim();
+		return text ? new Date(`${text}T00:00:00.000Z`).toISOString() : null;
+	};
+	return (
+		<DetailSheetSection title="Update financial profile">
+			<form
+				className="grid gap-3"
+				onSubmit={(event) => {
+					event.preventDefault();
+					const form = new FormData(event.currentTarget);
+					const input = {
+						id: profile?.id,
+						dealId,
+						packageName: String(form.get("packageName") ?? "").trim() || null,
+						currency: profile?.currency ?? "EUR",
+						billingStatus: billingStatus as
+							| "NOT_STARTED"
+							| "ACTIVE"
+							| "PAUSED"
+							| "ENDED",
+						paymentStatus: paymentStatus as
+							| "NOT_APPLICABLE"
+							| "CURRENT"
+							| "PENDING"
+							| "OVERDUE"
+							| "PAID",
+						monthlyFeeCents: parse(form.get("monthlyFee")),
+						directMonthlyCostCents: parse(form.get("directMonthlyCost")),
+						editorMonthlyCostCents: parse(form.get("editorMonthlyCost")),
+						otherRecurringCostCents: parse(form.get("otherRecurringCost")),
+						onboardingFeeCents: parse(form.get("onboardingFee")),
+						oneOffRevenueCents: parse(form.get("oneOffRevenue")),
+						additionalChargesCents: parse(form.get("additionalCharges")),
+						outstandingAmountCents: parse(form.get("outstandingAmount")),
+						contractStartDate: parseDate(form.get("contractStartDate")),
+						contractEndDate: parseDate(form.get("contractEndDate")),
+					};
+					void save
+						.mutateAsync(input)
+						.then(onSaved)
+						.then(() => toast.success("Financial profile saved."))
+						.catch((error: Error) => toast.error(error.message));
+				}}
+			>
+				<Field>
+					<FieldLabel htmlFor={`${dealId}-package`}>Package</FieldLabel>
+					<Input
+						id={`${dealId}-package`}
+						name="packageName"
+						defaultValue={profile?.packageName ?? ""}
+						placeholder="Monthly representation"
+					/>
+				</Field>
+				<div className="grid gap-3 sm:grid-cols-2">
+					<Field>
+						<FieldLabel htmlFor={`${dealId}-fee`}>Monthly fee</FieldLabel>
+						<Input
+							id={`${dealId}-fee`}
+							name="monthlyFee"
+							defaultValue={amount(profile?.monthlyFeeCents ?? null)}
+							inputMode="decimal"
+							placeholder="0"
+						/>
+					</Field>
+					<Field>
+						<FieldLabel htmlFor={`${dealId}-direct`}>
+							Direct monthly cost
+						</FieldLabel>
+						<Input
+							id={`${dealId}-direct`}
+							name="directMonthlyCost"
+							defaultValue={amount(profile?.directMonthlyCostCents ?? null)}
+							inputMode="decimal"
+							placeholder="0"
+						/>
+					</Field>
+					<Field>
+						<FieldLabel htmlFor={`${dealId}-editor`}>
+							Editor monthly cost
+						</FieldLabel>
+						<Input
+							id={`${dealId}-editor`}
+							name="editorMonthlyCost"
+							defaultValue={amount(profile?.editorMonthlyCostCents ?? null)}
+							inputMode="decimal"
+							placeholder="0"
+						/>
+					</Field>
+					<Field>
+						<FieldLabel htmlFor={`${dealId}-oneoff`}>
+							One-off revenue
+						</FieldLabel>
+						<Input
+							id={`${dealId}-oneoff`}
+							name="oneOffRevenue"
+							defaultValue={amount(profile?.oneOffRevenueCents ?? null)}
+							inputMode="decimal"
+							placeholder="0"
+						/>
+					</Field>
+					<Field>
+						<FieldLabel htmlFor={`${dealId}-other-cost`}>
+							Other recurring cost
+						</FieldLabel>
+						<Input
+							id={`${dealId}-other-cost`}
+							name="otherRecurringCost"
+							defaultValue={amount(profile?.otherRecurringCostCents ?? null)}
+							inputMode="decimal"
+							placeholder="0"
+						/>
+					</Field>
+					<Field>
+						<FieldLabel htmlFor={`${dealId}-onboarding`}>
+							Onboarding fee
+						</FieldLabel>
+						<Input
+							id={`${dealId}-onboarding`}
+							name="onboardingFee"
+							defaultValue={amount(profile?.onboardingFeeCents ?? null)}
+							inputMode="decimal"
+							placeholder="0"
+						/>
+					</Field>
+					<Field>
+						<FieldLabel htmlFor={`${dealId}-charges`}>
+							Additional charges
+						</FieldLabel>
+						<Input
+							id={`${dealId}-charges`}
+							name="additionalCharges"
+							defaultValue={amount(profile?.additionalChargesCents ?? null)}
+							inputMode="decimal"
+							placeholder="0"
+						/>
+					</Field>
+					<Field>
+						<FieldLabel htmlFor={`${dealId}-outstanding`}>
+							Outstanding amount
+						</FieldLabel>
+						<Input
+							id={`${dealId}-outstanding`}
+							name="outstandingAmount"
+							defaultValue={amount(profile?.outstandingAmountCents ?? null)}
+							inputMode="decimal"
+							placeholder="0"
+						/>
+					</Field>
+				</div>
+				<div className="grid gap-3 sm:grid-cols-2">
+					<Field>
+						<FieldLabel htmlFor={`${dealId}-contract-start`}>
+							Contract start
+						</FieldLabel>
+						<Input
+							id={`${dealId}-contract-start`}
+							name="contractStartDate"
+							type="date"
+							defaultValue={profile?.contractStartDate?.slice(0, 10) ?? ""}
+						/>
+					</Field>
+					<Field>
+						<FieldLabel htmlFor={`${dealId}-contract-end`}>
+							Contract end
+						</FieldLabel>
+						<Input
+							id={`${dealId}-contract-end`}
+							name="contractEndDate"
+							type="date"
+							defaultValue={profile?.contractEndDate?.slice(0, 10) ?? ""}
+						/>
+					</Field>
+					<Field>
+						<FieldLabel htmlFor={`${dealId}-billing`}>
+							Billing status
+						</FieldLabel>
+						<select
+							id={`${dealId}-billing`}
+							value={billingStatus}
+							onChange={(event) => setBillingStatus(event.target.value)}
+							className="h-9 rounded-md border bg-background px-3 text-sm"
+						>
+							<option value="NOT_STARTED">Not started</option>
+							<option value="ACTIVE">Active</option>
+							<option value="PAUSED">Paused</option>
+							<option value="ENDED">Ended</option>
+						</select>
+					</Field>
+					<Field>
+						<FieldLabel htmlFor={`${dealId}-payment`}>
+							Payment status
+						</FieldLabel>
+						<select
+							id={`${dealId}-payment`}
+							value={paymentStatus}
+							onChange={(event) => setPaymentStatus(event.target.value)}
+							className="h-9 rounded-md border bg-background px-3 text-sm"
+						>
+							<option value="NOT_APPLICABLE">Not applicable</option>
+							<option value="CURRENT">Current</option>
+							<option value="PENDING">Pending</option>
+							<option value="OVERDUE">Overdue</option>
+							<option value="PAID">Paid</option>
+						</select>
+					</Field>
+				</div>
+				<Button type="submit" disabled={save.isPending}>
+					{save.isPending ? "Saving…" : "Save financial profile"}
+				</Button>
+			</form>
+			{profile ? (
+				<div className="mt-4 grid gap-3">
+					<div className="font-medium text-sm">Commissions</div>
+					{profile.commissions.length ? (
+						<div className="grid gap-1 text-sm">
+							{profile.commissions.map((commission) => (
+								<div
+									key={commission.id}
+									className="flex flex-wrap items-center justify-between gap-2 text-muted-foreground"
+								>
+									<span>{commission.userName}</span>
+									<span className="flex items-center gap-2">
+										{commission.type === "PERCENTAGE"
+											? `${commission.percentage ?? 0}%`
+											: commission.fixedAmountCents === null
+												? "Fixed amount unavailable"
+												: formatMoney(
+														commission.fixedAmountCents,
+														commission.currency,
+													)}{" "}
+										{commission.recurring ? "recurring" : "one-off"}
+										<Button
+											type="button"
+											variant="ghost"
+											size="sm"
+											disabled={saveCommission.isPending}
+											onClick={() => {
+												void saveCommission
+													.mutateAsync({
+														id: commission.id,
+														financialProfileId: profile.id,
+														userId: commission.userId,
+														type: commission.type as "PERCENTAGE" | "FIXED",
+														recurring: commission.recurring,
+														percentage: commission.percentage,
+														fixedAmountCents: commission.fixedAmountCents,
+														currency: commission.currency,
+														active: !commission.active,
+													})
+													.then(onSaved)
+													.catch((error: Error) => toast.error(error.message));
+											}}
+										>
+											{commission.active ? "Deactivate" : "Activate"}
+										</Button>
+									</span>
+								</div>
+							))}
+						</div>
+					) : null}
+					<form
+						className="grid gap-3 sm:grid-cols-2"
+						onSubmit={(event) => {
+							event.preventDefault();
+							const value = Number.parseFloat(commissionValue);
+							if (!commissionUserId || !Number.isFinite(value) || value < 0) {
+								toast.error("Choose a user and enter a commission value.");
+								return;
+							}
+							void saveCommission
+								.mutateAsync({
+									financialProfileId: profile.id,
+									userId: commissionUserId,
+									type: commissionType as "PERCENTAGE" | "FIXED",
+									recurring: commissionRecurring === "true",
+									percentage: commissionType === "PERCENTAGE" ? value : null,
+									fixedAmountCents:
+										commissionType === "FIXED" ? Math.round(value * 100) : null,
+									currency: profile.currency,
+									active: true,
+								})
+								.then(onSaved)
+								.then(() => {
+									setCommissionUserId("");
+									setCommissionValue("");
+									toast.success("Commission saved.");
+								})
+								.catch((error: Error) => toast.error(error.message));
+						}}
+					>
+						<Field>
+							<FieldLabel htmlFor={`${dealId}-commission-user`}>
+								User
+							</FieldLabel>
+							<select
+								id={`${dealId}-commission-user`}
+								className="h-9 rounded-md border bg-background px-3 text-sm"
+								value={commissionUserId}
+								onChange={(event) => setCommissionUserId(event.target.value)}
+							>
+								<option value="">Choose a user</option>
+								{(users.data ?? []).map((user) => (
+									<option key={user.id} value={user.id}>
+										{user.name}
+									</option>
+								))}
+							</select>
+						</Field>
+						<Field>
+							<FieldLabel htmlFor={`${dealId}-commission-type`}>
+								Type
+							</FieldLabel>
+							<select
+								id={`${dealId}-commission-type`}
+								className="h-9 rounded-md border bg-background px-3 text-sm"
+								value={commissionType}
+								onChange={(event) => setCommissionType(event.target.value)}
+							>
+								<option value="PERCENTAGE">Percentage</option>
+								<option value="FIXED">Fixed amount</option>
+							</select>
+						</Field>
+						<Field>
+							<FieldLabel htmlFor={`${dealId}-commission-value`}>
+								{commissionType === "PERCENTAGE" ? "Percentage" : "Amount"}
+							</FieldLabel>
+							<Input
+								id={`${dealId}-commission-value`}
+								value={commissionValue}
+								inputMode="decimal"
+								placeholder="10"
+								onChange={(event) => setCommissionValue(event.target.value)}
+							/>
+						</Field>
+						<Field>
+							<FieldLabel htmlFor={`${dealId}-commission-frequency`}>
+								Frequency
+							</FieldLabel>
+							<select
+								id={`${dealId}-commission-frequency`}
+								className="h-9 rounded-md border bg-background px-3 text-sm"
+								value={commissionRecurring}
+								onChange={(event) => setCommissionRecurring(event.target.value)}
+							>
+								<option value="true">Recurring</option>
+								<option value="false">One-off</option>
+							</select>
+						</Field>
+						<Button type="submit" disabled={saveCommission.isPending}>
+							{saveCommission.isPending ? "Saving…" : "Add commission"}
+						</Button>
+					</form>
+				</div>
+			) : null}
+		</DetailSheetSection>
 	);
 }
 

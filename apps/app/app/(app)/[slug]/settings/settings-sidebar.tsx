@@ -19,6 +19,7 @@ const ITEMS: SettingsNavItem[] = [
 	{ title: "Team", href: `${ROOT}/members` },
 	{ title: "Mailbox", href: `${ROOT}/mailbox` },
 	{ title: "Provider Status", href: `${ROOT}/providers` },
+	{ title: "Financials", href: `${ROOT}/finance` },
 ];
 
 function isActive(href: string, root: string, pathname: string): boolean {

@@ -27,6 +27,7 @@ export type CrmCache = {
 	activity(options?: Options): Promise<void>;
 	settings(options?: Options): Promise<void>;
 	currency(options?: Options): Promise<void>;
+	finance(options?: Options): Promise<void>;
 	workspace(options?: Options): Promise<void>;
 	sso(options?: Options): Promise<void>;
 	everything(): Promise<void>;
@@ -214,11 +215,7 @@ export function useCrmCache(): CrmCache {
 			),
 
 		settings: (options) =>
-			run(
-				[trpc.settings.researchKey.queryKey()],
-				[],
-				options,
-			),
+			run([trpc.settings.researchKey.queryKey()], [], options),
 
 		currency: (options) =>
 			run(
@@ -227,6 +224,23 @@ export function useCrmCache(): CrmCache {
 					...listKeys(),
 					trpc.deals.byId.queryKey(),
 					trpc.companies.byId.queryKey(),
+					trpc.dashboard.summary.queryKey(),
+				],
+				options,
+			),
+
+		finance: (options) =>
+			run(
+				[
+					trpc.finance.commandCenter.queryKey(),
+					trpc.finance.goals.queryKey(),
+					trpc.finance.expenses.queryKey(),
+					trpc.finance.permissionOverrides.queryKey(),
+				],
+				[
+					trpc.finance.profile.queryKey(),
+					trpc.finance.profiles.queryKey(),
+					trpc.finance.companyHistory.queryKey(),
 					trpc.dashboard.summary.queryKey(),
 				],
 				options,

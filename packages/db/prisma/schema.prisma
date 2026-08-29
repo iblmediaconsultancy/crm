@@ -68,6 +68,13 @@ model User {
   mergeDecisions           MergeDecision[]         @relation("MergeDecisionDecider")
   researchRequests         ResearchRequest[]       @relation("ResearchRequestOwner")
   domainAuditEvents        DomainAuditEvent[]      @relation("DomainAuditActor")
+  financialEvents          FinancialEvent[]        @relation("FinancialEventActor")
+  commissionRecipients     ClientCommission[]     @relation("CommissionRecipient")
+  createdExpenses          CompanyExpense[]        @relation("ExpenseCreator")
+  createdGoals             CompanyGoal[]            @relation("GoalCreator")
+  weeklyTargets            WeeklyTarget[]           @relation("WeeklyTargetUser")
+  permissionOverrides     WorkspacePermissionOverride[] @relation("PermissionOverrideUser")
+  createdPermissionOverrides WorkspacePermissionOverride[] @relation("PermissionOverrideCreator")
 
   members     Member[]
   invitations Invitation[]
@@ -146,6 +153,40 @@ enum DealStage {
   CONTRACT_SENT
   CLOSED_WON
   CLOSED_LOST
+}
+
+enum BillingStatus {
+  NOT_STARTED
+  ACTIVE
+  PAUSED
+  ENDED
+}
+
+enum PaymentStatus {
+  NOT_APPLICABLE
+  CURRENT
+  PENDING
+  OVERDUE
+  PAID
+}
+
+enum CommissionType {
+  PERCENTAGE
+  FIXED
+}
+
+enum FinancialEventType {
+  PROFILE_CREATED
+  PROFILE_UPDATED
+  FEE_CHANGED
+  STATUS_CHANGED
+  PAYMENT_STATUS_CHANGED
+  CHURNED
+  SNAPSHOT_RECORDED
+}
+
+enum CompanyGoalType {
+  MRR
 }
 
 enum ActivityType {
@@ -316,6 +357,7 @@ model Company {
   operationalTasks    OperationalTask[]
   notes               Note[]
   proofItems          ProofItem[]
+  financialProfiles   ClientFinancialProfile[]
   createdAt           DateTime            @default(now())
   updatedAt           DateTime            @updatedAt
 
@@ -391,6 +433,7 @@ model Contact {
   operationalTasks      OperationalTask[]
   notes                 Note[]
   proofItems            ProofItem[]
+  financialProfiles     ClientFinancialProfile[]
   createdAt             DateTime            @default(now())
   updatedAt             DateTime            @updatedAt
 
@@ -922,6 +965,14 @@ model Deal {
   baseCurrency String?
   fxRate       Decimal?  @db.Decimal(20, 10)
   fxRateAt     DateTime?
+  potentialMonthlyRevenue     Decimal? @db.Decimal(14, 2)
+  potentialMonthlyRevenueBase Decimal? @db.Decimal(24, 4)
+  potentialOneOffRevenue      Decimal? @db.Decimal(14, 2)
+  potentialOneOffRevenueBase  Decimal? @db.Decimal(24, 4)
+  potentialPackageName        String?
+  potentialBaseCurrency       String?
+  potentialFxRate             Decimal? @db.Decimal(20, 10)
+  potentialFxRateAt           DateTime?
 
   lifecycleState    CanonicalLifecycleState @default(ACTIVE)
   archivedAt        DateTime?
@@ -939,6 +990,7 @@ model Deal {
   proofItems       ProofItem[]
   leads            Lead[]
   proposals        Proposal[]
+  financialProfile ClientFinancialProfile?
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
 
@@ -949,6 +1001,7 @@ model Deal {
   @@index([expectedCloseDate])
   @@index([lastActivityAt])
   @@index([baseAmount])
+  @@index([potentialMonthlyRevenueBase])
   @@index([currency])
   @@index([lifecycleState, name])
   @@map("deal")
@@ -2311,6 +2364,213 @@ model ResearchFinding {
   @@index([requestId, status])
   @@index([evidenceSourceId])
   @@map("researchFinding")
+}
+
+model ClientFinancialProfile {
+  id                   String        @id @default(cuid())
+  dealId               String?       @unique
+  deal                 Deal?         @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  companyId            String?
+  company              Company?      @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  contactId            String?
+  contact              Contact?      @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  packageName         String?
+  currency             String        @default("EUR")
+  baseCurrency         String?
+  fxRate               Decimal?      @db.Decimal(20, 10)
+  fxRateAt             DateTime?
+  contractStartDate    DateTime?
+  contractEndDate      DateTime?
+  billingStatus        BillingStatus @default(NOT_STARTED)
+  paymentStatus        PaymentStatus @default(NOT_APPLICABLE)
+  monthlyFee           Decimal?      @db.Decimal(14, 2)
+  monthlyFeeBase       Decimal?      @db.Decimal(24, 4)
+  directMonthlyCost    Decimal?      @db.Decimal(14, 2)
+  directMonthlyCostBase Decimal?     @db.Decimal(24, 4)
+  editorMonthlyCost    Decimal?      @db.Decimal(14, 2)
+  editorMonthlyCostBase Decimal?     @db.Decimal(24, 4)
+  otherRecurringCost   Decimal?      @db.Decimal(14, 2)
+  otherRecurringCostBase Decimal?    @db.Decimal(24, 4)
+  onboardingFee        Decimal?      @db.Decimal(14, 2)
+  onboardingFeeBase    Decimal?      @db.Decimal(24, 4)
+  oneOffRevenue        Decimal?      @db.Decimal(14, 2)
+  oneOffRevenueBase    Decimal?      @db.Decimal(24, 4)
+  additionalCharges    Decimal?      @db.Decimal(14, 2)
+  additionalChargesBase Decimal?     @db.Decimal(24, 4)
+  outstandingAmount    Decimal?      @db.Decimal(14, 2)
+  outstandingAmountBase Decimal?     @db.Decimal(24, 4)
+  commissions          ClientCommission[]
+  snapshots            FinancialSnapshot[]
+  events               FinancialEvent[]
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  @@index([companyId, billingStatus])
+  @@index([contactId, billingStatus])
+  @@index([billingStatus, contractStartDate])
+  @@map("clientFinancialProfile")
+}
+
+model ClientCommission {
+  id                String                @id @default(cuid())
+  financialProfileId String
+  financialProfile  ClientFinancialProfile @relation(fields: [financialProfileId], references: [id], onDelete: Cascade)
+  userId            String
+  user              User                  @relation("CommissionRecipient", fields: [userId], references: [id], onDelete: Restrict)
+  type              CommissionType
+  recurring         Boolean               @default(true)
+  percentage        Decimal?              @db.Decimal(5, 2)
+  fixedAmount       Decimal?              @db.Decimal(14, 2)
+  fixedAmountBase   Decimal?              @db.Decimal(24, 4)
+  currency          String                @default("EUR")
+  baseCurrency      String?
+  fxRate            Decimal?              @db.Decimal(20, 10)
+  fxRateAt          DateTime?
+  active            Boolean               @default(true)
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  @@index([financialProfileId, active])
+  @@index([userId, active])
+  @@map("clientCommission")
+}
+
+model FinancialSnapshot {
+  id                 String                @id @default(cuid())
+  financialProfileId String
+  financialProfile   ClientFinancialProfile @relation(fields: [financialProfileId], references: [id], onDelete: Cascade)
+  periodStart        DateTime
+  currency           String
+  recurringRevenueBase Decimal?             @db.Decimal(24, 4)
+  oneOffRevenueBase  Decimal?              @db.Decimal(24, 4)
+  directCostBase     Decimal?              @db.Decimal(24, 4)
+  commissionBase     Decimal?              @db.Decimal(24, 4)
+  operatingCostBase  Decimal?              @db.Decimal(24, 4)
+  estimatedProfitBase Decimal?             @db.Decimal(24, 4)
+  margin             Decimal?               @db.Decimal(7, 4)
+  data               Json?
+  createdAt          DateTime              @default(now())
+
+  @@unique([financialProfileId, periodStart])
+  @@index([periodStart])
+  @@map("financialSnapshot")
+}
+
+model CompanyFinancialSnapshot {
+  id                   String   @id @default(cuid())
+  periodStart          DateTime
+  currency             String
+  recurringRevenueBase Decimal? @db.Decimal(24, 4)
+  oneOffRevenueBase    Decimal? @db.Decimal(24, 4)
+  revenueBase          Decimal? @db.Decimal(24, 4)
+  directClientCostBase Decimal? @db.Decimal(24, 4)
+  commissionBase       Decimal? @db.Decimal(24, 4)
+  operatingCostBase    Decimal? @db.Decimal(24, 4)
+  estimatedProfitBase Decimal? @db.Decimal(24, 4)
+  margin               Decimal? @db.Decimal(7, 4)
+  outstandingBase      Decimal? @db.Decimal(24, 4)
+  newMrrBase           Decimal? @db.Decimal(24, 4)
+  lostMrrBase          Decimal? @db.Decimal(24, 4)
+  activeClients        Int      @default(0)
+  data                 Json?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@unique([currency, periodStart])
+  @@index([periodStart])
+  @@map("companyFinancialSnapshot")
+}
+
+model FinancialEvent {
+  id                 String                @id @default(cuid())
+  financialProfileId String
+  financialProfile   ClientFinancialProfile @relation(fields: [financialProfileId], references: [id], onDelete: Cascade)
+  type               FinancialEventType
+  actorUserId        String?
+  actor              User?                 @relation("FinancialEventActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  occurredAt         DateTime              @default(now())
+  payload            Json?
+
+  @@index([financialProfileId, occurredAt])
+  @@index([type, occurredAt])
+  @@map("financialEvent")
+}
+
+model CompanyExpense {
+  id             String    @id @default(cuid())
+  category       String
+  amount         Decimal   @db.Decimal(14, 2)
+  currency       String    @default("EUR")
+  baseAmount     Decimal?  @db.Decimal(24, 4)
+  baseCurrency   String?
+  fxRate         Decimal?  @db.Decimal(20, 10)
+  fxRateAt       DateTime?
+  recurringMonthly Boolean  @default(true)
+  active         Boolean   @default(true)
+  startDate      DateTime
+  endDate        DateTime?
+  description    String?
+  createdByUserId String
+  createdBy      User      @relation("ExpenseCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([active, startDate, endDate])
+  @@index([category])
+  @@map("companyExpense")
+}
+
+model CompanyGoal {
+  id               String          @id @default(cuid())
+  type             CompanyGoalType
+  name             String
+  targetAmountBase Decimal         @db.Decimal(24, 4)
+  currency         String
+  deadline         DateTime
+  milestones       Json?
+  active           Boolean         @default(true)
+  createdByUserId  String
+  createdBy        User            @relation("GoalCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  @@index([type, active, deadline])
+  @@map("companyGoal")
+}
+
+model WeeklyTarget {
+  id                    String   @id @default(cuid())
+  userId                String
+  user                  User     @relation("WeeklyTargetUser", fields: [userId], references: [id], onDelete: Cascade)
+  weekStart             DateTime
+  outreachContacts      Int      @default(0)
+  followUps             Int      @default(0)
+  qualifiedOpportunities Int      @default(0)
+  proposals             Int      @default(0)
+  clientsClosed         Int      @default(0)
+  mrrGeneratedTargetBase Decimal? @db.Decimal(24, 4)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@unique([userId, weekStart])
+  @@index([weekStart])
+  @@map("weeklyTarget")
+}
+
+model WorkspacePermissionOverride {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation("PermissionOverrideUser", fields: [userId], references: [id], onDelete: Cascade)
+  permission    String
+  allowed       Boolean
+  createdByUserId String
+  createdBy      User     @relation("PermissionOverrideCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([userId, permission])
+  @@index([permission, allowed])
+  @@map("workspacePermissionOverride")
 }
 
 model DomainAuditEvent {

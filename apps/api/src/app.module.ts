@@ -17,6 +17,7 @@ import { DashboardModule } from "./dashboard/dashboard.module";
 import { DatabaseModule } from "./database/database.module";
 import { DealsModule } from "./deals/deals.module";
 import { FieldsModule } from "./fields/fields.module";
+import { FinanceModule } from "./finance/finance.module";
 import { HealthModule } from "./health/health.module";
 import { LoggingModule } from "./logging/logging.module";
 import { logAuthRoute } from "./logging/request-logger.middleware";
@@ -56,6 +57,7 @@ import { WorkspaceModule } from "./workspace/workspace.module";
 		CurrencyModule,
 		DealsModule,
 		FieldsModule,
+		FinanceModule,
 		ProfileModule,
 		ProviderCapabilitiesModule,
 		ProvidersModule,

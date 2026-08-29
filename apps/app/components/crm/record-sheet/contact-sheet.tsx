@@ -58,6 +58,7 @@ import { useCrmCache } from "@/lib/trpc/cache";
 import { useTRPC } from "@/lib/trpc/client";
 import type { RouterOutputs } from "@/lib/trpc/types";
 import { RecordActions } from "./record-actions";
+import { RecordFinance } from "./record-finance";
 import { DealAmount, MetaLine, RecordSheetFrame } from "./record-parts";
 import { useOpenRecord, useRecordSheetView } from "./record-stack";
 
@@ -122,6 +123,11 @@ export function ContactSheet({ contactId }: { contactId: string }) {
 					label: "Deals",
 					count: contact.deals.length,
 					content: <ContactDeals contact={contact} />,
+				},
+				{
+					value: "finance",
+					label: "Finance",
+					content: <RecordFinance contactId={contact.id} />,
 				},
 				{
 					value: "activity",

@@ -24,6 +24,7 @@ import { setReportingCurrencyInput, setManualRateInput, removeManualRateInput } 
 import { dashboardSummaryInput } from "../dashboard/dashboard.contracts";
 import { dealListInput, dealIdInput, dealCreateInput, dealUpdateArgs, setStageInput, dealContactsInput, dealAttachContactInput, dealDetachContactInput, dealContactRoleInput, dealBulkOwnerInput, dealBulkStageInput } from "../deals/deals.contracts";
 import { fieldListInput, fieldByKeyInput, fieldIdInput, fieldCreateInput, fieldUpdateArgs, fieldReorderInput } from "../fields/fields.contracts";
+import { financeDashboardInput, financialProfileByRecordInput, financialProfilesByRecordInput, financialHistoryInput, companyHistoryInput, financialProfileUpsertInput, commissionUpsertInput, expenseListInput, expenseUpsertInput, goalInput, weeklyTargetInput, permissionOverrideInput } from "../finance/finance.contracts";
 import { mailboxIdInput, updateOwnedMailboxIdentityInput, mailboxThreadInput, mailboxEventInput } from "../mailbox/mailbox.contracts";
 import { invitationIdInput, acceptInvitationInput, pendingInvitationsInput, inviteMemberInput } from "../onboarding/onboarding.contracts";
 import { allocationTargetInput, allocationPolicyCreateInput, allocationPolicyActivateInput, allocationEnqueueInput, allocationOverrideInput } from "../operations/allocation.contracts";
@@ -43,6 +44,7 @@ import type { CurrencyRouter } from "../currency/currency.router";
 import type { DashboardRouter } from "../dashboard/dashboard.router";
 import type { DealsRouter } from "../deals/deals.router";
 import type { FieldsRouter } from "../fields/fields.router";
+import type { FinanceRouter } from "../finance/finance.router";
 import type { MailboxRouter } from "../mailbox/mailbox.router";
 import type { OnboardingRouter } from "../onboarding/onboarding.router";
 import type { AllocationRouter } from "../operations/allocation.router";
@@ -366,6 +368,52 @@ const appRouter = t.router({
     backfill: publicProcedure
       .input(fieldIdInput)
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<FieldsRouter["backfill"]>>)
+    }),
+  finance: t.router({
+    commandCenter: publicProcedure
+      .input(financeDashboardInput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<FinanceRouter["commandCenter"]>>),
+    profile: publicProcedure
+      .input(financialProfileByRecordInput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<FinanceRouter["profile"]>>),
+    profiles: publicProcedure
+      .input(financialProfilesByRecordInput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<FinanceRouter["profiles"]>>),
+    history: publicProcedure
+      .input(financialHistoryInput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<FinanceRouter["history"]>>),
+    companyHistory: publicProcedure
+      .input(companyHistoryInput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<FinanceRouter["companyHistory"]>>),
+    upsertProfile: publicProcedure
+      .input(financialProfileUpsertInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<FinanceRouter["upsertProfile"]>>),
+    upsertCommission: publicProcedure
+      .input(commissionUpsertInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<FinanceRouter["upsertCommission"]>>),
+    expenses: publicProcedure
+      .input(expenseListInput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<FinanceRouter["expenses"]>>),
+    upsertExpense: publicProcedure
+      .input(expenseUpsertInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<FinanceRouter["upsertExpense"]>>),
+    goals: publicProcedure
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<FinanceRouter["goals"]>>),
+    upsertGoal: publicProcedure
+      .input(goalInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<FinanceRouter["upsertGoal"]>>),
+    myPerformance: publicProcedure
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<FinanceRouter["myPerformance"]>>),
+    teamPerformance: publicProcedure
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<FinanceRouter["teamPerformance"]>>),
+    upsertWeeklyTarget: publicProcedure
+      .input(weeklyTargetInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<FinanceRouter["upsertWeeklyTarget"]>>),
+    permissionOverrides: publicProcedure
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<FinanceRouter["permissionOverrides"]>>),
+    setPermissionOverride: publicProcedure
+      .input(permissionOverrideInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<FinanceRouter["setPermissionOverride"]>>)
     }),
   mailbox: t.router({
     listAccessible: publicProcedure

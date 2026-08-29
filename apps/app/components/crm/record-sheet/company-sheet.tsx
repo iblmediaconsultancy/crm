@@ -61,6 +61,7 @@ import { useTRPC } from "@/lib/trpc/client";
 import type { RouterOutputs } from "@/lib/trpc/types";
 import { QuickAddContact, QuickAddDeal } from "./quick-add";
 import { RecordActions } from "./record-actions";
+import { RecordFinance } from "./record-finance";
 import {
 	AddRow,
 	DealAmount,
@@ -207,6 +208,11 @@ export function CompanySheet({ companyId }: { companyId: string }) {
 							onDone={() => setAdding(null)}
 						/>
 					),
+				},
+				{
+					value: "finance",
+					label: "Finance",
+					content: <RecordFinance companyId={company.id} />,
 				},
 				{
 					value: "activity",

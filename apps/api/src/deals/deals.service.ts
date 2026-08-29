@@ -18,9 +18,7 @@ import {
 	Logger,
 	NotFoundException,
 } from "@nestjs/common";
-import {
-	ActivityStampService,
-} from "../crm/activity-stamp.service";
+import { ActivityStampService } from "../crm/activity-stamp.service";
 import { type BulkResult, requireOwner, runBulk } from "../crm/bulk";
 import {
 	blankToNull,
@@ -122,10 +120,10 @@ export class DealsService {
 					orderBy: resolveOrderBy(input, SORTABLE, [{ createdAt: "desc" }]),
 					select: {
 						id: true,
-					lifecycleState: true,
-					version: true,
-					archiveReason: true,
-					archivedAt: true,
+						lifecycleState: true,
+						version: true,
+						archiveReason: true,
+						archivedAt: true,
 						name: true,
 						stage: true,
 						amount: true,
@@ -192,10 +190,10 @@ export class DealsService {
 			where: { id },
 			select: {
 				id: true,
-					lifecycleState: true,
-					version: true,
-					archiveReason: true,
-					archivedAt: true,
+				lifecycleState: true,
+				version: true,
+				archiveReason: true,
+				archivedAt: true,
 				name: true,
 				description: true,
 				stage: true,
@@ -203,12 +201,16 @@ export class DealsService {
 				amount: true,
 				currency: true,
 				baseAmount: true,
+				potentialMonthlyRevenue: true,
+				potentialMonthlyRevenueBase: true,
+				potentialOneOffRevenue: true,
+				potentialOneOffRevenueBase: true,
+				potentialPackageName: true,
 				fxRate: true,
 				fxRateAt: true,
 				expectedCloseDate: true,
 				closedAt: true,
 				closedReason: true,
-
 
 				createdAt: true,
 				company: { select: { ...COMPANY_SELECT, industry: true } },
@@ -224,13 +226,28 @@ export class DealsService {
 			throw new NotFoundException(`No deal with id ${id}.`);
 		}
 
-		const { contacts, amount, baseAmount, fxRate, fxRateAt, ...rest } = deal;
+		const {
+			contacts,
+			amount,
+			baseAmount,
+			potentialMonthlyRevenue,
+			potentialMonthlyRevenueBase,
+			potentialOneOffRevenue,
+			potentialOneOffRevenueBase,
+			fxRate,
+			fxRateAt,
+			...rest
+		} = deal;
 
 		return {
 			...rest,
 			fields: await this.fields.valuesFor("DEAL", id),
 			amountCents: toCents(amount),
 			baseAmountCents: toCents(baseAmount),
+			potentialMonthlyRevenueCents: toCents(potentialMonthlyRevenue),
+			potentialMonthlyRevenueBaseCents: toCents(potentialMonthlyRevenueBase),
+			potentialOneOffRevenueCents: toCents(potentialOneOffRevenue),
+			potentialOneOffRevenueBaseCents: toCents(potentialOneOffRevenueBase),
 			reportingCurrency: await this.conversion.reportingCurrency(),
 			fxRate: fxRate?.toNumber() ?? null,
 			fxRateAt: fxRateAt?.toISOString() ?? null,
@@ -254,6 +271,14 @@ export class DealsService {
 			decimalFromCents(input.amountCents),
 			currency,
 		);
+		const monthlyFx = await this.conversion.convert(
+			decimalFromCents(input.potentialMonthlyRevenueCents),
+			currency,
+		);
+		const oneOffFx = await this.conversion.convert(
+			decimalFromCents(input.potentialOneOffRevenueCents),
+			currency,
+		);
 
 		try {
 			const deal = await this.db.deal.create({
@@ -267,6 +292,17 @@ export class DealsService {
 					amount: fromCents(input.amountCents),
 					currency,
 					...fx,
+					potentialMonthlyRevenue: fromCents(
+						input.potentialMonthlyRevenueCents,
+					),
+					potentialMonthlyRevenueBase: monthlyFx?.baseAmount ?? null,
+					potentialOneOffRevenue: fromCents(input.potentialOneOffRevenueCents),
+					potentialOneOffRevenueBase: oneOffFx?.baseAmount ?? null,
+					potentialPackageName: input.potentialPackageName?.trim() || null,
+					potentialBaseCurrency:
+						monthlyFx?.baseCurrency ?? oneOffFx?.baseCurrency ?? null,
+					potentialFxRate: monthlyFx?.fxRate ?? oneOffFx?.fxRate ?? null,
+					potentialFxRateAt: monthlyFx?.fxRateAt ?? oneOffFx?.fxRateAt ?? null,
 					expectedCloseDate: parseDate(input.expectedCloseDate),
 				},
 				select: { id: true, name: true, companyId: true },
@@ -303,11 +339,38 @@ export class DealsService {
 		if (input.expectedCloseDate !== undefined) {
 			data.expectedCloseDate = parseDate(input.expectedCloseDate);
 		}
+		if (input.potentialPackageName !== undefined) {
+			data.potentialPackageName =
+				input.potentialPackageName === null
+					? null
+					: blankToNull(input.potentialPackageName);
+		}
 
-		if (input.amountCents !== undefined || input.currency !== undefined) {
+		if (input.potentialMonthlyRevenueCents !== undefined) {
+			data.potentialMonthlyRevenue = fromCents(
+				input.potentialMonthlyRevenueCents,
+			);
+		}
+		if (input.potentialOneOffRevenueCents !== undefined) {
+			data.potentialOneOffRevenue = fromCents(
+				input.potentialOneOffRevenueCents,
+			);
+		}
+
+		if (
+			input.amountCents !== undefined ||
+			input.currency !== undefined ||
+			input.potentialMonthlyRevenueCents !== undefined ||
+			input.potentialOneOffRevenueCents !== undefined
+		) {
 			const current = await this.db.deal.findUnique({
 				where: { id },
-				select: { amount: true, currency: true },
+				select: {
+					amount: true,
+					currency: true,
+					potentialMonthlyRevenue: true,
+					potentialOneOffRevenue: true,
+				},
 			});
 
 			if (!current) {
@@ -324,6 +387,23 @@ export class DealsService {
 					: normalizeCurrency(current.currency);
 
 			Object.assign(data, await this.conversion.dealFields(amount, currency));
+			const monthly =
+				input.potentialMonthlyRevenueCents !== undefined
+					? decimalFromCents(input.potentialMonthlyRevenueCents)
+					: current.potentialMonthlyRevenue;
+			const oneOff =
+				input.potentialOneOffRevenueCents !== undefined
+					? decimalFromCents(input.potentialOneOffRevenueCents)
+					: current.potentialOneOffRevenue;
+			const monthlyFx = await this.conversion.convert(monthly, currency);
+			const oneOffFx = await this.conversion.convert(oneOff, currency);
+			data.potentialMonthlyRevenueBase = monthlyFx?.baseAmount ?? null;
+			data.potentialOneOffRevenueBase = oneOffFx?.baseAmount ?? null;
+			data.potentialBaseCurrency =
+				monthlyFx?.baseCurrency ?? oneOffFx?.baseCurrency ?? null;
+			data.potentialFxRate = monthlyFx?.fxRate ?? oneOffFx?.fxRate ?? null;
+			data.potentialFxRateAt =
+				monthlyFx?.fxRateAt ?? oneOffFx?.fxRateAt ?? null;
 		}
 
 		try {
@@ -346,7 +426,21 @@ export class DealsService {
 	async setStage(input: SetStageInput, actingUserId: string) {
 		const deal = await this.db.deal.findUnique({
 			where: { id: input.id },
-			select: { id: true, stage: true, companyId: true },
+			select: {
+				id: true,
+				stage: true,
+				companyId: true,
+				currency: true,
+				potentialMonthlyRevenue: true,
+				potentialMonthlyRevenueBase: true,
+				potentialOneOffRevenue: true,
+				potentialOneOffRevenueBase: true,
+				potentialPackageName: true,
+				potentialBaseCurrency: true,
+				potentialFxRate: true,
+				potentialFxRateAt: true,
+				financialProfile: { select: { id: true } },
+			},
 		});
 
 		if (!deal) {
@@ -367,8 +461,8 @@ export class DealsService {
 		const now = new Date();
 		const closed = isClosedStage(input.stage);
 
-		const [updated] = await this.db.$transaction([
-			this.db.deal.update({
+		const updated = await this.db.$transaction(async (tx) => {
+			const changedDeal = await tx.deal.update({
 				where: { id: input.id },
 				data: {
 					stage: input.stage,
@@ -377,8 +471,8 @@ export class DealsService {
 					closedReason: closed ? (closedReason ?? null) : null,
 				},
 				select: { id: true, stage: true },
-			}),
-			this.db.activity.create({
+			});
+			await tx.activity.create({
 				data: {
 					type: ActivityType.STAGE_CHANGE,
 					subject: "Stage changed",
@@ -389,8 +483,44 @@ export class DealsService {
 					createdById: actingUserId,
 					meta: { from: deal.stage, to: input.stage },
 				},
-			}),
-		]);
+			});
+			if (input.stage === "CLOSED_WON") {
+				const profile = await tx.clientFinancialProfile.upsert({
+					where: { dealId: deal.id },
+					create: {
+						dealId: deal.id,
+						companyId: deal.companyId,
+						currency: deal.currency,
+						packageName: deal.potentialPackageName,
+						baseCurrency: deal.potentialBaseCurrency,
+						fxRate: deal.potentialFxRate,
+						fxRateAt: deal.potentialFxRateAt,
+						billingStatus: "ACTIVE",
+						contractStartDate: now,
+						monthlyFee: deal.potentialMonthlyRevenue,
+						monthlyFeeBase: deal.potentialMonthlyRevenueBase,
+						oneOffRevenue: deal.potentialOneOffRevenue,
+						oneOffRevenueBase: deal.potentialOneOffRevenueBase,
+					},
+					update: {},
+				});
+				if (!deal.financialProfile) {
+					await tx.financialEvent.create({
+						data: {
+							financialProfileId: profile.id,
+							actorUserId: actingUserId,
+							type: "PROFILE_CREATED",
+							payload: {
+								source: "deal_stage_change",
+								dealId: deal.id,
+								newMrrBase: profile.monthlyFeeBase?.toString() ?? null,
+							},
+						},
+					});
+				}
+			}
+			return changedDeal;
+		});
 
 		await this.stamp.touch(
 			{ companyId: deal.companyId, dealId: deal.id },

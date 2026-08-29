@@ -49,15 +49,23 @@ export default function OverviewPage({ searchParams }: PageProps<"/[slug]">) {
 async function Summary({
 	searchParams,
 }: Pick<PageProps<"/[slug]">, "searchParams">) {
-	const [, { scope }] = await Promise.all([
+	const queryClient = getServerQueryClient();
+	const trpc = getServerTrpc();
+	const [rawSearchParams, , { scope }, workspace] = await Promise.all([
+		searchParams,
 		requireSession(),
 		loadOverviewSearchParams(searchParams),
+		queryClient.fetchQuery(trpc.workspace.get.queryOptions()),
 	]);
-
-	const queryClient = getServerQueryClient();
-	await queryClient.prefetchQuery(
-		getServerTrpc().dashboard.summary.queryOptions({ scope }),
-	);
+	const hasExplicitScope = Object.hasOwn(rawSearchParams, "scope");
+	const financeScope =
+		workspace.viewerRole === "admin" && !hasExplicitScope ? "everyone" : scope;
+	await Promise.all([
+		queryClient.prefetchQuery(trpc.dashboard.summary.queryOptions({ scope })),
+		queryClient.prefetchQuery(
+			trpc.finance.commandCenter.queryOptions({ scope: financeScope }),
+		),
+	]);
 
 	return (
 		<HydrateClient>

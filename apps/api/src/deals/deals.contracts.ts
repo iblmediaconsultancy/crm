@@ -47,6 +47,9 @@ export const dealCreateInput = z.object({
 	amountCents,
 	currency: currencyCode.optional(),
 	expectedCloseDate: z.string().nullable().optional(),
+	potentialPackageName: z.string().trim().max(160).nullable().optional(),
+	potentialMonthlyRevenueCents: amountCents,
+	potentialOneOffRevenueCents: amountCents,
 });
 
 export type DealCreateInput = z.infer<typeof dealCreateInput>;
@@ -59,6 +62,9 @@ const dealUpdateInput = z.object({
 	amountCents,
 	currency: currencyCode.optional(),
 	expectedCloseDate: z.string().nullable().optional(),
+	potentialPackageName: z.string().trim().max(160).nullable().optional(),
+	potentialMonthlyRevenueCents: amountCents,
+	potentialOneOffRevenueCents: amountCents,
 	fields: recordFieldValues.optional(),
 });
 

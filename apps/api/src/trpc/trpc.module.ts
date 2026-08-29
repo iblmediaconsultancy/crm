@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { TRPCModule } from "nestjs-trpc";
 import { ContextLogger } from "../logging/context-logger";
+import { PermissionAccessService } from "../workspace/permission-access.service";
 import { formatTrpcError } from "./error-formatter";
 import { AuthMiddleware } from "./middlewares/auth.middleware";
 import { DomainErrorMiddleware } from "./middlewares/domain-error.middleware";
@@ -27,7 +28,8 @@ import { TrpcErrorHandler } from "./trpc-error.handler";
 		DomainErrorMiddleware,
 		AuthMiddleware,
 		PermissionMiddleware,
+		PermissionAccessService,
 	],
-	exports: [AuthMiddleware, PermissionMiddleware],
+	exports: [AuthMiddleware, PermissionMiddleware, PermissionAccessService],
 })
 export class TrpcModule {}

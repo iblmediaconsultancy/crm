@@ -1,5 +1,5 @@
 import { db } from "@crm/db";
-import { WORKSPACE_ID, workspaceSlug } from "@crm/db/workspace";
+import { WORKSPACE_ID } from "@crm/db/workspace";
 
 export { WORKSPACE_ID };
 
@@ -23,11 +23,40 @@ export const WORKSPACE_PERMISSIONS = [
 	"outreach.approve",
 	"workspace.manage",
 	"canonical.destroy",
+	"finance.company.mrr",
+	"finance.company.revenue",
+	"finance.company.profit",
+	"finance.company.costs",
+	"finance.client.pricing",
+	"finance.client.costs",
+	"finance.pipeline.value",
+	"finance.team.performance.own",
+	"finance.team.performance.all",
+	"finance.goals.read",
+	"finance.goals.edit",
+	"finance.edit",
+	"finance.expenses.edit",
+	"finance.permissions.edit",
+	"finance.compensation.own",
+	"finance.compensation.other",
 ] as const;
 
 export type WorkspacePermission = (typeof WORKSPACE_PERMISSIONS)[number];
 
-const ROLE_PERMISSIONS: Record<WorkspaceRole, ReadonlySet<WorkspacePermission>> = {
+export const FINANCE_PERMISSIONS = WORKSPACE_PERMISSIONS.filter(
+	(value): value is Extract<WorkspacePermission, `finance.${string}`> =>
+		value.startsWith("finance."),
+) as [
+	Extract<WorkspacePermission, `finance.${string}`>,
+	...Extract<WorkspacePermission, `finance.${string}`>[],
+];
+
+export type FinancePermission = (typeof FINANCE_PERMISSIONS)[number];
+
+const ROLE_PERMISSIONS: Record<
+	WorkspaceRole,
+	ReadonlySet<WorkspacePermission>
+> = {
 	admin: new Set(WORKSPACE_PERMISSIONS),
 	team: new Set([
 		"crm.read",
@@ -41,8 +70,19 @@ const ROLE_PERMISSIONS: Record<WorkspaceRole, ReadonlySet<WorkspacePermission>> 
 		"allocation.manage",
 		"duplicates.review",
 		"outreach.approve",
+		"finance.company.mrr",
+		"finance.goals.read",
+		"finance.pipeline.value",
+		"finance.team.performance.own",
+		"finance.compensation.own",
 	]),
-	contributor: new Set(["crm.read", "crm.create", "crm.update.owned"]),
+	contributor: new Set([
+		"crm.read",
+		"crm.create",
+		"crm.update.owned",
+		"finance.team.performance.own",
+		"finance.compensation.own",
+	]),
 };
 
 export function hasWorkspacePermission(
