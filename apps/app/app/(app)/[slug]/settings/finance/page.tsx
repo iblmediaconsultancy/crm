@@ -13,6 +13,7 @@ import { getServerQueryClient, getServerTrpc } from "@/lib/trpc/server";
 import { FinanceSettings } from "./finance-settings";
 
 export const metadata: Metadata = { title: "Financials" };
+export const instant = false;
 
 export default async function FinancialSettingsPage() {
 	await requireSession();
