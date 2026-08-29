@@ -1,6 +1,9 @@
 "use client";
 
-import { FINANCE_PERMISSIONS, type FinancePermission } from "@crm/auth";
+import {
+	FINANCE_PERMISSIONS,
+	type FinancePermission,
+} from "@crm/auth/permissions";
 import { Button } from "@crm/ui/components/button";
 import {
 	Card,
