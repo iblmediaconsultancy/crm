@@ -40,9 +40,9 @@ type RailItem = {
 };
 
 const ITEMS: RailItem[] = [
-	{ title: "Overview", href: "/", icon: Dashboard, match: "exact" },
+	{ title: "Command Center", href: "/", icon: Dashboard, match: "exact" },
 	{
-		title: "Research Agent",
+		title: "Atlas",
 		href: "/chat",
 		icon: Chat,
 		match: "prefix",
@@ -55,8 +55,26 @@ const ITEMS: RailItem[] = [
 		icon: UserMultiple,
 		match: "prefix",
 	},
+	{ title: "Leads", href: "/leads", icon: Task, match: "prefix" },
 	{ title: "Deals", href: "/deals", icon: Partnership, match: "prefix" },
-	{ title: "Operations", href: "/operations", icon: Task, match: "prefix", related: ["/players", "/football-agents", "/agencies", "/clubs", "/representations", "/leads", "/football-tasks", "/outreach", "/duplicates", "/allocation", "/archived"] },
+	{
+		title: "Outreach",
+		href: "/outreach",
+		icon: Task,
+		match: "prefix",
+		related: [
+			"/operations",
+			"/players",
+			"/football-agents",
+			"/agencies",
+			"/clubs",
+			"/representations",
+			"/football-tasks",
+			"/duplicates",
+			"/allocation",
+			"/archived",
+		],
+	},
 	{ title: "Settings", href: "/settings", icon: Settings, match: "prefix" },
 ];
 
@@ -137,7 +155,7 @@ function MobileRailLink({
 				aria-current={active ? "page" : undefined}
 				onClick={onNavigate}
 				transitionTypes={[
-					item.title === "Research Agent" ? "nav-forward" : "nav-lateral",
+					item.title === "Atlas" ? "nav-forward" : "nav-lateral",
 				]}
 			>
 				<Icon icon={item.icon} />
@@ -224,7 +242,7 @@ export function AppIconRail() {
 		[workspaceUrl],
 	);
 	const inChat = items.some(
-		(item) => item.title === "Research Agent" && isActive(item, pathname),
+		(item) => item.title === "Atlas" && isActive(item, pathname),
 	);
 
 	return (

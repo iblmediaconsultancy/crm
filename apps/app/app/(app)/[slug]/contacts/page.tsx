@@ -29,7 +29,10 @@ export default function ContactsPage({
 			<PageShellHeader>
 				<PageShellHeading>
 					<PageShellTitle>Contacts</PageShellTitle>
-					<PageShellDescription>Everyone in the pipeline.</PageShellDescription>
+					<PageShellDescription>
+						Players, agents and club relationships with their next action in
+						view.
+					</PageShellDescription>
 				</PageShellHeading>
 				<PageShellActions>
 					<CreateContactSheet />

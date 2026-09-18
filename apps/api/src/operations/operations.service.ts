@@ -210,7 +210,14 @@ export class OperationsService {
 						attentionState: true,
 						nextActionAt: true,
 						nextActionTitle: true,
+						handoffReason: true,
+						handoffSummary: true,
+						handoffRecommendedAction: true,
+						handoffAt: true,
+						lastContactedAt: true,
+						lastRepliedAt: true,
 						ownerUserId: true,
+						company: { select: { name: true } },
 						contact: {
 							select: {
 								id: true,
@@ -394,7 +401,7 @@ export class OperationsService {
 				deliveries,
 				threads,
 				audit,
-					dailyReport: {
+				dailyReport: {
 					date: startOfDay(),
 					leadStageCounts: Object.fromEntries(
 						leadStageCounts.map((row) => [row.stage, row._count._all]),

@@ -65,6 +65,10 @@ export function SalesDashboard({ summary }: { summary: Summary }) {
 		);
 
 	const hasTrend = trend.some((point) => point.won > 0 || point.created > 0);
+	const hasSalesSignal =
+		wonThisMonth.count > 0 || pipeline.totalDeals > 0 || hasTrend;
+
+	if (!hasSalesSignal) return null;
 
 	const stageSlices = pipeline.stages.flatMap((stage) =>
 		stage.valueCents > 0

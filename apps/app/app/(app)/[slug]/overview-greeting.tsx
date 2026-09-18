@@ -20,11 +20,11 @@ export function OverviewGreeting() {
 
 	return (
 		<>
-			<PageShellTitle>Welcome back</PageShellTitle>
+			<PageShellTitle>Command Center</PageShellTitle>
 			<PageShellDescription>
 				{scope === "me"
-					? "What you have closed, what is still in play, and what needs you today."
-					: "What the team has closed, what is still in play, and what needs you today."}
+					? "Your current business picture, pipeline and next decisions."
+					: "The current IBL business picture, pipeline and next decisions."}
 			</PageShellDescription>
 		</>
 	);

@@ -26,6 +26,9 @@ type CalendarStatus = {
 	primaryCalendarId: string;
 	hvaCalendarId: string | null;
 	blockedCalendarIds: string[];
+	connectionOwnerUserId: string | null;
+	connectionOwnerEmail: string | null;
+	connectionSharedWithRequester: boolean;
 };
 
 export function GoogleCalendarConnection({

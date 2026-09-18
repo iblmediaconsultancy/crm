@@ -17,6 +17,12 @@ export default function AppLayout({
 	return (
 		<MobileNavProvider>
 			<div className="isolate flex h-svh flex-col">
+				<a
+					href="#main-content"
+					className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:m-2 focus:rounded-md focus:bg-background focus:px-3 focus:py-2 focus:text-sm focus:ring-2 focus:ring-ring"
+				>
+					Skip to main content
+				</a>
 				<Suspense fallback={<AppHeaderFallback />}>
 					<WorkspaceHeader params={params} />
 				</Suspense>

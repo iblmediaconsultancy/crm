@@ -30,7 +30,7 @@ export default function CompaniesPage({
 				<PageShellHeading>
 					<PageShellTitle>Companies</PageShellTitle>
 					<PageShellDescription>
-						Every account in the pipeline.
+						Agencies, clubs and the organisations behind the relationships.
 					</PageShellDescription>
 				</PageShellHeading>
 				<PageShellActions>

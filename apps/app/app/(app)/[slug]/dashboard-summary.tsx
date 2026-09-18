@@ -40,6 +40,7 @@ import { dealStageColor } from "@/lib/deal-stage";
 import { useCrmCache } from "@/lib/trpc/cache";
 import { useTRPC } from "@/lib/trpc/client";
 import { useWorkspaceUrl } from "@/lib/use-workspace-url";
+import { AtlasOperationsSummary } from "./atlas-operations-summary";
 import { FinancialCommandCenter } from "./financial-command-center";
 import { overviewParsers } from "./overview-search-params";
 import { SalesDashboard } from "./sales-dashboard";
@@ -127,6 +128,7 @@ export function DashboardSummary() {
 	return (
 		<div className="flex flex-col gap-6">
 			<FinancialCommandCenter />
+			<AtlasOperationsSummary />
 			<SalesDashboard summary={summary} />
 
 			<div className="grid gap-6 @3xl/page-content:grid-cols-2">

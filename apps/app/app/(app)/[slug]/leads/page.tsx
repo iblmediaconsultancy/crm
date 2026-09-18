@@ -20,7 +20,7 @@ export default async function Page() {
 				<PageShellHeading>
 					<PageShellTitle>Leads</PageShellTitle>
 					<PageShellDescription>
-						Owned football opportunities and pipeline state.
+						Football relationships with stage, ownership and the next action.
 					</PageShellDescription>
 				</PageShellHeading>
 			</PageShellHeader>
