@@ -1,6 +1,7 @@
 import { db } from "@crm/db";
 import { defineSchedule } from "eve/schedules";
 import crm from "../channels/crm";
+import { atlasLocalDateKey, atlasReportWindow } from "../lib/atlas-report";
 import {
 	pendingAgentRunIds,
 	pendingBuilderSubmissionIds,
@@ -20,6 +21,31 @@ export default defineSchedule({
 	async run({ receive, waitUntil, appAuth }) {
 		waitUntil(
 			Promise.all([
+				(async () => {
+					const settings = await db.appSetting.findUnique({
+						where: { id: "app" },
+						select: { atlasWorkingTimeZone: true, atlasReportMinute: true },
+					});
+					const timeZone = settings?.atlasWorkingTimeZone ?? "Europe/Amsterdam";
+					const reportMinute = settings?.atlasReportMinute ?? 1140;
+					if (!atlasReportWindow(new Date(), timeZone, reportMinute)) return;
+					const reportDate = new Date(
+						`${atlasLocalDateKey(new Date(), timeZone)}T00:00:00.000Z`,
+					);
+					const existing = await db.atlasDailyReport.findUnique({
+						where: { reportDate_timeZone: { reportDate, timeZone } },
+						select: { id: true },
+					});
+					if (existing) return;
+					await scheduleTask({
+						kind: "atlas-daily-report",
+						reason:
+							"Generate the weekday Atlas operating report at the configured local report time.",
+						dueAt: new Date(),
+						priority: 90,
+						budget: 2,
+					});
+				})(),
 				(async () => {
 					if (
 						process.env.ATLAS_LIVE_OUTREACH_ENABLED?.trim().toLowerCase() !==

@@ -236,6 +236,32 @@ export function OutreachWorkbench() {
 			</Card>
 			<Card>
 				<CardHeader>
+					<CardTitle>Atlas weekday report</CardTitle>
+					<CardDescription>
+						A persisted 19:00 Europe/Amsterdam operating snapshot, separate from
+						live dashboard counters.
+					</CardDescription>
+				</CardHeader>
+				<CardContent>
+					{data?.atlasDailyReport ? (
+						<div className="grid gap-2">
+							<p className="text-sm">{data.atlasDailyReport.summary}</p>
+							<p className="text-xs text-muted-foreground">
+								Generated{" "}
+								{new Date(data.atlasDailyReport.generatedAt).toLocaleString()}{" "}
+								for {data.atlasDailyReport.timeZone}.
+							</p>
+						</div>
+					) : (
+						<p className="text-sm text-muted-foreground">
+							No weekday report has been generated yet. The Atlas scheduler
+							creates one at the configured local report time.
+						</p>
+					)}
+				</CardContent>
+			</Card>
+			<Card>
+				<CardHeader>
 					<CardTitle>Outreach readiness</CardTitle>
 					<CardDescription>
 						Live providers remain fail-closed. The local double never contacts

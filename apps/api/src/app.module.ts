@@ -22,6 +22,7 @@ import { HealthModule } from "./health/health.module";
 import { LoggingModule } from "./logging/logging.module";
 import { logAuthRoute } from "./logging/request-logger.middleware";
 import { MailboxModule } from "./mailbox/mailbox.module";
+import { MeetingsModule } from "./meetings/meetings.module";
 import { MetricsModule } from "./metrics/metrics.module";
 import { OnboardingModule } from "./onboarding/onboarding.module";
 import { OperationsModule } from "./operations/operations.module";
@@ -67,6 +68,7 @@ import { WorkspaceModule } from "./workspace/workspace.module";
 		SearchModule,
 		MailboxModule,
 		MetricsModule,
+		MeetingsModule,
 		OnboardingModule,
 		OperationsModule,
 		SettingsModule,

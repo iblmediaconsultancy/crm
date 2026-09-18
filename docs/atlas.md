@@ -13,6 +13,9 @@ Production expects:
 - `RESEND_OUTREACH_FROM_EMAIL=outreach@iblmedia.com`
 - `RESEND_OUTREACH_FROM_NAME=IBL Media Team`
 - `ATLAS_LIVE_OUTREACH_ENABLED=false`
+- `GOOGLE_CALENDAR_CLIENT_ID` and `GOOGLE_CALENDAR_CLIENT_SECRET_FILE` for token refresh
+- `GOOGLE_CALENDAR_PRIMARY_ID` for Ihsan's IBL calendar, defaulting to `primary`
+- `GOOGLE_CALENDAR_HVA_ID` and optional `GOOGLE_CALENDAR_BLOCKER_IDS`; every listed calendar is treated as unavailable time
 
 The Resend sender address is applied by the worker. Inbound replies do not use Resend: MIAB IMAP sync passes normalized messages to `ThreadWriterService`, which writes the email thread, message and activity, cancels active follow-up plans, marks the delivery replied, and advances the linked lead to `REPLIED`.
 
@@ -32,6 +35,20 @@ Atlas only queues email when all of the following are true:
 - the queue operation is idempotent
 
 Once the worker sends the message, the lead advances to `CONTACTED` and receives a dated next action. An inbound reply advances it to `REPLIED` and cancels queued follow-ups. Bounce and complaint handling continues through the existing Resend webhook and suppression path.
+
+## Meetings and calendar safety
+
+Meeting requests are persisted as `PENDING_APPROVAL`. Team or Admin approval changes them to `APPROVED`; only an explicit confirmation rechecks Google FreeBusy for the IBL calendar and every configured blocker calendar, then creates the Google event using the write scope. A busy IBL or HvA interval changes the request to `BLOCKED`. There is no automatic meeting confirmation.
+
+The current branch contains the read, availability, write, and approval flow, but the Google account, OAuth scopes, client credentials, and HvA calendar ID still require Ihsan's external setup.
+
+## Mailbox and daily report
+
+The additive mailbox migration provisions `outreach@iblmedia.com` as an MIAB mailbox owned by Atlas and creates its `miab` sync row. It stays `UNVERIFIED` until the real MIAB mailbox credential and provider proof are supplied. Once verified, the existing worker reads its INBOX and sends inbound messages through `ThreadWriterService`; no separate inbound parser is needed.
+
+The weekday report is a separate `AtlasDailyReport` snapshot, scheduled at 19:00 Europe/Amsterdam and persisted by the Atlas agent even while live outreach is disabled. The Outreach workbench displays the latest persisted snapshot separately from live dashboard counters.
+
+The versioned playbook is stored in `apps/agent/agent/lib/atlas-playbook.ts` and loaded into Atlas outreach instructions at session start. It is repository-controlled, not supplied by an external prompt or inferred from a lead.
 
 ## Enablement procedure
 

@@ -122,6 +122,7 @@ export function taskAuth(task: LeasedTask, base: AppAuth = APP_AUTH): AppAuth {
 		attributes: {
 			taskKind: task.kind,
 			...(task.kind === "atlas-outreach" ? { purpose: "atlas-outreach" } : {}),
+			...(task.kind === "atlas-daily-report" ? { purpose: "atlas-daily-report" } : {}),
 			reason: task.reason,
 			budget: String(task.budget),
 			...(task.contactId ? { contactId: task.contactId } : {}),
@@ -157,6 +158,8 @@ function work(kind: string, reason: string): string {
 			return "There is a meeting with this person soon. Make sure whoever is taking it opens the record knowing who they are dealing with.";
 		case "atlas-outreach":
 			return "Run one safe Atlas outreach cycle. Review the eligible lead queue, send no more than one approved-by-policy email, and stop when a safety gate blocks the action.";
+		case "atlas-daily-report":
+			return "Write the weekday Atlas operating report as a separate CRM snapshot. Do not send email or change outreach state.";
 		case "company-profile":
 			return "This company's brand, industry, location and links are filled in separately and may already be there. Read the account, fill anything still missing, and write a brief if there is something worth saying.";
 		case "workspace-profile":

@@ -81,6 +81,30 @@ export class EnvironmentVariables {
 
 	@IsOptional()
 	@IsString()
+	GOOGLE_CALENDAR_CLIENT_ID?: string;
+
+	@IsOptional()
+	@IsString()
+	GOOGLE_CALENDAR_CLIENT_SECRET?: string;
+
+	@IsOptional()
+	@IsString()
+	GOOGLE_CALENDAR_CLIENT_SECRET_FILE?: string;
+
+	@IsOptional()
+	@IsString()
+	GOOGLE_CALENDAR_PRIMARY_ID?: string;
+
+	@IsOptional()
+	@IsString()
+	GOOGLE_CALENDAR_HVA_ID?: string;
+
+	@IsOptional()
+	@IsString()
+	GOOGLE_CALENDAR_BLOCKER_IDS?: string;
+
+	@IsOptional()
+	@IsString()
 	CRM_TELEMETRY_DISABLED?: string;
 
 	@IsOptional()

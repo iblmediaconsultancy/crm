@@ -180,6 +180,7 @@ export class OperationsService {
 				meetings,
 				wonLeads,
 				quota,
+				atlasReport,
 			] = await Promise.all([
 				this.roleOf(tx, userId),
 				tx.providerCapability.findMany({
@@ -360,6 +361,7 @@ export class OperationsService {
 						coldEmailSent: true,
 					},
 				}),
+				tx.atlasDailyReport.findFirst({ orderBy: { generatedAt: "desc" } }),
 			]);
 			const localProviderDouble = localProviderDoubleEnabled();
 			return {
@@ -392,7 +394,7 @@ export class OperationsService {
 				deliveries,
 				threads,
 				audit,
-				dailyReport: {
+					dailyReport: {
 					date: startOfDay(),
 					leadStageCounts: Object.fromEntries(
 						leadStageCounts.map((row) => [row.stage, row._count._all]),
@@ -403,6 +405,7 @@ export class OperationsService {
 					wonLeads,
 					quota,
 				},
+				atlasDailyReport: atlasReport,
 			};
 		});
 	}
