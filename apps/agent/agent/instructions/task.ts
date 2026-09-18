@@ -1,5 +1,5 @@
 import { defineDynamic, defineInstructions } from "eve/instructions";
-import { ATLAS_SALES_PLAYBOOK } from "../lib/atlas-playbook";
+import { ATLAS_RUNTIME_INSTRUCTIONS } from "../lib/atlas-playbook";
 import { focusOn, setBudget } from "../lib/focus";
 import { sessionPreamble } from "../lib/preamble";
 import { RESEARCH_INSTRUCTIONS } from "../lib/research-instructions";
@@ -21,7 +21,7 @@ export default defineDynamic({
 
 			if (purpose === "atlas-outreach") {
 				return defineInstructions({
-					markdown: `${ATLAS_SALES_PLAYBOOK}\n\nThis is an authenticated Atlas outreach run. Use list_atlas_outreach_queue to inspect eligible leads. If and only if every safety gate is satisfied, compose one concise, personalized email in English, Dutch, or Turkish and call send_atlas_email exactly once. Never include pricing, quote a fee, contact a lead through LinkedIn, Instagram, WhatsApp, or phone, or send to a lead with NEEDS_IHSAN, WITH_IHSAN, PARKED, SUPPRESSED, PROTECTED, or DO_NOT_CONTACT state. If the queue is empty or any gate is closed, report the reason and stop. Do not claim delivery; the database worker is responsible for delivery status.`,
+					markdown: `${ATLAS_RUNTIME_INSTRUCTIONS}\n\nThis is an authenticated Atlas outreach run. Call list_atlas_outreach_queue before deciding. If and only if every safety gate is satisfied, compose one concise, personalized email in English, Dutch, or Turkish and call send_atlas_email exactly once. Never include pricing, quote a fee, contact a lead through LinkedIn, Instagram, WhatsApp, or phone, or send to a lead with NEEDS_IHSAN, WITH_IHSAN, PARKED, SUPPRESSED, PROTECTED, or DO_NOT_CONTACT state.`,
 				});
 			}
 

@@ -1,5 +1,6 @@
 import { db, Prisma } from "@crm/db";
 import { withPrincipal } from "@crm/db/security";
+import { hasUnsupportedOutcomeClaim } from "./atlas-playbook";
 import type { PurposeContext } from "./session-purpose";
 import { attribute, purposeOf } from "./session-purpose";
 
@@ -70,6 +71,22 @@ export function hasBlockedPricingLanguage(value: string): boolean {
 	return BLOCKED_PRICING.test(value);
 }
 
+export function isAtlasLanguageAllowed(value: string): boolean {
+	return LANGUAGES.has(value.trim().toLowerCase());
+}
+
+export function isAtlasContactEligible(
+	lifecycleState: string,
+	outreachState: string,
+	attentionState: string,
+): boolean {
+	return (
+		lifecycleState === "ACTIVE" &&
+		outreachState === "ALLOWED" &&
+		attentionState === "NONE"
+	);
+}
+
 function dayKey(date: Date, timeZone: string): Date {
 	const parts = new Intl.DateTimeFormat("en-CA", {
 		timeZone,
@@ -135,8 +152,12 @@ export async function sendAtlasEmail(ctx: PurposeContext, input: AtlasInput) {
 		throw new Error("Email content is too long.");
 	if (hasBlockedPricingLanguage(`${input.subject}\n${input.body}`))
 		throw new Error("Pricing language is not allowed in external outreach.");
+	if (hasUnsupportedOutcomeClaim(`${input.subject}\n${input.body}`))
+		throw new Error(
+			"Unsupported guarantees or client-outcome claims are not allowed in external outreach.",
+		);
 	const language = input.language.trim().toLowerCase();
-	if (!LANGUAGES.has(language))
+	if (!isAtlasLanguageAllowed(language))
 		throw new Error("Atlas may send only in English, Dutch, or Turkish.");
 
 	return withPrincipal(
@@ -195,8 +216,11 @@ export async function sendAtlasEmail(ctx: PurposeContext, input: AtlasInput) {
 			if (
 				!lead?.contactId ||
 				!lead.contact ||
-				lead.contact.lifecycleState !== "ACTIVE" ||
-				lead.contact.outreachState !== "ALLOWED"
+				!isAtlasContactEligible(
+					lead.contact.lifecycleState,
+					lead.contact.outreachState,
+					lead.attentionState,
+				)
 			)
 				throw new Error("Lead contact is not eligible for outreach.");
 			if (!mailbox)
