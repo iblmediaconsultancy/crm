@@ -16,7 +16,12 @@ describe("Google Calendar OAuth foundation", () => {
 		const transaction = {
 			$executeRaw: async () => 0,
 			user: {
-				findUnique: async () => ({ email: "ihsan@example.test" }),
+				findUnique: async () => ({
+					email: "ihsan@example.test",
+					kind: "HUMAN",
+					profile: { status: "ACTIVE" },
+					members: [{ role: "admin" }],
+				}),
 			},
 			verification: {
 				deleteMany: async () => ({ count: 0 }),

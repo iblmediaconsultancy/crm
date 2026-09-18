@@ -10,6 +10,7 @@ import {
 import type { z } from "zod";
 import type { AuthedTrpcContext } from "../trpc/context.types";
 import { AuthMiddleware } from "../trpc/middlewares/auth.middleware";
+import { PermissionMiddleware } from "../trpc/middlewares/permission.middleware";
 import { GoogleCalendarService } from "./google-calendar.service";
 import {
 	meetingAvailabilityInput,
@@ -19,7 +20,7 @@ import {
 import { MeetingsService } from "./meetings.service";
 
 @Router({ alias: "meetings" })
-@UseMiddlewares(AuthMiddleware)
+@UseMiddlewares(AuthMiddleware, PermissionMiddleware)
 export class MeetingsRouter {
 	constructor(
 		@Inject(MeetingsService) private readonly meetings: MeetingsService,
@@ -27,12 +28,12 @@ export class MeetingsRouter {
 		private readonly google: GoogleCalendarService,
 	) {}
 
-	@Query()
+	@Query({ meta: { permission: "crm.read" } })
 	status(@Ctx() ctx: AuthedTrpcContext) {
 		return this.google.status(ctx.user.id);
 	}
 
-	@Query({ input: meetingAvailabilityInput })
+	@Query({ input: meetingAvailabilityInput, meta: { permission: "crm.read" } })
 	availability(
 		@Ctx() ctx: AuthedTrpcContext,
 		@Input() input: z.infer<typeof meetingAvailabilityInput>,
@@ -44,12 +45,12 @@ export class MeetingsRouter {
 		);
 	}
 
-	@Query()
+	@Query({ meta: { permission: "crm.read" } })
 	list(@Ctx() ctx: AuthedTrpcContext) {
 		return this.meetings.list(ctx.user.id);
 	}
 
-	@Mutation({ input: meetingRequestInput })
+	@Mutation({ input: meetingRequestInput, meta: { permission: "crm.create" } })
 	request(
 		@Ctx() ctx: AuthedTrpcContext,
 		@Input() input: z.infer<typeof meetingRequestInput>,
@@ -57,7 +58,7 @@ export class MeetingsRouter {
 		return this.meetings.request(ctx.user.id, input);
 	}
 
-	@Mutation({ input: meetingIdInput })
+	@Mutation({ input: meetingIdInput, meta: { permission: "crm.update.owned" } })
 	approve(
 		@Ctx() ctx: AuthedTrpcContext,
 		@Input() input: z.infer<typeof meetingIdInput>,
@@ -65,7 +66,7 @@ export class MeetingsRouter {
 		return this.meetings.approve(ctx.user.id, input.id);
 	}
 
-	@Mutation({ input: meetingIdInput })
+	@Mutation({ input: meetingIdInput, meta: { permission: "crm.update.owned" } })
 	decline(
 		@Ctx() ctx: AuthedTrpcContext,
 		@Input() input: z.infer<typeof meetingIdInput>,
@@ -73,7 +74,7 @@ export class MeetingsRouter {
 		return this.meetings.decline(ctx.user.id, input.id);
 	}
 
-	@Mutation({ input: meetingIdInput })
+	@Mutation({ input: meetingIdInput, meta: { permission: "crm.update.owned" } })
 	confirm(
 		@Ctx() ctx: AuthedTrpcContext,
 		@Input() input: z.infer<typeof meetingIdInput>,
@@ -81,7 +82,7 @@ export class MeetingsRouter {
 		return this.meetings.confirm(ctx.user.id, input.id);
 	}
 
-	@Mutation()
+	@Mutation({ meta: { permission: "workspace.manage" } })
 	disconnect(@Ctx() ctx: AuthedTrpcContext) {
 		return this.google.disconnect(ctx.user.id);
 	}

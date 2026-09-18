@@ -1,6 +1,7 @@
 import { ActivityType, type Db, type Prisma } from "@crm/db";
 import {
 	BadRequestException,
+	ForbiddenException,
 	Injectable,
 	Logger,
 	NotFoundException,
@@ -156,10 +157,10 @@ export class ActivitiesService {
 		return serializeEntry(activity);
 	}
 
-	async complete(id: string, completed: boolean) {
+	async complete(id: string, completed: boolean, actingUserId: string) {
 		const activity = await this.db.activity.findUnique({
 			where: { id },
-			select: { type: true },
+			select: { type: true, createdById: true },
 		});
 
 		if (!activity) {
@@ -168,6 +169,9 @@ export class ActivitiesService {
 
 		if (activity.type !== ActivityType.TASK) {
 			throw new BadRequestException("Only tasks can be completed.");
+		}
+		if (activity.createdById !== actingUserId) {
+			throw new ForbiddenException("You can only complete your own tasks.");
 		}
 
 		const updated = await this.db.activity.update({

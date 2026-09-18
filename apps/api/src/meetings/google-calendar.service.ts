@@ -5,6 +5,7 @@ import { withPrincipal } from "@crm/db/security";
 import {
 	BadRequestException,
 	ConflictException,
+	ForbiddenException,
 	Injectable,
 	Logger,
 	ServiceUnavailableException,
@@ -27,6 +28,11 @@ export const WRITE_SCOPE = "https://www.googleapis.com/auth/calendar.events";
 const OAUTH_STATE_PREFIX = "google-calendar-oauth:";
 const OAUTH_STATE_TTL_MS = 10 * 60_000;
 
+type CalendarPrincipal = {
+	userId: string;
+	kind: "user" | "service";
+};
+
 @Injectable()
 export class GoogleCalendarService {
 	private readonly logger = new Logger(GoogleCalendarService.name);
@@ -38,35 +44,47 @@ export class GoogleCalendarService {
 	) {}
 
 	async status(userId: string) {
-		return withPrincipal(this.db, { userId, kind: "user" }, async (tx) => {
-			const account = await tx.account.findFirst({
-				where: { userId, providerId: GOOGLE_PROVIDER_ID },
-				select: { scope: true, refreshToken: true, accessToken: true },
-			});
-			const scopes = parseScopes(account?.scope);
-			return {
-				configured: Boolean(
-					this.clientId() &&
-						(await this.clientSecret()) &&
-						this.tokenEncryptionSecret(),
-				),
-				linked: Boolean(account),
-				connected: Boolean(
-					account?.refreshToken &&
-						scopes.has(READ_SCOPE) &&
-						scopes.has(WRITE_SCOPE),
-				),
-				readAccess: scopes.has(READ_SCOPE),
-				writeAccess: scopes.has(WRITE_SCOPE),
-				hasRefreshToken: Boolean(account?.refreshToken),
-				redirectUri: this.redirectUri(),
-				primaryCalendarId: this.primaryCalendarId(),
-				hvaCalendarId:
-					this.config.get("GOOGLE_CALENDAR_HVA_ID", { infer: true })?.trim() ||
-					null,
-				blockedCalendarIds: this.blockedCalendarIds(),
-			};
-		});
+		const principal = await this.calendarPrincipal(userId);
+		const account = principal
+			? await withPrincipal(this.db, principal, (tx) =>
+					tx.account.findFirst({
+						where: { userId: principal.userId, providerId: GOOGLE_PROVIDER_ID },
+						select: {
+							scope: true,
+							refreshToken: true,
+							accessToken: true,
+							user: { select: { email: true } },
+						},
+					}),
+				)
+			: null;
+		return {
+			configured: Boolean(
+				this.clientId() &&
+					(await this.clientSecret()) &&
+					this.tokenEncryptionSecret(),
+			),
+			linked: Boolean(account),
+			connected: Boolean(
+				account?.refreshToken &&
+				parseScopes(account.scope).has(READ_SCOPE) &&
+				parseScopes(account.scope).has(WRITE_SCOPE),
+			),
+			readAccess: parseScopes(account?.scope).has(READ_SCOPE),
+			writeAccess: parseScopes(account?.scope).has(WRITE_SCOPE),
+			hasRefreshToken: Boolean(account?.refreshToken),
+			redirectUri: this.redirectUri(),
+			primaryCalendarId: this.primaryCalendarId(),
+			hvaCalendarId:
+				this.config.get("GOOGLE_CALENDAR_HVA_ID", { infer: true })?.trim() ||
+				null,
+			blockedCalendarIds: this.blockedCalendarIds(),
+			connectionOwnerUserId: principal?.userId ?? null,
+			connectionOwnerEmail: account?.user.email ?? null,
+			connectionSharedWithRequester: Boolean(
+				principal && principal.userId !== userId,
+			),
+		};
 	}
 
 	async authorizationUrl(userId: string, returnTo: string | undefined) {
@@ -85,8 +103,25 @@ export class GoogleCalendarService {
 			async (tx) => {
 				const user = await tx.user.findUnique({
 					where: { id: userId },
-					select: { email: true },
+					select: {
+						email: true,
+						kind: true,
+						profile: { select: { status: true } },
+						members: {
+							where: { organizationId: "workspace" },
+							select: { role: true },
+							take: 1,
+						},
+					},
 				});
+				if (
+					user?.kind !== "HUMAN" ||
+					user.profile?.status !== "ACTIVE" ||
+					user.members[0]?.role !== "admin"
+				)
+					throw new ForbiddenException(
+						"Only an active human Admin can connect Google Calendar.",
+					);
 				await tx.verification.deleteMany({
 					where: {
 						identifier: { startsWith: OAUTH_STATE_PREFIX },
@@ -376,13 +411,55 @@ export class GoogleCalendarService {
 		});
 	}
 
+	private async calendarPrincipal(
+		requestingUserId: string,
+	): Promise<CalendarPrincipal | null> {
+		const ownConnection = await withPrincipal(
+			this.db,
+			{ userId: requestingUserId, kind: "user" },
+			(tx) =>
+				tx.account.findFirst({
+					where: {
+						userId: requestingUserId,
+						providerId: GOOGLE_PROVIDER_ID,
+					},
+					select: { id: true },
+				}),
+		);
+		if (ownConnection) return { userId: requestingUserId, kind: "user" };
+
+		const owner = await withPrincipal(
+			this.db,
+			{ userId: null, kind: "service" },
+			(tx) =>
+				tx.user.findFirst({
+					where: {
+						kind: "HUMAN",
+						profile: { status: "ACTIVE" },
+						members: {
+							some: { organizationId: "workspace", role: "admin" },
+						},
+						accounts: { some: { providerId: GOOGLE_PROVIDER_ID } },
+					},
+					orderBy: { createdAt: "asc" },
+					select: { id: true },
+				}),
+		);
+		return owner ? { userId: owner.id, kind: "service" } : null;
+	}
+
 	private async accessToken(
 		userId: string,
 		requiredScope: string,
 	): Promise<string> {
-		return withPrincipal(this.db, { userId, kind: "user" }, async (tx) => {
+		const principal = await this.calendarPrincipal(userId);
+		if (!principal)
+			throw new ServiceUnavailableException(
+				"Google Calendar access is not connected for an active human owner.",
+			);
+		return withPrincipal(this.db, principal, async (tx) => {
 			const account = await tx.account.findFirst({
-				where: { userId, providerId: GOOGLE_PROVIDER_ID },
+				where: { userId: principal.userId, providerId: GOOGLE_PROVIDER_ID },
 				select: {
 					id: true,
 					scope: true,
