@@ -8,10 +8,11 @@ export const routeConsentInput = z.object({
 export const followUpPlanCreateInput = z.object({
 	contactId: z.string().min(1),
 	routeId: z.string().min(1),
+	leadId: z.string().min(1).nullable().optional(),
 	steps: z
 		.array(z.object({ dueAt: z.coerce.date(), draftId: z.string().min(1) }))
 		.min(1)
-		.max(20),
+		.max(3),
 });
 export const followUpCancelInput = z.object({
 	planId: z.string().min(1),

@@ -196,6 +196,46 @@ export function OutreachWorkbench() {
 		<div className="grid gap-4">
 			<Card>
 				<CardHeader>
+					<CardTitle>Today’s outreach report</CardTitle>
+					<CardDescription>
+						Lead movement, replies and the Atlas quota for the current operating
+						day.
+					</CardDescription>
+				</CardHeader>
+				<CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+					<Readiness
+						label="Emails sent"
+						value={String(data?.dailyReport.outreachSent ?? 0)}
+						detail="Outbound deliveries today"
+					/>
+					<Readiness
+						label="Replies"
+						value={String(data?.dailyReport.outreachReplies ?? 0)}
+						detail="Delivered outreach marked replied"
+					/>
+					<Readiness
+						label="Meetings"
+						value={String(data?.dailyReport.meetings ?? 0)}
+						detail="Meeting activities today"
+					/>
+					<Readiness
+						label="Won"
+						value={String(data?.dailyReport.wonLeads ?? 0)}
+						detail="Leads won today"
+					/>
+					<Readiness
+						label="Cold quota"
+						value={
+							data?.dailyReport.quota
+								? `${data.dailyReport.quota.coldEmailSent}/${data.dailyReport.quota.coldEmailLimit}`
+								: "0/90"
+						}
+						detail="Sent against the hard daily ceiling"
+					/>
+				</CardContent>
+			</Card>
+			<Card>
+				<CardHeader>
 					<CardTitle>Outreach readiness</CardTitle>
 					<CardDescription>
 						Live providers remain fail-closed. The local double never contacts

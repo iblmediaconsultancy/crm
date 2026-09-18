@@ -121,6 +121,7 @@ export function taskAuth(task: LeasedTask, base: AppAuth = APP_AUTH): AppAuth {
 		...base,
 		attributes: {
 			taskKind: task.kind,
+			...(task.kind === "atlas-outreach" ? { purpose: "atlas-outreach" } : {}),
 			reason: task.reason,
 			budget: String(task.budget),
 			...(task.contactId ? { contactId: task.contactId } : {}),
@@ -154,6 +155,8 @@ function work(kind: string, reason: string): string {
 			return "Bring this contact's record up to date: their background, their current role, and anything that has changed since we last looked.";
 		case "meeting-prep":
 			return "There is a meeting with this person soon. Make sure whoever is taking it opens the record knowing who they are dealing with.";
+		case "atlas-outreach":
+			return "Run one safe Atlas outreach cycle. Review the eligible lead queue, send no more than one approved-by-policy email, and stop when a safety gate blocks the action.";
 		case "company-profile":
 			return "This company's brand, industry, location and links are filled in separately and may already be there. Read the account, fill anything still missing, and write a brief if there is something worth saying.";
 		case "workspace-profile":

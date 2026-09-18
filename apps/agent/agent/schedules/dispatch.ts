@@ -1,3 +1,4 @@
+import { db } from "@crm/db";
 import { defineSchedule } from "eve/schedules";
 import crm from "../channels/crm";
 import {
@@ -12,12 +13,32 @@ import {
 	researchRequestAuth,
 	settleResearchRequest,
 } from "../lib/ibl-research";
+import { scheduleTask } from "../lib/tasks";
 
 export default defineSchedule({
 	cron: "* * * * *",
 	async run({ receive, waitUntil, appAuth }) {
 		waitUntil(
 			Promise.all([
+				(async () => {
+					if (
+						process.env.ATLAS_LIVE_OUTREACH_ENABLED?.trim().toLowerCase() !==
+						"true"
+					)
+						return;
+					const settings = await db.appSetting.findUnique({
+						where: { id: "app" },
+						select: { atlasLiveOutreachEnabled: true },
+					});
+					if (!settings?.atlasLiveOutreachEnabled) return;
+					await scheduleTask({
+						kind: "atlas-outreach",
+						reason: "Run the Atlas autonomous outreach cycle within policy.",
+						dueAt: new Date(),
+						priority: 100,
+						budget: 4,
+					});
+				})(),
 				drainAll((task) =>
 					receive(crm, {
 						message: brief(task),

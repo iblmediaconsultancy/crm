@@ -22,6 +22,8 @@ import type {
 	draftUpdateInput,
 	footballProfileInput,
 	leadCreateInput,
+	leadHandoffInput,
+	leadTransitionInput,
 	noteCreateInput,
 	operationsListInput,
 	organizationProfileInput,
@@ -36,6 +38,28 @@ import type {
 } from "./operations.contracts";
 
 type Input<T extends z.ZodType> = z.infer<T>;
+
+function startOfDay(): Date {
+	const date = new Date();
+	date.setHours(0, 0, 0, 0);
+	return date;
+}
+
+function normalizeContactRoute(type: string, value: string): string {
+	const trimmed = value.trim();
+	if (type === "EMAIL") return trimmed.toLowerCase();
+	if (["LINKEDIN", "INSTAGRAM", "SOCIAL"].includes(type)) {
+		try {
+			const url = new URL(
+				/^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`,
+			);
+			return `${url.hostname.toLowerCase()}${url.pathname.replace(/\/+$/, "")}`;
+		} catch {
+			return trimmed.toLowerCase().replace(/\s+/g, "");
+		}
+	}
+	return trimmed.toLowerCase().replace(/[\s()-]/g, "");
+}
 
 @Injectable()
 export class OperationsService {
@@ -150,6 +174,12 @@ export class OperationsService {
 				deliveries,
 				threads,
 				audit,
+				leadStageCounts,
+				outreachSent,
+				outreachReplies,
+				meetings,
+				wonLeads,
+				quota,
 			] = await Promise.all([
 				this.roleOf(tx, userId),
 				tx.providerCapability.findMany({
@@ -174,6 +204,11 @@ export class OperationsService {
 						id: true,
 						name: true,
 						status: true,
+						stage: true,
+						priority: true,
+						attentionState: true,
+						nextActionAt: true,
+						nextActionTitle: true,
 						ownerUserId: true,
 						contact: {
 							select: {
@@ -305,6 +340,26 @@ export class OperationsService {
 						actor: { select: { name: true } },
 					},
 				}),
+				tx.lead.groupBy({ by: ["stage"], _count: { _all: true } }),
+				tx.outboundDelivery.count({ where: { sentAt: { gte: startOfDay() } } }),
+				tx.outboundDelivery.count({
+					where: { status: "REPLIED", updatedAt: { gte: startOfDay() } },
+				}),
+				tx.activity.count({
+					where: { type: "MEETING", createdAt: { gte: startOfDay() } },
+				}),
+				tx.lead.count({
+					where: { stage: "WON", updatedAt: { gte: startOfDay() } },
+				}),
+				tx.outreachQuota.findFirst({
+					orderBy: { day: "desc" },
+					select: {
+						day: true,
+						coldEmailLimit: true,
+						coldEmailReserved: true,
+						coldEmailSent: true,
+					},
+				}),
 			]);
 			const localProviderDouble = localProviderDoubleEnabled();
 			return {
@@ -337,6 +392,17 @@ export class OperationsService {
 				deliveries,
 				threads,
 				audit,
+				dailyReport: {
+					date: startOfDay(),
+					leadStageCounts: Object.fromEntries(
+						leadStageCounts.map((row) => [row.stage, row._count._all]),
+					),
+					outreachSent,
+					outreachReplies,
+					meetings,
+					wonLeads,
+					quota,
+				},
 			};
 		});
 	}
@@ -872,15 +938,26 @@ export class OperationsService {
 	) {
 		if (Boolean(input.contactId) === Boolean(input.companyId))
 			throw new BadRequestException("Choose exactly one contact or company.");
-		const normalizedValue =
-			input.type === "EMAIL"
-				? input.value.toLowerCase()
-				: input.value.replace(/[\s()-]/g, "").toLowerCase();
-		return this.run(userId, (tx) =>
-			tx.contactRoute.create({
+		const normalizedValue = normalizeContactRoute(input.type, input.value);
+		return this.run(userId, async (tx) => {
+			const existing = await tx.contactRoute.findFirst({
+				where: { type: input.type, normalizedValue },
+				select: { id: true, contactId: true, companyId: true },
+			});
+			if (existing) {
+				if (
+					existing.contactId === (input.contactId ?? null) &&
+					existing.companyId === (input.companyId ?? null)
+				)
+					return existing;
+				throw new BadRequestException(
+					"This contact route is already attached to another CRM profile.",
+				);
+			}
+			return tx.contactRoute.create({
 				data: { ...input, ownerUserId: userId, normalizedValue },
-			}),
-		);
+			});
+		});
 	}
 
 	async shareRoute(
@@ -902,14 +979,121 @@ export class OperationsService {
 				(await this.roleOf(tx, userId)) === "contributor"
 					? userId
 					: input.ownerUserId;
-			return tx.lead.create({
+			const lead = await tx.lead.create({
 				data: {
 					...input,
 					ownerUserId,
 					nextActionAt: input.nextActionAt
 						? new Date(input.nextActionAt)
-						: null,
+						: new Date(),
+					nextActionTitle: input.nextActionTitle ?? "Define the next action",
 					createdByUserId: userId,
+				},
+			});
+			await tx.leadStageHistory.create({
+				data: {
+					leadId: lead.id,
+					toStage: "NEW",
+					reason: "Lead created",
+					actorUserId: userId,
+				},
+			});
+			return lead;
+		});
+	}
+
+	async transitionLead(
+		userId: string,
+		input: Input<typeof leadTransitionInput>,
+	) {
+		return this.run(userId, async (tx) => {
+			const lead = await tx.lead.findUnique({
+				where: { id: input.id },
+				select: {
+					id: true,
+					stage: true,
+					ownerUserId: true,
+					attentionState: true,
+				},
+			});
+			if (!lead) throw new NotFoundException("Lead not found.");
+			const role = await this.roleOf(tx, userId);
+			if (role === "contributor" && lead.ownerUserId !== userId)
+				throw new ForbiddenException(
+					"Contributors may transition only owned leads.",
+				);
+			const terminal = input.stage === "WON" || input.stage === "LOST";
+			const nextActionAt = input.nextActionAt
+				? new Date(input.nextActionAt)
+				: null;
+			const nextActionTitle = input.nextActionTitle ?? null;
+			if (
+				!terminal &&
+				lead.attentionState !== "SUPPRESSED" &&
+				(!nextActionAt || !nextActionTitle)
+			)
+				throw new BadRequestException(
+					"Every active lead requires a next action title and time.",
+				);
+			const updated = await tx.lead.update({
+				where: { id: input.id },
+				data: {
+					stage: input.stage,
+					stageChangedAt: new Date(),
+					nextActionAt,
+					nextActionTitle,
+					outcome:
+						input.outcome ??
+						(terminal ? (input.stage === "WON" ? "WON" : "LOST") : null),
+					outcomeNote: input.outcomeNote ?? undefined,
+					blocker: input.blocker ?? undefined,
+				},
+			});
+			if (lead.stage !== input.stage)
+				await tx.leadStageHistory.create({
+					data: {
+						leadId: lead.id,
+						fromStage: lead.stage,
+						toStage: input.stage,
+						reason: input.outcomeNote ?? "Lead stage changed",
+						actorUserId: userId,
+					},
+				});
+			return updated;
+		});
+	}
+
+	async handoffLead(userId: string, input: Input<typeof leadHandoffInput>) {
+		return this.run(userId, async (tx) => {
+			const lead = await tx.lead.findUnique({
+				where: { id: input.id },
+				select: { id: true, ownerUserId: true },
+			});
+			if (!lead) throw new NotFoundException("Lead not found.");
+			const role = await this.roleOf(tx, userId);
+			if (role === "contributor" && lead.ownerUserId !== userId)
+				throw new ForbiddenException(
+					"Contributors may hand off only owned leads.",
+				);
+			return tx.lead.update({
+				where: { id: input.id },
+				data: {
+					attentionState: input.attentionState,
+					handoffReason: input.reason,
+					handoffSummary: input.summary ?? null,
+					handoffRecommendedAction: input.recommendedAction ?? null,
+					handoffSuggestedResponses: input.suggestedResponses ?? undefined,
+					handoffAt: new Date(),
+					handoffDeadlineAt: input.deadlineAt
+						? new Date(input.deadlineAt)
+						: null,
+					parkedUntil: input.parkedUntil ? new Date(input.parkedUntil) : null,
+					ihsanTakenOverAt:
+						input.attentionState === "WITH_IHSAN" ? new Date() : null,
+					nextActionAt:
+						input.attentionState === "SUPPRESSED" ? null : undefined,
+					nextActionTitle:
+						input.attentionState === "SUPPRESSED" ? null : undefined,
 				},
 			});
 		});

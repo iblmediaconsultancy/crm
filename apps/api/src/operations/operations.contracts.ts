@@ -48,7 +48,15 @@ export const representationTransitionInput = z.object({
 export const contactRouteCreateInput = z.object({
 	contactId: optionalId,
 	companyId: optionalId,
-	type: z.enum(["EMAIL", "PHONE", "WHATSAPP", "LINKEDIN", "SOCIAL", "OTHER"]),
+	type: z.enum([
+		"EMAIL",
+		"PHONE",
+		"WHATSAPP",
+		"LINKEDIN",
+		"INSTAGRAM",
+		"SOCIAL",
+		"OTHER",
+	]),
 	value: z.string().trim().min(1).max(500),
 	label: z.string().trim().max(100).nullable().optional(),
 	visibility: z.enum(["PRIVATE", "SHARED"]).default("PRIVATE"),
@@ -70,6 +78,75 @@ export const leadCreateInput = z.object({
 	dealId: optionalId,
 	ownerUserId: id,
 	nextActionAt: z.string().datetime().nullable().optional(),
+	nextActionTitle: z.string().trim().max(300).nullable().optional(),
+	priority: z.enum(["LOW", "NORMAL", "HIGH", "URGENT"]).default("NORMAL"),
+	originChannel: z
+		.enum([
+			"MANUAL",
+			"EMAIL",
+			"LINKEDIN",
+			"INSTAGRAM",
+			"WHATSAPP",
+			"PHONE",
+			"REFERRAL",
+			"IMPORT",
+		])
+		.default("MANUAL"),
+});
+
+export const leadTransitionInput = z.object({
+	id,
+	stage: z.enum([
+		"NEW",
+		"READY",
+		"CONTACTED",
+		"REPLIED",
+		"QUALIFIED",
+		"WARM",
+		"MEETING",
+		"OPPORTUNITY",
+		"WON",
+		"LOST",
+	]),
+	nextActionAt: z.string().datetime().nullable().optional(),
+	nextActionTitle: z.string().trim().max(300).nullable().optional(),
+	outcome: z
+		.enum([
+			"WON",
+			"LOST",
+			"NO_RESPONSE",
+			"NOT_A_FIT",
+			"NO_BUDGET",
+			"NO_TIMING",
+			"COMPETITOR",
+			"DUPLICATE",
+			"OTHER",
+		])
+		.nullable()
+		.optional(),
+	outcomeNote: z.string().trim().max(2000).nullable().optional(),
+	blocker: z.string().trim().max(2000).nullable().optional(),
+});
+
+export const leadHandoffInput = z.object({
+	id,
+	attentionState: z.enum([
+		"NEEDS_IHSAN",
+		"WITH_IHSAN",
+		"PARKED",
+		"SUPPRESSED",
+		"NONE",
+	]),
+	reason: z.string().trim().min(1).max(1000),
+	summary: z.string().trim().max(5000).nullable().optional(),
+	recommendedAction: z.string().trim().max(2000).nullable().optional(),
+	suggestedResponses: z
+		.array(z.string().trim().max(1000))
+		.max(10)
+		.nullable()
+		.optional(),
+	deadlineAt: z.string().datetime().nullable().optional(),
+	parkedUntil: z.string().datetime().nullable().optional(),
 });
 
 export const taskCreateInput = z.object({

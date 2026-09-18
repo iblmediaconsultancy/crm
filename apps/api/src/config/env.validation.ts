@@ -158,6 +158,10 @@ export class EnvironmentVariables {
 
 	@IsOptional()
 	@IsString()
+	ATLAS_LIVE_OUTREACH_ENABLED?: string;
+
+	@IsOptional()
+	@IsString()
 	IBL_LOCAL_PROVIDER_DOUBLE?: string;
 }
 

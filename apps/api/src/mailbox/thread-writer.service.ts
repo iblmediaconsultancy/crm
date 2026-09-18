@@ -78,6 +78,7 @@ export class ThreadWriterService {
 					select: {
 						companyId: true,
 						contactId: true,
+						leadId: true,
 						activity: { select: { id: true } },
 					},
 				},
@@ -94,6 +95,7 @@ export class ThreadWriterService {
 					id: existing.threadId,
 					companyId: existing.thread.companyId,
 					contactId: existing.thread.contactId,
+					leadId: existing.thread.leadId,
 				}
 			: await this.db.emailThread.findUnique({
 					where: {
@@ -102,7 +104,7 @@ export class ThreadWriterService {
 							rootMessageId: parsed.rootId,
 						},
 					},
-					select: { id: true, companyId: true, contactId: true },
+					select: { id: true, companyId: true, contactId: true, leadId: true },
 				});
 
 		let companyId = thread?.companyId ?? null;
@@ -142,6 +144,17 @@ export class ThreadWriterService {
 
 		try {
 			occurredAt = await this.db.$transaction(async (tx) => {
+				const lead = contactId
+					? await tx.lead.findFirst({
+							where: {
+								contactId,
+								stage: { notIn: ["WON", "LOST"] },
+							},
+							orderBy: { updatedAt: "desc" },
+							select: { id: true },
+						})
+					: null;
+				const leadId = thread?.leadId ?? lead?.id ?? null;
 				const record = existing
 					? { id: existing.threadId }
 					: await tx.emailThread.upsert({
@@ -157,6 +170,7 @@ export class ThreadWriterService {
 								subject: parsed.subject,
 								companyId,
 								contactId,
+								leadId,
 								firstMessageAt: parsed.sentAt,
 								lastMessageAt: parsed.sentAt,
 								messageCount: 0,
@@ -164,6 +178,12 @@ export class ThreadWriterService {
 							update: {},
 							select: { id: true },
 						});
+				if (leadId) {
+					await tx.emailThread.updateMany({
+						where: { id: record.id, leadId: null },
+						data: { leadId },
+					});
+				}
 
 				if (!repair) {
 					await tx.emailMessage.create({
@@ -240,6 +260,37 @@ export class ThreadWriterService {
 						}
 					}
 				}
+				if (!outbound && leadId) {
+					const current = await tx.lead.findUnique({
+						where: { id: leadId },
+						select: { stage: true },
+					});
+					if (current && !["WON", "LOST"].includes(current.stage)) {
+						await tx.lead.update({
+							where: { id: leadId },
+							data: {
+								stage: "REPLIED",
+								stageChangedAt: parsed.sentAt,
+								lastRepliedAt: parsed.sentAt,
+								nextActionAt: new Date(
+									parsed.sentAt.getTime() + 24 * 60 * 60 * 1000,
+								),
+								nextActionTitle: "Review reply and decide the next step",
+							},
+						});
+						if (current.stage !== "REPLIED") {
+							await tx.leadStageHistory.create({
+								data: {
+									leadId,
+									fromStage: current.stage,
+									toStage: "REPLIED",
+									reason: "Inbound reply received",
+									actorUserId: "atlas-operator",
+								},
+							});
+						}
+					}
+				}
 				const repliedDelivery = await tx.outboundDelivery.findFirst({
 					where: {
 						status: { in: ["SENT", "DELIVERED"] },
@@ -283,6 +334,7 @@ export class ThreadWriterService {
 					lastMessageAt,
 					companyId,
 					contactId,
+					leadId,
 					origin: options.origin,
 				});
 			});
@@ -360,6 +412,7 @@ export class ThreadWriterService {
 			lastMessageAt: Date;
 			companyId: string | null;
 			contactId: string | null;
+			leadId: string | null;
 			origin: IngestionOrigin;
 		},
 	): Promise<Date> {
@@ -372,6 +425,7 @@ export class ThreadWriterService {
 				occurredAt: summary.lastMessageAt,
 				companyId: summary.companyId,
 				contactId: summary.contactId,
+				leadId: summary.leadId,
 				createdById: userId,
 				emailThreadId,
 				meta: { synced: true, source: summary.origin },

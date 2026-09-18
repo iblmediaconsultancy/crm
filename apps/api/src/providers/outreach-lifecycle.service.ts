@@ -222,6 +222,7 @@ export class OutreachLifecycleService {
 		input: {
 			contactId: string;
 			routeId: string;
+			leadId?: string | null;
 			steps: { dueAt: Date; draftId: string }[];
 		},
 	) {
@@ -238,6 +239,16 @@ export class OutreachLifecycleService {
 			const consent = await tx.contactRouteConsent.findUnique({
 				where: { routeId: input.routeId },
 			});
+			if (input.leadId) {
+				const lead = await tx.lead.findFirst({
+					where: { id: input.leadId, contactId: input.contactId },
+					select: { id: true },
+				});
+				if (!lead)
+					throw new ConflictException(
+						"The follow-up lead does not belong to the contact.",
+					);
+			}
 			if (
 				!route ||
 				route.contactId !== input.contactId ||
@@ -273,6 +284,8 @@ export class OutreachLifecycleService {
 					contactId: input.contactId,
 					routeId: input.routeId,
 					ownerUserId: actorUserId,
+					leadId: input.leadId ?? null,
+					maxSteps: input.steps.length,
 					sourceDraftId: input.steps[0]?.draftId,
 				},
 			});
@@ -521,6 +534,26 @@ export class OutreachLifecycleService {
 					delivery.draft.recipientRoute.contactId,
 					status,
 				);
+				await tx.contact.update({
+					where: { id: delivery.draft.recipientRoute.contactId },
+					data: {
+						outreachState: "SUPPRESSED",
+						outreachStateReason: status,
+						outreachStateChangedAt: new Date(),
+					},
+				});
+				await tx.lead.updateMany({
+					where: {
+						contactId: delivery.draft.recipientRoute.contactId,
+						stage: { notIn: ["WON", "LOST"] },
+					},
+					data: {
+						attentionState: "SUPPRESSED",
+						blocker: status,
+						nextActionAt: null,
+						nextActionTitle: null,
+					},
+				});
 			}
 			return { accepted: true, deliveryId: delivery.id, status };
 		});

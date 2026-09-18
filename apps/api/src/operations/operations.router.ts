@@ -23,6 +23,8 @@ import {
 	draftUpdateInput,
 	footballProfileInput,
 	leadCreateInput,
+	leadHandoffInput,
+	leadTransitionInput,
 	noteCreateInput,
 	operationsListInput,
 	organizationProfileInput,
@@ -151,6 +153,28 @@ export class OperationsRouter {
 		@Input() input: z.infer<typeof leadCreateInput>,
 	) {
 		return this.operations.createLead(ctx.user.id, input);
+	}
+
+	@Mutation({
+		input: leadTransitionInput,
+		meta: { permission: "crm.update.owned" },
+	})
+	transitionLead(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof leadTransitionInput>,
+	) {
+		return this.operations.transitionLead(ctx.user.id, input);
+	}
+
+	@Mutation({
+		input: leadHandoffInput,
+		meta: { permission: "crm.update.owned" },
+	})
+	handoffLead(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof leadHandoffInput>,
+	) {
+		return this.operations.handoffLead(ctx.user.id, input);
 	}
 
 	@Mutation({ input: taskCreateInput, meta: { permission: "crm.create" } })

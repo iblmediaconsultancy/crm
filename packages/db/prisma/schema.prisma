@@ -17,6 +17,7 @@ model User {
   name          String
   email         String
   emailVerified Boolean   @default(false)
+  kind          UserKind  @default(HUMAN)
   image         String?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
@@ -46,34 +47,35 @@ model User {
   conversationSubmissions AgentConversationSubmission[] @relation("ConversationSubmissionAuthor")
   conversationFeedback    AgentConversationFeedback[]   @relation("ConversationFeedbackAuthor")
 
-  ownedContactRoutes       ContactRoute[]          @relation("ContactRouteOwner")
-  approvedRoutePolicies    SharedRoutePolicy[]     @relation("SharedRoutePolicyApprover")
-  createdRepresentations   Representation[]        @relation("RepresentationCreator")
-  representationChanges    RepresentationHistory[] @relation("RepresentationHistoryActor")
-  ownedLeads               Lead[]                  @relation("LeadOwner")
-  createdLeads             Lead[]                  @relation("LeadCreator")
-  assignedOperationalTasks OperationalTask[]       @relation("OperationalTaskAssignee")
-  createdOperationalTasks  OperationalTask[]       @relation("OperationalTaskCreator")
-  authoredNotes            Note[]                  @relation("NoteAuthor")
-  ownedTemplates           Template[]              @relation("TemplateOwner")
-  ownedDrafts              Draft[]                 @relation("DraftOwner")
-  ownedProposals           Proposal[]              @relation("ProposalOwner")
-  requestedApprovals       OutreachApproval[]      @relation("OutreachApprovalRequester")
-  decidedApprovals         OutreachApproval[]      @relation("OutreachApprovalApprover")
-  receivedAssignments      Assignment[]            @relation("AssignmentAssignee")
-  createdAssignments       Assignment[]            @relation("AssignmentCreator")
-  lifecycleEvents          LifecycleEvent[]        @relation("LifecycleEventActor")
-  evidenceSources          EvidenceSource[]        @relation("EvidenceSourceCreator")
-  duplicateReviews         DuplicateCandidate[]    @relation("DuplicateCandidateReviewer")
-  mergeDecisions           MergeDecision[]         @relation("MergeDecisionDecider")
-  researchRequests         ResearchRequest[]       @relation("ResearchRequestOwner")
-  domainAuditEvents        DomainAuditEvent[]      @relation("DomainAuditActor")
-  financialEvents          FinancialEvent[]        @relation("FinancialEventActor")
-  commissionRecipients     ClientCommission[]     @relation("CommissionRecipient")
-  createdExpenses          CompanyExpense[]        @relation("ExpenseCreator")
-  createdGoals             CompanyGoal[]            @relation("GoalCreator")
-  weeklyTargets            WeeklyTarget[]           @relation("WeeklyTargetUser")
-  permissionOverrides     WorkspacePermissionOverride[] @relation("PermissionOverrideUser")
+  ownedContactRoutes         ContactRoute[]                @relation("ContactRouteOwner")
+  approvedRoutePolicies      SharedRoutePolicy[]           @relation("SharedRoutePolicyApprover")
+  createdRepresentations     Representation[]              @relation("RepresentationCreator")
+  representationChanges      RepresentationHistory[]       @relation("RepresentationHistoryActor")
+  ownedLeads                 Lead[]                        @relation("LeadOwner")
+  createdLeads               Lead[]                        @relation("LeadCreator")
+  leadStageChanges           LeadStageHistory[]            @relation("LeadStageHistoryActor")
+  assignedOperationalTasks   OperationalTask[]             @relation("OperationalTaskAssignee")
+  createdOperationalTasks    OperationalTask[]             @relation("OperationalTaskCreator")
+  authoredNotes              Note[]                        @relation("NoteAuthor")
+  ownedTemplates             Template[]                    @relation("TemplateOwner")
+  ownedDrafts                Draft[]                       @relation("DraftOwner")
+  ownedProposals             Proposal[]                    @relation("ProposalOwner")
+  requestedApprovals         OutreachApproval[]            @relation("OutreachApprovalRequester")
+  decidedApprovals           OutreachApproval[]            @relation("OutreachApprovalApprover")
+  receivedAssignments        Assignment[]                  @relation("AssignmentAssignee")
+  createdAssignments         Assignment[]                  @relation("AssignmentCreator")
+  lifecycleEvents            LifecycleEvent[]              @relation("LifecycleEventActor")
+  evidenceSources            EvidenceSource[]              @relation("EvidenceSourceCreator")
+  duplicateReviews           DuplicateCandidate[]          @relation("DuplicateCandidateReviewer")
+  mergeDecisions             MergeDecision[]               @relation("MergeDecisionDecider")
+  researchRequests           ResearchRequest[]             @relation("ResearchRequestOwner")
+  domainAuditEvents          DomainAuditEvent[]            @relation("DomainAuditActor")
+  financialEvents            FinancialEvent[]              @relation("FinancialEventActor")
+  commissionRecipients       ClientCommission[]            @relation("CommissionRecipient")
+  createdExpenses            CompanyExpense[]              @relation("ExpenseCreator")
+  createdGoals               CompanyGoal[]                 @relation("GoalCreator")
+  weeklyTargets              WeeklyTarget[]                @relation("WeeklyTargetUser")
+  permissionOverrides        WorkspacePermissionOverride[] @relation("PermissionOverrideUser")
   createdPermissionOverrides WorkspacePermissionOverride[] @relation("PermissionOverrideCreator")
 
   members     Member[]
@@ -83,6 +85,11 @@ model User {
 
   @@unique([email])
   @@map("user")
+}
+
+enum UserKind {
+  HUMAN
+  SYSTEM_OPERATOR
 }
 
 model Session {
@@ -212,6 +219,7 @@ enum RecordSource {
   IMPORT
   EMAIL
   CALENDAR
+  REFERRAL
 }
 
 enum AgentConversationKind {
@@ -333,15 +341,15 @@ model Company {
 
   source RecordSource @default(MANUAL)
 
-  lifecycleState    CanonicalLifecycleState @default(ACTIVE)
-  archivedAt        DateTime?
-  archivedByUserId  String?
-  archiveReason     String?
-  version           Int @default(1)
+  lifecycleState   CanonicalLifecycleState @default(ACTIVE)
+  archivedAt       DateTime?
+  archivedByUserId String?
+  archiveReason    String?
+  version          Int                     @default(1)
 
   lastActivityAt DateTime?
 
-  contacts            Contact[]           @relation("CompanyContacts")
+  contacts            Contact[]                @relation("CompanyContacts")
   conversations       AgentConversation[]
   deals               Deal[]
   activities          Activity[]
@@ -358,8 +366,8 @@ model Company {
   notes               Note[]
   proofItems          ProofItem[]
   financialProfiles   ClientFinancialProfile[]
-  createdAt           DateTime            @default(now())
-  updatedAt           DateTime            @updatedAt
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime                 @updatedAt
 
   @@index([ownerId])
   @@index([name])
@@ -409,11 +417,15 @@ model Contact {
 
   source RecordSource @default(MANUAL)
 
-  lifecycleState    CanonicalLifecycleState @default(ACTIVE)
-  archivedAt        DateTime?
-  archivedByUserId  String?
-  archiveReason     String?
-  version           Int @default(1)
+  outreachState          ContactOutreachState @default(ALLOWED)
+  outreachStateReason    String?
+  outreachStateChangedAt DateTime?
+
+  lifecycleState   CanonicalLifecycleState @default(ACTIVE)
+  archivedAt       DateTime?
+  archivedByUserId String?
+  archiveReason    String?
+  version          Int                     @default(1)
 
   lastActivityAt DateTime?
 
@@ -427,19 +439,20 @@ model Contact {
   footballAgentProfile  FootballAgent?
   contactRoutes         ContactRoute[]
   sharedRoutePolicies   SharedRoutePolicy[]
-  playerRepresentations Representation[]    @relation("RepresentationPlayer")
-  agentRepresentations  Representation[]    @relation("RepresentationAgent")
+  playerRepresentations Representation[]         @relation("RepresentationPlayer")
+  agentRepresentations  Representation[]         @relation("RepresentationAgent")
   leads                 Lead[]
   operationalTasks      OperationalTask[]
   notes                 Note[]
   proofItems            ProofItem[]
   financialProfiles     ClientFinancialProfile[]
-  createdAt             DateTime            @default(now())
-  updatedAt             DateTime            @updatedAt
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
 
   @@index([companyId])
   @@index([ownerId])
   @@index([email])
+  @@index([outreachState])
   @@index([lastActivityAt])
   @@index([lifecycleState, firstName])
   @@map("contact")
@@ -961,24 +974,24 @@ model Deal {
   closedAt          DateTime?
   closedReason      String?
 
-  baseAmount   Decimal?  @db.Decimal(24, 4)
-  baseCurrency String?
-  fxRate       Decimal?  @db.Decimal(20, 10)
-  fxRateAt     DateTime?
-  potentialMonthlyRevenue     Decimal? @db.Decimal(14, 2)
-  potentialMonthlyRevenueBase Decimal? @db.Decimal(24, 4)
-  potentialOneOffRevenue      Decimal? @db.Decimal(14, 2)
-  potentialOneOffRevenueBase  Decimal? @db.Decimal(24, 4)
+  baseAmount                  Decimal?  @db.Decimal(24, 4)
+  baseCurrency                String?
+  fxRate                      Decimal?  @db.Decimal(20, 10)
+  fxRateAt                    DateTime?
+  potentialMonthlyRevenue     Decimal?  @db.Decimal(14, 2)
+  potentialMonthlyRevenueBase Decimal?  @db.Decimal(24, 4)
+  potentialOneOffRevenue      Decimal?  @db.Decimal(14, 2)
+  potentialOneOffRevenueBase  Decimal?  @db.Decimal(24, 4)
   potentialPackageName        String?
   potentialBaseCurrency       String?
-  potentialFxRate             Decimal? @db.Decimal(20, 10)
+  potentialFxRate             Decimal?  @db.Decimal(20, 10)
   potentialFxRateAt           DateTime?
 
-  lifecycleState    CanonicalLifecycleState @default(ACTIVE)
-  archivedAt        DateTime?
-  archivedByUserId  String?
-  archiveReason     String?
-  version           Int @default(1)
+  lifecycleState   CanonicalLifecycleState @default(ACTIVE)
+  archivedAt       DateTime?
+  archivedByUserId String?
+  archiveReason    String?
+  version          Int                     @default(1)
 
   lastActivityAt DateTime?
 
@@ -991,8 +1004,8 @@ model Deal {
   leads            Lead[]
   proposals        Proposal[]
   financialProfile ClientFinancialProfile?
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
 
   @@index([companyId])
   @@index([ownerId])
@@ -1107,20 +1120,19 @@ model FieldValue {
   field   FieldDefinition @relation(fields: [fieldId], references: [id], onDelete: Cascade)
 
   companyId String?
-  company   Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company   Company?     @relation(fields: [companyId], references: [id], onDelete: Cascade)
   contactId String?
-  contact   Contact? @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  contact   Contact?     @relation(fields: [contactId], references: [id], onDelete: Cascade)
   dealId    String?
-  deal      Deal?    @relation(fields: [dealId], references: [id], onDelete: Cascade)
-
-  text     String?
-  number   Decimal?     @db.Decimal(24, 4)
-  date     DateTime?
-  bool     Boolean?
-  optionId String?
-  option   FieldOption? @relation(fields: [optionId], references: [id], onDelete: SetNull)
-  userId   String?
-  user     User?        @relation("FieldValueUser", fields: [userId], references: [id], onDelete: SetNull)
+  deal      Deal?        @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  text      String?
+  number    Decimal?     @db.Decimal(24, 4)
+  date      DateTime?
+  bool      Boolean?
+  optionId  String?
+  option    FieldOption? @relation(fields: [optionId], references: [id], onDelete: SetNull)
+  userId    String?
+  user      User?        @relation("FieldValueUser", fields: [userId], references: [id], onDelete: SetNull)
 
   updatedAt DateTime @updatedAt
 
@@ -1154,16 +1166,18 @@ model Activity {
   contact   Contact? @relation(fields: [contactId], references: [id], onDelete: Cascade)
   dealId    String?
   deal      Deal?    @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  leadId    String?
+  lead      Lead?    @relation(fields: [leadId], references: [id], onDelete: Cascade)
 
   createdById String
   createdBy   User   @relation("ActivityAuthor", fields: [createdById], references: [id])
   meta        Json?
 
-  lifecycleState    CanonicalLifecycleState @default(ACTIVE)
-  archivedAt        DateTime?
-  archivedByUserId  String?
-  archiveReason     String?
-  version           Int @default(1)
+  lifecycleState   CanonicalLifecycleState @default(ACTIVE)
+  archivedAt       DateTime?
+  archivedByUserId String?
+  archiveReason    String?
+  version          Int                     @default(1)
 
   emailThreadId   String?        @unique
   emailThread     EmailThread?   @relation(fields: [emailThreadId], references: [id], onDelete: Cascade)
@@ -1176,6 +1190,7 @@ model Activity {
   @@index([companyId, createdAt])
   @@index([dealId, createdAt])
   @@index([contactId, createdAt])
+  @@index([leadId, createdAt])
   @@index([dueAt])
   @@index([createdById])
   @@map("activity")
@@ -1349,6 +1364,8 @@ model EmailThread {
   company   Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
   contactId String?
   contact   Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  leadId    String?
+  lead      Lead?    @relation(fields: [leadId], references: [id], onDelete: SetNull)
 
   firstMessageAt DateTime
   lastMessageAt  DateTime
@@ -1364,6 +1381,7 @@ model EmailThread {
   @@unique([id, mailboxId])
   @@index([companyId, lastMessageAt])
   @@index([contactId, lastMessageAt])
+  @@index([leadId, lastMessageAt])
   @@map("emailThread")
 }
 
@@ -1467,10 +1485,19 @@ model SuppressedContact {
 }
 
 model AppSetting {
-  id String @id
+  id               String  @id
   contextDevApiKey String?
 
   reportingCurrency String?
+
+  atlasLiveOutreachEnabled Boolean @default(false)
+  atlasWorkingTimeZone     String  @default("Europe/Amsterdam")
+  atlasWorkStartMinute     Int     @default(540)
+  atlasWorkEndMinute       Int     @default(1080)
+  atlasReportMinute        Int     @default(1140)
+  atlasDailyColdEmailLimit Int     @default(90)
+  atlasMaxFollowUps        Int     @default(3)
+  atlasCooldownMinutes     Int     @default(2880)
 
   ratesRefreshedAt DateTime?
 
@@ -1597,6 +1624,7 @@ enum ContactRouteType {
   PHONE
   WHATSAPP
   LINKEDIN
+  INSTAGRAM
   SOCIAL
   OTHER
 }
@@ -1613,6 +1641,63 @@ enum LeadStatus {
   CONVERTED
   DISQUALIFIED
   ARCHIVED
+}
+
+enum LeadStage {
+  NEW
+  READY
+  CONTACTED
+  REPLIED
+  QUALIFIED
+  WARM
+  MEETING
+  OPPORTUNITY
+  WON
+  LOST
+}
+
+enum LeadPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum LeadOutcome {
+  WON
+  LOST
+  NO_RESPONSE
+  NOT_A_FIT
+  NO_BUDGET
+  NO_TIMING
+  COMPETITOR
+  DUPLICATE
+  OTHER
+}
+
+enum LeadOriginChannel {
+  MANUAL
+  EMAIL
+  LINKEDIN
+  INSTAGRAM
+  WHATSAPP
+  PHONE
+  REFERRAL
+  IMPORT
+}
+
+enum LeadAttentionState {
+  NONE
+  NEEDS_IHSAN
+  WITH_IHSAN
+  PARKED
+  SUPPRESSED
+}
+
+enum ContactOutreachState {
+  ALLOWED
+  PROTECTED
+  SUPPRESSED
 }
 
 enum PipelineStageKind {
@@ -1830,6 +1915,7 @@ model ContactRoute {
   @@index([companyId])
   @@index([ownerUserId])
   @@index([type, normalizedValue])
+  @@unique([type, normalizedValue])
   @@map("contactRoute")
 }
 
@@ -1914,37 +2000,66 @@ model PipelineStage {
 }
 
 model Lead {
-  id               String            @id @default(cuid())
-  name             String
-  status           LeadStatus        @default(NEW)
-  contactId        String?
-  contact          Contact?          @relation(fields: [contactId], references: [id], onDelete: SetNull)
-  companyId        String?
-  company          Company?          @relation(fields: [companyId], references: [id], onDelete: SetNull)
-  dealId           String?
-  deal             Deal?             @relation(fields: [dealId], references: [id], onDelete: SetNull)
-  ownerUserId      String
-  owner            User              @relation("LeadOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
-  createdByUserId  String
-  createdBy        User              @relation("LeadCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
-  source           RecordSource      @default(MANUAL)
-  sourceKey        String?           @unique
-  nextActionAt     DateTime?
-  convertedAt      DateTime?
-  disqualifiedAt   DateTime?
-  disqualifyReason String?
-  tasks            OperationalTask[]
-  notes            Note[]
-  proofItems       ProofItem[]
-  proposals        Proposal[]
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  id                        String             @id @default(cuid())
+  name                      String
+  status                    LeadStatus         @default(NEW)
+  stage                     LeadStage          @default(NEW)
+  stageChangedAt            DateTime           @default(now())
+  priority                  LeadPriority       @default(NORMAL)
+  contactId                 String?
+  contact                   Contact?           @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  companyId                 String?
+  company                   Company?           @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  dealId                    String?
+  deal                      Deal?              @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  ownerUserId               String
+  owner                     User               @relation("LeadOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
+  createdByUserId           String
+  createdBy                 User               @relation("LeadCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  source                    RecordSource       @default(MANUAL)
+  sourceKey                 String?            @unique
+  originChannel             LeadOriginChannel  @default(MANUAL)
+  nextActionAt              DateTime?
+  nextActionTitle           String?
+  outcome                   LeadOutcome?
+  outcomeNote               String?
+  blocker                   String?
+  attentionState            LeadAttentionState @default(NONE)
+  handoffReason             String?
+  handoffSummary            String?
+  handoffRecommendedAction  String?
+  handoffSuggestedResponses Json?
+  handoffAt                 DateTime?
+  handoffDeadlineAt         DateTime?
+  ihsanTakenOverAt          DateTime?
+  lastContactedAt           DateTime?
+  lastRepliedAt             DateTime?
+  parkedUntil               DateTime?
+  lastLanguage              String?
+  needsReview               Boolean            @default(false)
+  convertedAt               DateTime?
+  disqualifiedAt            DateTime?
+  disqualifyReason          String?
+  tasks                     OperationalTask[]
+  notes                     Note[]
+  proofItems                ProofItem[]
+  proposals                 Proposal[]
+  activities                Activity[]
+  drafts                    Draft[]
+  emailThreads              EmailThread[]
+  followUpPlans             FollowUpPlan[]
+  stageHistory              LeadStageHistory[]
+  createdAt                 DateTime           @default(now())
+  updatedAt                 DateTime           @updatedAt
 
   @@index([ownerUserId, status])
+  @@index([ownerUserId, stage, attentionState])
   @@index([contactId])
   @@index([companyId])
   @@index([dealId])
   @@index([nextActionAt])
+  @@index([attentionState, nextActionAt])
+  @@index([originChannel])
   @@map("lead")
 }
 
@@ -2089,6 +2204,12 @@ model Draft {
   template         Template?          @relation(fields: [templateId], references: [id], onDelete: SetNull)
   subject          String?
   body             String
+  leadId           String?
+  lead             Lead?              @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  coldOutreach     Boolean            @default(false)
+  language         String?
+  atlasAuthorizedAt DateTime?
+  atlasPolicyVersion String?
   status           DraftStatus        @default(DRAFT)
   idempotencyKey   String             @unique
   approvedAt       DateTime?
@@ -2103,8 +2224,26 @@ model Draft {
   @@index([ownerUserId, status])
   @@index([mailboxId, status])
   @@index([recipientRouteId])
+  @@index([leadId, status])
+  @@index([atlasAuthorizedAt])
   @@index([templateId])
   @@map("draft")
+}
+
+model LeadStageHistory {
+  id          String    @id @default(cuid())
+  leadId      String
+  lead        Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  fromStage   LeadStage?
+  toStage     LeadStage
+  reason      String?
+  actorUserId String
+  actor       User      @relation("LeadStageHistoryActor", fields: [actorUserId], references: [id], onDelete: Restrict)
+  createdAt   DateTime  @default(now())
+
+  @@index([leadId, createdAt])
+  @@index([actorUserId, createdAt])
+  @@map("leadStageHistory")
 }
 
 model OutboundDelivery {
@@ -2258,37 +2397,38 @@ model CanonicalTombstone {
 }
 
 model DestructiveConfirmation {
-  id                 String           @id @default(cuid())
-  entityType         DomainEntityType
-  entityId           String
-  entityVersion      Int
-  dependencyDigest   String
-  requestedByUserId  String
-  expiresAt          DateTime
-  consumedAt         DateTime?
-  createdAt          DateTime         @default(now())
+  id                String           @id @default(cuid())
+  entityType        DomainEntityType
+  entityId          String
+  entityVersion     Int
+  dependencyDigest  String
+  requestedByUserId String
+  expiresAt         DateTime
+  consumedAt        DateTime?
+  createdAt         DateTime         @default(now())
 
   @@index([requestedByUserId, expiresAt])
   @@map("destructiveConfirmation")
 }
+
 model DuplicateCandidate {
-  id            String                   @id @default(cuid())
-  entityType    DomainEntityType
-  leftEntityId  String
-  rightEntityId String
+  id              String                   @id @default(cuid())
+  entityType      DomainEntityType
+  leftEntityId    String
+  rightEntityId   String
   score           Decimal                  @db.Decimal(5, 4)
   reasons         Json
   scoreComponents Json
   detectorVersion String
   leftVersion     Int
   rightVersion    Int
-  status        DuplicateCandidateStatus @default(OPEN)
-  reviewedById  String?
-  reviewedBy    User?                    @relation("DuplicateCandidateReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
-  reviewedAt    DateTime?
-  mergeDecision MergeDecision?
-  createdAt     DateTime                 @default(now())
-  updatedAt     DateTime                 @updatedAt
+  status          DuplicateCandidateStatus @default(OPEN)
+  reviewedById    String?
+  reviewedBy      User?                    @relation("DuplicateCandidateReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedAt      DateTime?
+  mergeDecision   MergeDecision?
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
 
   @@unique([entityType, leftEntityId, rightEntityId])
   @@index([entityType, status, score])
@@ -2367,43 +2507,43 @@ model ResearchFinding {
 }
 
 model ClientFinancialProfile {
-  id                   String        @id @default(cuid())
-  dealId               String?       @unique
-  deal                 Deal?         @relation(fields: [dealId], references: [id], onDelete: SetNull)
-  companyId            String?
-  company              Company?      @relation(fields: [companyId], references: [id], onDelete: SetNull)
-  contactId            String?
-  contact              Contact?      @relation(fields: [contactId], references: [id], onDelete: SetNull)
-  packageName         String?
-  currency             String        @default("EUR")
-  baseCurrency         String?
-  fxRate               Decimal?      @db.Decimal(20, 10)
-  fxRateAt             DateTime?
-  contractStartDate    DateTime?
-  contractEndDate      DateTime?
-  billingStatus        BillingStatus @default(NOT_STARTED)
-  paymentStatus        PaymentStatus @default(NOT_APPLICABLE)
-  monthlyFee           Decimal?      @db.Decimal(14, 2)
-  monthlyFeeBase       Decimal?      @db.Decimal(24, 4)
-  directMonthlyCost    Decimal?      @db.Decimal(14, 2)
-  directMonthlyCostBase Decimal?     @db.Decimal(24, 4)
-  editorMonthlyCost    Decimal?      @db.Decimal(14, 2)
-  editorMonthlyCostBase Decimal?     @db.Decimal(24, 4)
-  otherRecurringCost   Decimal?      @db.Decimal(14, 2)
-  otherRecurringCostBase Decimal?    @db.Decimal(24, 4)
-  onboardingFee        Decimal?      @db.Decimal(14, 2)
-  onboardingFeeBase    Decimal?      @db.Decimal(24, 4)
-  oneOffRevenue        Decimal?      @db.Decimal(14, 2)
-  oneOffRevenueBase    Decimal?      @db.Decimal(24, 4)
-  additionalCharges    Decimal?      @db.Decimal(14, 2)
-  additionalChargesBase Decimal?     @db.Decimal(24, 4)
-  outstandingAmount    Decimal?      @db.Decimal(14, 2)
-  outstandingAmountBase Decimal?     @db.Decimal(24, 4)
-  commissions          ClientCommission[]
-  snapshots            FinancialSnapshot[]
-  events               FinancialEvent[]
-  createdAt            DateTime      @default(now())
-  updatedAt            DateTime      @updatedAt
+  id                     String              @id @default(cuid())
+  dealId                 String?             @unique
+  deal                   Deal?               @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  companyId              String?
+  company                Company?            @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  contactId              String?
+  contact                Contact?            @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  packageName            String?
+  currency               String              @default("EUR")
+  baseCurrency           String?
+  fxRate                 Decimal?            @db.Decimal(20, 10)
+  fxRateAt               DateTime?
+  contractStartDate      DateTime?
+  contractEndDate        DateTime?
+  billingStatus          BillingStatus       @default(NOT_STARTED)
+  paymentStatus          PaymentStatus       @default(NOT_APPLICABLE)
+  monthlyFee             Decimal?            @db.Decimal(14, 2)
+  monthlyFeeBase         Decimal?            @db.Decimal(24, 4)
+  directMonthlyCost      Decimal?            @db.Decimal(14, 2)
+  directMonthlyCostBase  Decimal?            @db.Decimal(24, 4)
+  editorMonthlyCost      Decimal?            @db.Decimal(14, 2)
+  editorMonthlyCostBase  Decimal?            @db.Decimal(24, 4)
+  otherRecurringCost     Decimal?            @db.Decimal(14, 2)
+  otherRecurringCostBase Decimal?            @db.Decimal(24, 4)
+  onboardingFee          Decimal?            @db.Decimal(14, 2)
+  onboardingFeeBase      Decimal?            @db.Decimal(24, 4)
+  oneOffRevenue          Decimal?            @db.Decimal(14, 2)
+  oneOffRevenueBase      Decimal?            @db.Decimal(24, 4)
+  additionalCharges      Decimal?            @db.Decimal(14, 2)
+  additionalChargesBase  Decimal?            @db.Decimal(24, 4)
+  outstandingAmount      Decimal?            @db.Decimal(14, 2)
+  outstandingAmountBase  Decimal?            @db.Decimal(24, 4)
+  commissions            ClientCommission[]
+  snapshots              FinancialSnapshot[]
+  events                 FinancialEvent[]
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
 
   @@index([companyId, billingStatus])
   @@index([contactId, billingStatus])
@@ -2412,23 +2552,23 @@ model ClientFinancialProfile {
 }
 
 model ClientCommission {
-  id                String                @id @default(cuid())
+  id                 String                 @id @default(cuid())
   financialProfileId String
-  financialProfile  ClientFinancialProfile @relation(fields: [financialProfileId], references: [id], onDelete: Cascade)
-  userId            String
-  user              User                  @relation("CommissionRecipient", fields: [userId], references: [id], onDelete: Restrict)
-  type              CommissionType
-  recurring         Boolean               @default(true)
-  percentage        Decimal?              @db.Decimal(5, 2)
-  fixedAmount       Decimal?              @db.Decimal(14, 2)
-  fixedAmountBase   Decimal?              @db.Decimal(24, 4)
-  currency          String                @default("EUR")
-  baseCurrency      String?
-  fxRate            Decimal?              @db.Decimal(20, 10)
-  fxRateAt          DateTime?
-  active            Boolean               @default(true)
-  createdAt         DateTime              @default(now())
-  updatedAt         DateTime              @updatedAt
+  financialProfile   ClientFinancialProfile @relation(fields: [financialProfileId], references: [id], onDelete: Cascade)
+  userId             String
+  user               User                   @relation("CommissionRecipient", fields: [userId], references: [id], onDelete: Restrict)
+  type               CommissionType
+  recurring          Boolean                @default(true)
+  percentage         Decimal?               @db.Decimal(5, 2)
+  fixedAmount        Decimal?               @db.Decimal(14, 2)
+  fixedAmountBase    Decimal?               @db.Decimal(24, 4)
+  currency           String                 @default("EUR")
+  baseCurrency       String?
+  fxRate             Decimal?               @db.Decimal(20, 10)
+  fxRateAt           DateTime?
+  active             Boolean                @default(true)
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
 
   @@index([financialProfileId, active])
   @@index([userId, active])
@@ -2436,20 +2576,20 @@ model ClientCommission {
 }
 
 model FinancialSnapshot {
-  id                 String                @id @default(cuid())
-  financialProfileId String
-  financialProfile   ClientFinancialProfile @relation(fields: [financialProfileId], references: [id], onDelete: Cascade)
-  periodStart        DateTime
-  currency           String
-  recurringRevenueBase Decimal?             @db.Decimal(24, 4)
-  oneOffRevenueBase  Decimal?              @db.Decimal(24, 4)
-  directCostBase     Decimal?              @db.Decimal(24, 4)
-  commissionBase     Decimal?              @db.Decimal(24, 4)
-  operatingCostBase  Decimal?              @db.Decimal(24, 4)
-  estimatedProfitBase Decimal?             @db.Decimal(24, 4)
-  margin             Decimal?               @db.Decimal(7, 4)
-  data               Json?
-  createdAt          DateTime              @default(now())
+  id                   String                 @id @default(cuid())
+  financialProfileId   String
+  financialProfile     ClientFinancialProfile @relation(fields: [financialProfileId], references: [id], onDelete: Cascade)
+  periodStart          DateTime
+  currency             String
+  recurringRevenueBase Decimal?               @db.Decimal(24, 4)
+  oneOffRevenueBase    Decimal?               @db.Decimal(24, 4)
+  directCostBase       Decimal?               @db.Decimal(24, 4)
+  commissionBase       Decimal?               @db.Decimal(24, 4)
+  operatingCostBase    Decimal?               @db.Decimal(24, 4)
+  estimatedProfitBase  Decimal?               @db.Decimal(24, 4)
+  margin               Decimal?               @db.Decimal(7, 4)
+  data                 Json?
+  createdAt            DateTime               @default(now())
 
   @@unique([financialProfileId, periodStart])
   @@index([periodStart])
@@ -2466,7 +2606,7 @@ model CompanyFinancialSnapshot {
   directClientCostBase Decimal? @db.Decimal(24, 4)
   commissionBase       Decimal? @db.Decimal(24, 4)
   operatingCostBase    Decimal? @db.Decimal(24, 4)
-  estimatedProfitBase Decimal? @db.Decimal(24, 4)
+  estimatedProfitBase  Decimal? @db.Decimal(24, 4)
   margin               Decimal? @db.Decimal(7, 4)
   outstandingBase      Decimal? @db.Decimal(24, 4)
   newMrrBase           Decimal? @db.Decimal(24, 4)
@@ -2482,13 +2622,13 @@ model CompanyFinancialSnapshot {
 }
 
 model FinancialEvent {
-  id                 String                @id @default(cuid())
+  id                 String                 @id @default(cuid())
   financialProfileId String
   financialProfile   ClientFinancialProfile @relation(fields: [financialProfileId], references: [id], onDelete: Cascade)
   type               FinancialEventType
   actorUserId        String?
-  actor              User?                 @relation("FinancialEventActor", fields: [actorUserId], references: [id], onDelete: SetNull)
-  occurredAt         DateTime              @default(now())
+  actor              User?                  @relation("FinancialEventActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  occurredAt         DateTime               @default(now())
   payload            Json?
 
   @@index([financialProfileId, occurredAt])
@@ -2497,23 +2637,23 @@ model FinancialEvent {
 }
 
 model CompanyExpense {
-  id             String    @id @default(cuid())
-  category       String
-  amount         Decimal   @db.Decimal(14, 2)
-  currency       String    @default("EUR")
-  baseAmount     Decimal?  @db.Decimal(24, 4)
-  baseCurrency   String?
-  fxRate         Decimal?  @db.Decimal(20, 10)
-  fxRateAt       DateTime?
-  recurringMonthly Boolean  @default(true)
-  active         Boolean   @default(true)
-  startDate      DateTime
-  endDate        DateTime?
-  description    String?
-  createdByUserId String
-  createdBy      User      @relation("ExpenseCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  id               String    @id @default(cuid())
+  category         String
+  amount           Decimal   @db.Decimal(14, 2)
+  currency         String    @default("EUR")
+  baseAmount       Decimal?  @db.Decimal(24, 4)
+  baseCurrency     String?
+  fxRate           Decimal?  @db.Decimal(20, 10)
+  fxRateAt         DateTime?
+  recurringMonthly Boolean   @default(true)
+  active           Boolean   @default(true)
+  startDate        DateTime
+  endDate          DateTime?
+  description      String?
+  createdByUserId  String
+  createdBy        User      @relation("ExpenseCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   @@index([active, startDate, endDate])
   @@index([category])
@@ -2539,18 +2679,18 @@ model CompanyGoal {
 }
 
 model WeeklyTarget {
-  id                    String   @id @default(cuid())
-  userId                String
-  user                  User     @relation("WeeklyTargetUser", fields: [userId], references: [id], onDelete: Cascade)
-  weekStart             DateTime
-  outreachContacts      Int      @default(0)
-  followUps             Int      @default(0)
+  id                     String   @id @default(cuid())
+  userId                 String
+  user                   User     @relation("WeeklyTargetUser", fields: [userId], references: [id], onDelete: Cascade)
+  weekStart              DateTime
+  outreachContacts       Int      @default(0)
+  followUps              Int      @default(0)
   qualifiedOpportunities Int      @default(0)
-  proposals             Int      @default(0)
-  clientsClosed         Int      @default(0)
+  proposals              Int      @default(0)
+  clientsClosed          Int      @default(0)
   mrrGeneratedTargetBase Decimal? @db.Decimal(24, 4)
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
 
   @@unique([userId, weekStart])
   @@index([weekStart])
@@ -2558,15 +2698,15 @@ model WeeklyTarget {
 }
 
 model WorkspacePermissionOverride {
-  id            String   @id @default(cuid())
-  userId        String
-  user          User     @relation("PermissionOverrideUser", fields: [userId], references: [id], onDelete: Cascade)
-  permission    String
-  allowed       Boolean
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation("PermissionOverrideUser", fields: [userId], references: [id], onDelete: Cascade)
+  permission      String
+  allowed         Boolean
   createdByUserId String
-  createdBy      User     @relation("PermissionOverrideCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdBy       User     @relation("PermissionOverrideCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   @@unique([userId, permission])
   @@index([permission, allowed])
@@ -2662,36 +2802,40 @@ model SystemEmailJob {
 }
 
 model ContactRouteConsent {
-  id            String    @id @default(cuid())
-  routeId       String    @unique
-  contactId     String
-  status        DncStatus @default(ALLOWED)
-  reason        String?
-  source        String
+  id              String    @id @default(cuid())
+  routeId         String    @unique
+  contactId       String
+  status          DncStatus @default(ALLOWED)
+  reason          String?
+  source          String
   changedByUserId String?
-  changedAt     DateTime  @default(now())
-  consentedAt   DateTime?
-  version       Int       @default(1)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  changedAt       DateTime  @default(now())
+  consentedAt     DateTime?
+  version         Int       @default(1)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   @@index([contactId, status])
   @@map("contactRouteConsent")
 }
 
 model FollowUpPlan {
-  id              String             @id @default(cuid())
-  contactId       String
-  routeId         String
-  ownerUserId     String
-  sourceDraftId   String?
-  status          FollowUpPlanStatus @default(ACTIVE)
+  id                 String             @id @default(cuid())
+  contactId          String
+  routeId            String
+  ownerUserId        String
+  sourceDraftId      String?
+  leadId             String?
+  lead               Lead?              @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  maxSteps           Int                @default(3)
+  status             FollowUpPlanStatus @default(ACTIVE)
   cancellationReason String?
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
 
   @@index([contactId, status])
   @@index([ownerUserId, status])
+  @@index([leadId, status])
   @@map("followUpPlan")
 }
 
@@ -2732,15 +2876,28 @@ model OutreachEvent {
   @@map("outreachEvent")
 }
 
-model AllocationPolicy {
+model OutreachQuota {
   id                String   @id @default(cuid())
-  version           Int      @unique
-  name              String
-  active            Boolean  @default(false)
-  rules             Json
-  createdByUserId   String
+  day               DateTime @db.Date
+  coldEmailLimit    Int
+  coldEmailReserved Int      @default(0)
+  coldEmailSent     Int      @default(0)
   createdAt         DateTime @default(now())
-  activatedAt       DateTime?
+  updatedAt         DateTime @updatedAt
+
+  @@unique([day])
+  @@map("outreachQuota")
+}
+
+model AllocationPolicy {
+  id              String    @id @default(cuid())
+  version         Int       @unique
+  name            String
+  active          Boolean   @default(false)
+  rules           Json
+  createdByUserId String
+  createdAt       DateTime  @default(now())
+  activatedAt     DateTime?
 
   @@index([active, version])
   @@map("allocationPolicy")
@@ -2810,16 +2967,16 @@ model AttachmentScanJob {
 }
 
 model MimeIngestionError {
-  id              String   @id @default(cuid())
+  id              String           @id @default(cuid())
   mailboxId       String
   providerUid     String
   rfcMessageId    String?
   errorCode       String
   detail          String?
   reprocessStatus DurableJobStatus @default(FAILED)
-  attemptCount    Int      @default(0)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  attemptCount    Int              @default(0)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
 
   @@unique([mailboxId, providerUid])
   @@index([reprocessStatus, updatedAt])
@@ -2827,14 +2984,14 @@ model MimeIngestionError {
 }
 
 model ProviderEvidence {
-  id              String   @id @default(cuid())
-  capability      ProviderCapabilityKey
-  probeKind       String
-  outcome         String
-  evidence        Json
+  id                  String                @id @default(cuid())
+  capability          ProviderCapabilityKey
+  probeKind           String
+  outcome             String
+  evidence            Json
   configurationDigest String
-  operatorUserId  String
-  createdAt       DateTime @default(now())
+  operatorUserId      String
+  createdAt           DateTime              @default(now())
 
   @@index([capability, createdAt])
   @@map("providerEvidence")

@@ -198,7 +198,11 @@ export class PostgresJobWorkerService {
 						where: { id: delivery.draftId },
 						select: {
 							id: true,
+							ownerUserId: true,
 							status: true,
+							leadId: true,
+							coldOutreach: true,
+							language: true,
 							subject: true,
 							body: true,
 							mailboxId: true,
@@ -218,6 +222,7 @@ export class PostgresJobWorkerService {
 									contact: { select: { id: true, lifecycleState: true } },
 								},
 							},
+							lead: { select: { id: true, stage: true } },
 						},
 					});
 					const consent = draft.recipientRoute
@@ -279,8 +284,8 @@ export class PostgresJobWorkerService {
 				from: {
 					address: fromAddress,
 					displayName:
-						prepared.mailbox?.displayName ||
 						process.env.RESEND_OUTREACH_FROM_NAME?.trim() ||
+						prepared.mailbox?.displayName ||
 						"IBL Media Consultancy",
 				},
 				to: prepared.recipientRoute?.normalizedValue ?? "",
@@ -366,6 +371,47 @@ export class PostgresJobWorkerService {
 						where: { id: prepared.id },
 						data: { status: "SENT", sentAt },
 					});
+					if (prepared.coldOutreach) {
+						const settings = await tx.appSetting.findUnique({
+							where: { id: "app" },
+							select: { atlasWorkingTimeZone: true },
+						});
+						const day = dayKey(
+							sentAt,
+							settings?.atlasWorkingTimeZone ?? "Europe/Amsterdam",
+						);
+						await tx.outreachQuota.updateMany({
+							where: { day, coldEmailReserved: { gt: 0 } },
+							data: {
+								coldEmailReserved: { decrement: 1 },
+								coldEmailSent: { increment: 1 },
+							},
+						});
+					}
+					if (prepared.lead && ["NEW", "READY"].includes(prepared.lead.stage)) {
+						await tx.lead.update({
+							where: { id: prepared.lead.id },
+							data: {
+								stage: "CONTACTED",
+								stageChangedAt: sentAt,
+								lastContactedAt: sentAt,
+								nextActionAt: new Date(
+									sentAt.getTime() + 3 * 24 * 60 * 60 * 1000,
+								),
+								nextActionTitle: "Review for a reply or follow up",
+								lastLanguage: prepared.language,
+							},
+						});
+						await tx.leadStageHistory.create({
+							data: {
+								leadId: prepared.lead.id,
+								fromStage: prepared.lead.stage,
+								toStage: "CONTACTED",
+								reason: "Outbound email sent",
+								actorUserId: prepared.ownerUserId,
+							},
+						});
+					}
 					const followUp = await tx.followUpStep.findFirst({
 						where: { draftId: prepared.id, status: "QUEUED" },
 						select: { id: true, planId: true },
@@ -426,19 +472,45 @@ export class PostgresJobWorkerService {
 			code,
 			dead,
 		});
-		return withPrincipal(this.db, { userId: null, kind: "worker" }, (tx) =>
-			tx.outboundDelivery.update({
-				where: { id: delivery.id },
-				data: {
-					status: dead ? "FAILED" : "RETRY",
-					leaseOwner: null,
-					leasedUntil: null,
-					retryAt: dead
-						? null
-						: new Date(Date.now() + this.backoff(delivery.attemptCount)),
-					lastErrorCode: code,
-				},
-			}),
+		return withPrincipal(
+			this.db,
+			{ userId: null, kind: "worker" },
+			async (tx) => {
+				const row = await tx.outboundDelivery.findUnique({
+					where: { id: delivery.id },
+					select: {
+						draft: { select: { coldOutreach: true, createdAt: true } },
+					},
+				});
+				await tx.outboundDelivery.update({
+					where: { id: delivery.id },
+					data: {
+						status: dead ? "FAILED" : "RETRY",
+						leaseOwner: null,
+						leasedUntil: null,
+						retryAt: dead
+							? null
+							: new Date(Date.now() + this.backoff(delivery.attemptCount)),
+						lastErrorCode: code,
+					},
+				});
+				if (dead && row?.draft.coldOutreach) {
+					const settings = await tx.appSetting.findUnique({
+						where: { id: "app" },
+						select: { atlasWorkingTimeZone: true },
+					});
+					await tx.outreachQuota.updateMany({
+						where: {
+							day: dayKey(
+								row.draft.createdAt,
+								settings?.atlasWorkingTimeZone ?? "Europe/Amsterdam",
+							),
+							coldEmailReserved: { gt: 0 },
+						},
+						data: { coldEmailReserved: { decrement: 1 } },
+					});
+				}
+			},
 		);
 	}
 
@@ -454,6 +526,20 @@ function parseSender(value: string): { address: string; displayName: string } {
 		address: match[2] ?? value,
 		displayName: (match[1] ?? "IBL Command Center").trim(),
 	};
+}
+
+function dayKey(date: Date, timeZone: string): Date {
+	const parts = new Intl.DateTimeFormat("en-CA", {
+		timeZone,
+		year: "numeric",
+		month: "2-digit",
+		day: "2-digit",
+	}).formatToParts(date);
+	const value = (type: string) =>
+		parts.find((part) => part.type === type)?.value ?? "01";
+	return new Date(
+		`${value("year")}-${value("month")}-${value("day")}T00:00:00.000Z`,
+	);
 }
 export const defaultPostgresJobProviders = [
 	{

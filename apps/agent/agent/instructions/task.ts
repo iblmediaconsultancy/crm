@@ -18,6 +18,13 @@ export default defineDynamic({
 				});
 			}
 
+			if (purpose === "atlas-outreach") {
+				return defineInstructions({
+					markdown:
+						"This is an authenticated Atlas outreach run. Use list_atlas_outreach_queue to inspect eligible leads. If and only if every safety gate is satisfied, compose one concise, personalized email in English, Dutch, or Turkish and call send_atlas_email exactly once. Never include pricing, quote a fee, contact a lead through LinkedIn, Instagram, WhatsApp, or phone, or send to a lead with NEEDS_IHSAN, WITH_IHSAN, PARKED, SUPPRESSED, PROTECTED, or DO_NOT_CONTACT state. If the queue is empty or any gate is closed, report the reason and stop. Do not claim delivery; the database worker is responsible for delivery status.",
+				});
+			}
+
 			if (attribute(ctx, "researchRequestId")) {
 				return defineInstructions({
 					markdown: `${RESEARCH_INSTRUCTIONS}\n\nThis is an authenticated IBL research request. Begin with inspect_ibl_research. Work only inside the returned identity envelope and CRM target. Every finding must cite a record_ibl_evidence result. You may create only DRAFT artifacts and submit findings for human review. You cannot approve, queue, or send outreach. Finish with submit_ibl_research_review.`,
