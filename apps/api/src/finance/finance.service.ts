@@ -250,6 +250,7 @@ export class FinanceService {
 
 		const profileWhere = {
 			billingStatus: "ACTIVE" as const,
+			lifecycleState: "ACTIVE" as const,
 			baseCurrency: base,
 			...ownerFilter,
 		};
@@ -276,8 +277,10 @@ export class FinanceService {
 		const events = canMrr
 			? await this.db.financialEvent.findMany({
 					where: {
+						lifecycleState: "ACTIVE",
 						occurredAt: { gte: monthStart },
 						financialProfile: {
+							lifecycleState: "ACTIVE",
 							baseCurrency: base,
 							...ownerFilter,
 						},
@@ -477,6 +480,7 @@ export class FinanceService {
 					})
 				: await this.db.clientFinancialProfile.findFirst({
 						where: {
+							lifecycleState: "ACTIVE",
 							OR: [
 								input.dealId ? { dealId: input.dealId } : undefined,
 								input.companyId ? { companyId: input.companyId } : undefined,
@@ -534,6 +538,7 @@ export class FinanceService {
 	) {
 		const rows = await this.db.clientFinancialProfile.findMany({
 			where: {
+				lifecycleState: "ACTIVE",
 				OR: [
 					input.dealId ? { dealId: input.dealId } : undefined,
 					input.companyId ? { companyId: input.companyId } : undefined,
@@ -670,6 +675,7 @@ export class FinanceService {
 		if (!canMrr && !canRevenue && !canProfit && !canCosts) return null;
 		const rows = await this.db.companyFinancialSnapshot.findMany({
 			where: {
+				lifecycleState: "ACTIVE",
 				currency: base,
 				...(input.from || input.to
 					? {
@@ -1249,7 +1255,11 @@ export class FinanceService {
 			"finance.company.mrr",
 		);
 		const total = await this.db.clientFinancialProfile.aggregate({
-			where: { billingStatus: "ACTIVE", baseCurrency: base },
+			where: {
+				billingStatus: "ACTIVE",
+				lifecycleState: "ACTIVE",
+				baseCurrency: base,
+			},
 			_sum: { monthlyFeeBase: true },
 		});
 		return this.goals(
@@ -1364,6 +1374,7 @@ export class FinanceService {
 				] = await Promise.all([
 					this.db.activity.count({
 						where: {
+							lifecycleState: "ACTIVE",
 							createdById: user.id,
 							type: { in: ["EMAIL", "CALL"] },
 							createdAt: { gte: weekStart, lt: weekEnd },
@@ -1414,6 +1425,7 @@ export class FinanceService {
 					this.db.clientFinancialProfile.findMany({
 						where: {
 							billingStatus: "ACTIVE",
+							lifecycleState: "ACTIVE",
 							baseCurrency: base,
 							contractStartDate: { gte: weekStart, lt: weekEnd },
 							OR: [
@@ -1501,6 +1513,7 @@ export class FinanceService {
 			create: {
 				periodStart: input.periodStart,
 				currency: input.currency,
+				lifecycleState: "ACTIVE",
 				recurringRevenueBase: input.totals.mrr,
 				oneOffRevenueBase: input.totals.oneOffRevenue,
 				revenueBase: input.totals.revenue,

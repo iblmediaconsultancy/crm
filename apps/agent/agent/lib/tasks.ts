@@ -44,7 +44,8 @@ export async function claimDue(
 			"attempts" = t."attempts" + 1
 		FROM (
 			SELECT t2.id FROM "agentTask" AS t2
-			WHERE t2."finishedAt" IS NULL
+			WHERE t2."lifecycleState" = 'ACTIVE'
+				AND t2."finishedAt" IS NULL
 				AND t2."dueAt" <= ${now}
 				AND (t2."leasedUntil" IS NULL OR t2."leasedUntil" < ${now})
 				AND t2."attempts" < ${MAX_ATTEMPTS}
@@ -71,6 +72,7 @@ export async function retireExhausted(): Promise<TaskSubject[]> {
 		SET "finishedAt" = ${now},
 			"outcome" = ${RETIRED_OUTCOME}
 		WHERE t."finishedAt" IS NULL
+			AND t."lifecycleState" = 'ACTIVE'
 			AND t."attempts" >= ${MAX_ATTEMPTS}
 			AND (t."leasedUntil" IS NULL OR t."leasedUntil" < ${now})
 		RETURNING t.id, t."contactId", t."companyId", t.kind;
@@ -83,7 +85,7 @@ export async function completeTask(
 	sessionId?: string,
 ): Promise<TaskSubject | null> {
 	const { count } = await db.agentTask.updateMany({
-		where: { id: taskId, finishedAt: null },
+		where: { id: taskId, lifecycleState: "ACTIVE", finishedAt: null },
 		data: {
 			finishedAt: new Date(),
 			outcome: outcome.slice(0, 500),
@@ -111,7 +113,7 @@ export async function noteSession(
 	sessionId: string,
 ): Promise<void> {
 	await db.agentTask.updateMany({
-		where: { id: taskId, finishedAt: null },
+		where: { id: taskId, lifecycleState: "ACTIVE", finishedAt: null },
 		data: { sessionId },
 	});
 }
@@ -128,6 +130,7 @@ export async function scheduleTask(input: {
 	const existing = await db.agentTask.findFirst({
 		where: {
 			kind: input.kind,
+			lifecycleState: "ACTIVE",
 			finishedAt: null,
 			contactId: input.contactId ?? undefined,
 			companyId: input.companyId ?? undefined,

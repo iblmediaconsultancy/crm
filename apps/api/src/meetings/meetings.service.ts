@@ -84,6 +84,8 @@ export class MeetingsService {
 			await this.requireManager(tx, userId);
 			const request = await tx.meetingRequest.findUnique({ where: { id } });
 			if (!request) throw new NotFoundException("Meeting request not found.");
+			if (request.lifecycleState !== "ACTIVE")
+				throw new NotFoundException("Meeting request not found.");
 			if (request.status !== "PENDING_APPROVAL")
 				throw new BadRequestException("Only pending meetings can be approved.");
 			return tx.meetingRequest.update({
@@ -103,6 +105,8 @@ export class MeetingsService {
 			await this.requireManager(tx, userId);
 			const request = await tx.meetingRequest.findUnique({ where: { id } });
 			if (!request) throw new NotFoundException("Meeting request not found.");
+			if (request.lifecycleState !== "ACTIVE")
+				throw new NotFoundException("Meeting request not found.");
 			if (request.status !== "PENDING_APPROVAL")
 				throw new BadRequestException("Only pending meetings can be declined.");
 			return tx.meetingRequest.update({
@@ -120,6 +124,8 @@ export class MeetingsService {
 				await this.requireManager(tx, userId);
 				const row = await tx.meetingRequest.findUnique({ where: { id } });
 				if (!row) throw new NotFoundException("Meeting request not found.");
+				if (row.lifecycleState !== "ACTIVE")
+					throw new NotFoundException("Meeting request not found.");
 				if (row.status !== "APPROVED")
 					throw new BadRequestException(
 						"Meeting approval is required before confirmation.",
@@ -171,7 +177,11 @@ export class MeetingsService {
 
 	list(userId: string) {
 		return withPrincipal(this.db, { userId, kind: "user" }, (tx) =>
-			tx.meetingRequest.findMany({ orderBy: { startsAt: "asc" }, take: 100 }),
+			tx.meetingRequest.findMany({
+				where: { lifecycleState: "ACTIVE" },
+				orderBy: { startsAt: "asc" },
+				take: 100,
+			}),
 		);
 	}
 

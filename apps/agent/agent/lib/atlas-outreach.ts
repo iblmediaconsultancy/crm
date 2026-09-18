@@ -205,14 +205,17 @@ export async function sendAtlasEmail(ctx: PurposeContext, input: AtlasInput) {
 				);
 			if (lead.stage !== "NEW" && lead.stage !== "READY")
 				throw new Error("Lead is no longer in a sendable stage.");
-			if (lead.attentionState !== "NONE")
-				throw new Error("Lead attention state blocks autonomous outreach.");
 			if (!lead.nextActionAt || !lead.nextActionTitle)
 				throw new Error(
 					"Every active lead must have a next action before outreach.",
 				);
 			const route = await tx.contactRoute.findFirst({
-				where: { id: input.routeId, contactId: lead.contactId, type: "EMAIL" },
+				where: {
+					id: input.routeId,
+					lifecycleState: "ACTIVE",
+					contactId: lead.contactId,
+					type: "EMAIL",
+				},
 				select: { id: true, normalizedValue: true },
 			});
 			if (!route)

@@ -31,6 +31,7 @@ export class OutboundDeliveryService {
 						select: {
 							id: true,
 							type: true,
+							lifecycleState: true,
 							contact: { select: { lifecycleState: true } },
 						},
 					},
@@ -53,9 +54,10 @@ export class OutboundDeliveryService {
 			}
 			if (
 				draft.status !== "APPROVED" ||
-				draft.mailbox?.status !== "VERIFIED" ||
-				draft.recipientRoute?.type !== "EMAIL" ||
-				draft.recipientRoute.contact?.lifecycleState !== "ACTIVE"
+					draft.mailbox?.status !== "VERIFIED" ||
+					draft.recipientRoute?.type !== "EMAIL" ||
+					draft.recipientRoute?.lifecycleState !== "ACTIVE" ||
+					draft.recipientRoute.contact?.lifecycleState !== "ACTIVE"
 			) {
 				throw new Error("OUTBOUND_DRAFT_NOT_SENDABLE");
 			}

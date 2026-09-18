@@ -523,6 +523,7 @@ model ContactBrief {
 
 model AgentTask {
   id        String  @id @default(cuid())
+  lifecycleState CanonicalLifecycleState @default(ACTIVE)
   contactId String?
   companyId String?
 
@@ -550,6 +551,7 @@ model AgentTask {
 
 model AgentEvent {
   id        String  @id
+  lifecycleState CanonicalLifecycleState @default(ACTIVE)
   sessionId String
   contactId String?
   type      String
@@ -1482,6 +1484,7 @@ model CalendarAttendee {
 
 model MeetingRequest {
   id                String               @id @default(cuid())
+  lifecycleState    CanonicalLifecycleState @default(ACTIVE)
   leadId            String?
   lead              Lead?                @relation(fields: [leadId], references: [id], onDelete: SetNull)
   contactId         String?
@@ -1938,6 +1941,7 @@ model Club {
 
 model ContactRoute {
   id              String                 @id @default(cuid())
+  lifecycleState  CanonicalLifecycleState @default(ACTIVE)
   contactId       String?
   contact         Contact?               @relation(fields: [contactId], references: [id], onDelete: Cascade)
   companyId       String?
@@ -1961,6 +1965,7 @@ model ContactRoute {
   @@index([companyId])
   @@index([ownerUserId])
   @@index([type, normalizedValue])
+  @@index([lifecycleState, updatedAt])
   @@map("contactRoute")
 }
 
@@ -2568,6 +2573,7 @@ model ClientFinancialProfile {
   contractStartDate      DateTime?
   contractEndDate        DateTime?
   billingStatus          BillingStatus       @default(NOT_STARTED)
+  lifecycleState         CanonicalLifecycleState @default(ACTIVE)
   paymentStatus          PaymentStatus       @default(NOT_APPLICABLE)
   monthlyFee             Decimal?            @db.Decimal(14, 2)
   monthlyFeeBase         Decimal?            @db.Decimal(24, 4)
@@ -2594,6 +2600,7 @@ model ClientFinancialProfile {
   @@index([companyId, billingStatus])
   @@index([contactId, billingStatus])
   @@index([billingStatus, contractStartDate])
+  @@index([lifecycleState, billingStatus])
   @@map("clientFinancialProfile")
 }
 
@@ -2627,6 +2634,7 @@ model FinancialSnapshot {
   financialProfile     ClientFinancialProfile @relation(fields: [financialProfileId], references: [id], onDelete: Cascade)
   periodStart          DateTime
   currency             String
+  lifecycleState       CanonicalLifecycleState @default(ACTIVE)
   recurringRevenueBase Decimal?               @db.Decimal(24, 4)
   oneOffRevenueBase    Decimal?               @db.Decimal(24, 4)
   directCostBase       Decimal?               @db.Decimal(24, 4)
@@ -2658,12 +2666,14 @@ model CompanyFinancialSnapshot {
   newMrrBase           Decimal? @db.Decimal(24, 4)
   lostMrrBase          Decimal? @db.Decimal(24, 4)
   activeClients        Int      @default(0)
+  lifecycleState       CanonicalLifecycleState @default(ACTIVE)
   data                 Json?
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
-  @@unique([currency, periodStart])
+  @@unique([currency, periodStart], where: { lifecycleState: "ACTIVE" })
   @@index([periodStart])
+  @@index([lifecycleState, periodStart])
   @@map("companyFinancialSnapshot")
 }
 
@@ -2672,6 +2682,7 @@ model FinancialEvent {
   financialProfileId String
   financialProfile   ClientFinancialProfile @relation(fields: [financialProfileId], references: [id], onDelete: Cascade)
   type               FinancialEventType
+  lifecycleState     CanonicalLifecycleState @default(ACTIVE)
   actorUserId        String?
   actor              User?                  @relation("FinancialEventActor", fields: [actorUserId], references: [id], onDelete: SetNull)
   occurredAt         DateTime               @default(now())
@@ -2679,6 +2690,7 @@ model FinancialEvent {
 
   @@index([financialProfileId, occurredAt])
   @@index([type, occurredAt])
+  @@index([lifecycleState, occurredAt])
   @@map("financialEvent")
 }
 

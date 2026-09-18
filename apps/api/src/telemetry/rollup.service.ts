@@ -234,7 +234,8 @@ export class RollupService {
 				COALESCE("data"->>'status', 'completed') <> 'completed' AS failed,
 				COUNT(*) AS count
 			FROM "agentEvent"
-			WHERE "type" = 'action.result' AND "emittedAt" >= ${since}
+			WHERE "lifecycleState" = 'ACTIVE'
+				AND "type" = 'action.result' AND "emittedAt" >= ${since}
 			GROUP BY 1, 2;
 		`;
 
@@ -263,7 +264,8 @@ export class RollupService {
 		const rows = await this.db.$queryRaw<{ type: string; sessions: bigint }[]>`
 			SELECT "type", COUNT(DISTINCT "sessionId") AS sessions
 			FROM "agentEvent"
-			WHERE "emittedAt" >= ${since}
+			WHERE "lifecycleState" = 'ACTIVE'
+				AND "emittedAt" >= ${since}
 				AND "type" IN ('session.started', 'session.waiting', 'session.failed', 'action.result')
 			GROUP BY 1;
 		`;
@@ -287,12 +289,12 @@ export class RollupService {
 		const [claimed, finished] = await Promise.all([
 			this.db.agentTask.groupBy({
 				by: ["kind"],
-				where: { startedAt: { gte: since } },
+				where: { lifecycleState: "ACTIVE", startedAt: { gte: since } },
 				_count: { _all: true },
 			}),
 			this.db.agentTask.groupBy({
 				by: ["kind", "outcome"],
-				where: { finishedAt: { gte: since } },
+				where: { lifecycleState: "ACTIVE", finishedAt: { gte: since } },
 				_count: { _all: true },
 			}),
 		]);
@@ -320,7 +322,7 @@ export class RollupService {
 	): Promise<{ mean: Record<string, number>; max: Record<string, number> }> {
 		const rows = await this.db.agentTask.groupBy({
 			by: ["kind"],
-			where: { finishedAt: { gte: since } },
+			where: { lifecycleState: "ACTIVE", finishedAt: { gte: since } },
 			_avg: { attempts: true },
 			_max: { attempts: true },
 		});
@@ -341,7 +343,11 @@ export class RollupService {
 		since: Date,
 	): Promise<{ total: number; buckets: Record<string, number> }> {
 		const rows = await this.db.agentTask.findMany({
-			where: { kind: "recheck", createdAt: { gte: since } },
+			where: {
+				lifecycleState: "ACTIVE",
+				kind: "recheck",
+				createdAt: { gte: since },
+			},
 			select: { createdAt: true, dueAt: true },
 		});
 

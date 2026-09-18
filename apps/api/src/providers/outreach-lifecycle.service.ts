@@ -147,9 +147,9 @@ export class OutreachLifecycleService {
 		return this.db.$transaction(async (tx) => {
 			const route = await tx.contactRoute.findUnique({
 				where: { id: input.routeId },
-				select: { contactId: true, ownerUserId: true },
+				select: { contactId: true, ownerUserId: true, lifecycleState: true },
 			});
-			if (!route?.contactId)
+			if (!route?.contactId || route.lifecycleState !== "ACTIVE")
 				throw new NotFoundException("A contact route is required.");
 			if (actor.role === "contributor") {
 				const assigned =
@@ -233,6 +233,7 @@ export class OutreachLifecycleService {
 					contactId: true,
 					ownerUserId: true,
 					type: true,
+					lifecycleState: true,
 					contact: { select: { lifecycleState: true } },
 				},
 			});
@@ -251,6 +252,7 @@ export class OutreachLifecycleService {
 			}
 			if (
 				!route ||
+				route.lifecycleState !== "ACTIVE" ||
 				route.contactId !== input.contactId ||
 				route.ownerUserId !== actorUserId ||
 				route.type !== "EMAIL" ||

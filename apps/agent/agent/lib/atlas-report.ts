@@ -90,9 +90,10 @@ export async function writeAtlasDailyReport(
 						draft: { coldOutreach: true },
 					},
 				}),
-				tx.meetingRequest.count({
-					where: {
-						status: "CONFIRMED",
+					tx.meetingRequest.count({
+						where: {
+							lifecycleState: "ACTIVE",
+							status: "CONFIRMED",
 						confirmedAt: { gte: periodStart, lt: periodEnd },
 					},
 				}),

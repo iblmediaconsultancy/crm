@@ -485,7 +485,10 @@ export class OperationsService {
 					select: { id: true, address: true, displayName: true },
 				}),
 				tx.contactRoute.findMany({
-					where: { OR: [{ ownerUserId: userId }, { visibility: "SHARED" }] },
+					where: {
+						lifecycleState: "ACTIVE",
+						OR: [{ ownerUserId: userId }, { visibility: "SHARED" }],
+					},
 					take: input.take,
 					orderBy: { updatedAt: "desc" },
 					select: {
@@ -617,6 +620,7 @@ export class OperationsService {
 						},
 					}),
 					tx.contactRoute.findMany({
+						where: { lifecycleState: "ACTIVE" },
 						skip: input.skip,
 						take: input.take,
 						orderBy: { updatedAt: "desc" },
