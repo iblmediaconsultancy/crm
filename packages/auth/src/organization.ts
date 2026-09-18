@@ -36,6 +36,7 @@ const ROLE_PERMISSIONS: Record<
 		"allocation.manage",
 		"duplicates.review",
 		"outreach.approve",
+		"providers.verify",
 		"finance.company.mrr",
 		"finance.goals.read",
 		"finance.pipeline.value",

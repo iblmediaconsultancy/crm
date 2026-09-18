@@ -14,6 +14,7 @@ export const WORKSPACE_PERMISSIONS = [
 	"allocation.manage",
 	"duplicates.review",
 	"outreach.approve",
+	"providers.verify",
 	"workspace.manage",
 	"canonical.destroy",
 	"finance.company.mrr",

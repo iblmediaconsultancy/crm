@@ -26,11 +26,13 @@ import { dealListInput, dealIdInput, dealCreateInput, dealUpdateArgs, setStageIn
 import { fieldListInput, fieldByKeyInput, fieldIdInput, fieldCreateInput, fieldUpdateArgs, fieldReorderInput } from "../fields/fields.contracts";
 import { financeDashboardInput, financialProfileByRecordInput, financialProfilesByRecordInput, financialHistoryInput, companyHistoryInput, financialProfileUpsertInput, commissionUpsertInput, expenseListInput, expenseUpsertInput, goalInput, weeklyTargetInput, permissionOverrideInput } from "../finance/finance.contracts";
 import { mailboxIdInput, updateOwnedMailboxIdentityInput, mailboxThreadInput, mailboxEventInput } from "../mailbox/mailbox.contracts";
+import { meetingAvailabilityInput, meetingRequestInput, meetingIdInput } from "../meetings/meetings.contracts";
 import { invitationIdInput, acceptInvitationInput, pendingInvitationsInput, inviteMemberInput } from "../onboarding/onboarding.contracts";
 import { allocationTargetInput, allocationPolicyCreateInput, allocationPolicyActivateInput, allocationEnqueueInput, allocationOverrideInput } from "../operations/allocation.contracts";
 import { operationsListInput, footballProfileInput, organizationProfileInput, representationCreateInput, representationTransitionInput, contactRouteCreateInput, contactRouteShareInput, leadCreateInput, leadTransitionInput, leadHandoffInput, taskCreateInput, taskTransitionInput, noteCreateInput, assignmentCreateInput, researchRequestCreateInput, templateCreateInput, draftCreateInput, draftUpdateInput, approvalRequestInput, approvalDecisionInput, draftApproveInput, proposalCreateInput, proofCreateInput } from "../operations/operations.contracts";
 import { routeConsentInput, followUpPlanCreateInput, followUpCancelInput, localReplyInput } from "../operations/outreach.contracts";
 import { updateOwnProfileInput } from "../profile/profile.contracts";
+import { verifyMailboxInput } from "../provider-capabilities/provider-capabilities.contracts";
 import { setResearchKeyInput } from "../settings/settings.contracts";
 import { ssoProviderListInput, registerSsoProviderInput, deleteSsoProviderInput } from "../sso/sso.contracts";
 import { memberListInput, updateWorkspaceInput, setMemberRoleInput, setMemberStatusInput, removeMemberInput, transferAdminInput } from "../workspace/workspace.contracts";
@@ -46,6 +48,7 @@ import type { DealsRouter } from "../deals/deals.router";
 import type { FieldsRouter } from "../fields/fields.router";
 import type { FinanceRouter } from "../finance/finance.router";
 import type { MailboxRouter } from "../mailbox/mailbox.router";
+import type { MeetingsRouter } from "../meetings/meetings.router";
 import type { OnboardingRouter } from "../onboarding/onboarding.router";
 import type { AllocationRouter } from "../operations/allocation.router";
 import type { OperationsRouter } from "../operations/operations.router";
@@ -431,6 +434,29 @@ const appRouter = t.router({
       .input(mailboxEventInput)
       .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<MailboxRouter["event"]>>)
     }),
+  meetings: t.router({
+    status: publicProcedure
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<MeetingsRouter["status"]>>),
+    availability: publicProcedure
+      .input(meetingAvailabilityInput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<MeetingsRouter["availability"]>>),
+    list: publicProcedure
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<MeetingsRouter["list"]>>),
+    request: publicProcedure
+      .input(meetingRequestInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<MeetingsRouter["request"]>>),
+    approve: publicProcedure
+      .input(meetingIdInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<MeetingsRouter["approve"]>>),
+    decline: publicProcedure
+      .input(meetingIdInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<MeetingsRouter["decline"]>>),
+    confirm: publicProcedure
+      .input(meetingIdInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<MeetingsRouter["confirm"]>>),
+    disconnect: publicProcedure
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<MeetingsRouter["disconnect"]>>)
+    }),
   onboarding: t.router({
     invitation: publicProcedure
       .input(invitationIdInput)
@@ -580,7 +606,12 @@ const appRouter = t.router({
     get: publicProcedure
       .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<ProviderCapabilitiesRouter["get"]>>),
     operations: publicProcedure
-      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<ProviderCapabilitiesRouter["operations"]>>)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<ProviderCapabilitiesRouter["operations"]>>),
+    mailboxVerification: publicProcedure
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<ProviderCapabilitiesRouter["mailboxVerification"]>>),
+    verifyMailbox: publicProcedure
+      .input(verifyMailboxInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<ProviderCapabilitiesRouter["verifyMailbox"]>>)
     }),
   search: t.router({
     quick: publicProcedure

@@ -18,6 +18,7 @@ const ITEMS: SettingsNavItem[] = [
 	{ title: "Profile", href: ROOT },
 	{ title: "Team", href: `${ROOT}/members` },
 	{ title: "Mailbox", href: `${ROOT}/mailbox` },
+	{ title: "Connections", href: `${ROOT}/connections` },
 	{ title: "Provider Status", href: `${ROOT}/providers` },
 	{ title: "Financials", href: `${ROOT}/finance` },
 ];

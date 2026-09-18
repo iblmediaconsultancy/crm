@@ -19,6 +19,7 @@ export const instant = false;
 
 import { requireSession } from "@/lib/session";
 import { getServerQueryClient, getServerTrpc } from "@/lib/trpc/server";
+import { MailboxVerification } from "./mailbox-verification";
 
 export const metadata: Metadata = { title: "Provider Status" };
 
@@ -30,6 +31,12 @@ export default async function ProviderStatusPage() {
 		queryClient.fetchQuery(trpc.providerCapabilities.get.queryOptions()),
 		queryClient.fetchQuery(trpc.providerCapabilities.operations.queryOptions()),
 	]);
+	const mailboxRows = await queryClient.fetchQuery(
+		trpc.providerCapabilities.mailboxVerification.queryOptions(),
+	);
+	const workspace = await queryClient.fetchQuery(
+		trpc.workspace.get.queryOptions(),
+	);
 	return (
 		<PageShell>
 			<PageShellHeader>
@@ -80,6 +87,19 @@ export default async function ProviderStatusPage() {
 						) : null}
 					</CardContent>
 				</Card>
+				<MailboxVerification
+					mailbox={
+						mailboxRows[0]
+							? {
+									...mailboxRows[0],
+									verifiedAt: mailboxRows[0].verifiedAt,
+								}
+							: null
+					}
+					canVerify={
+						workspace.viewerRole === "admin" || workspace.viewerRole === "team"
+					}
+				/>
 			</PageShellContent>
 		</PageShell>
 	);

@@ -40,9 +40,17 @@ export type GoogleCalendarEventInput = {
 	attendees: Array<{ email: string }>;
 };
 
+export type GoogleTokenResponse = {
+	accessToken: string;
+	refreshToken: string | null;
+	expiresIn: number;
+	scope: string | null;
+};
+
 @Injectable()
 export class GoogleCalendarClient {
 	private readonly logger = new Logger(GoogleCalendarClient.name);
+	private readonly fetcher: typeof fetch = fetch;
 
 	async listEvents(
 		accessToken: string,
@@ -116,7 +124,7 @@ export class GoogleCalendarClient {
 		clientId: string,
 		clientSecret: string,
 	): Promise<{ accessToken: string; expiresIn: number }> {
-		const response = await fetch(TOKEN_API, {
+		const response = await this.fetcher(TOKEN_API, {
 			method: "POST",
 			headers: { "content-type": "application/x-www-form-urlencoded" },
 			body: new URLSearchParams({
@@ -140,6 +148,49 @@ export class GoogleCalendarClient {
 		};
 	}
 
+	async exchangeCode(
+		code: string,
+		clientId: string,
+		clientSecret: string,
+		redirectUri: string,
+	): Promise<GoogleTokenResponse> {
+		const response = await this.fetcher(TOKEN_API, {
+			method: "POST",
+			headers: { "content-type": "application/x-www-form-urlencoded" },
+			body: new URLSearchParams({
+				code,
+				client_id: clientId,
+				client_secret: clientSecret,
+				redirect_uri: redirectUri,
+				grant_type: "authorization_code",
+			}),
+		});
+		if (!response.ok)
+			throw new Error(`GOOGLE_TOKEN_EXCHANGE_${response.status}`);
+		const data = (await response.json()) as {
+			access_token?: string;
+			refresh_token?: string;
+			expires_in?: number;
+			scope?: string;
+		};
+		if (!data.access_token)
+			throw new Error("GOOGLE_TOKEN_EXCHANGE_MISSING_ACCESS_TOKEN");
+		return {
+			accessToken: data.access_token,
+			refreshToken: data.refresh_token ?? null,
+			expiresIn: data.expires_in ?? 3600,
+			scope: data.scope ?? null,
+		};
+	}
+
+	async revokeToken(token: string): Promise<void> {
+		const response = await this.fetcher(
+			`https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(token)}`,
+			{ method: "POST" },
+		);
+		if (!response.ok) throw new Error(`GOOGLE_TOKEN_REVOKE_${response.status}`);
+	}
+
 	private async request<T>(
 		accessToken: string,
 		url: string,
@@ -153,7 +204,7 @@ export class GoogleCalendarClient {
 		for (const [key, value] of Object.entries(input.params ?? {})) {
 			if (value !== undefined) target.searchParams.set(key, value);
 		}
-		const response = await fetch(target, {
+		const response = await this.fetcher(target, {
 			method: input.method,
 			headers: {
 				authorization: `Bearer ${accessToken}`,

@@ -80,4 +80,9 @@ export class MeetingsRouter {
 	) {
 		return this.meetings.confirm(ctx.user.id, input.id);
 	}
+
+	@Mutation()
+	disconnect(@Ctx() ctx: AuthedTrpcContext) {
+		return this.google.disconnect(ctx.user.id);
+	}
 }
