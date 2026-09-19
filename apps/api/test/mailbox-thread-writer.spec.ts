@@ -28,6 +28,23 @@ const routeId = `route-${suffix}`;
 const leadId = `lead-${suffix}`;
 const followUpPlanId = `follow-up-plan-${suffix}`;
 const followUpStepId = `follow-up-step-${suffix}`;
+const freeMailCases = [
+	{ key: "icloud", email: `known-${suffix}@icloud.com` },
+	{ key: "gmail", email: `known-${suffix}@gmail.com` },
+	{ key: "outlook", email: `known-${suffix}@outlook.com` },
+] as const;
+const freeMailContactIds = freeMailCases.map(
+	({ key }) => `free-contact-${key}-${suffix}`,
+);
+const freeMailRouteIds = freeMailCases.map(
+	({ key }) => `free-route-${key}-${suffix}`,
+);
+const freeMailLeadIds = freeMailCases.map(
+	({ key }) => `free-lead-${key}-${suffix}`,
+);
+const freeMailRootIds = freeMailCases.map(
+	({ key }) => `<free-root-${key}-${suffix}@mail.test>`,
+);
 
 const agent = {
 	contactCreated: async () => undefined,
@@ -104,6 +121,7 @@ async function clean() {
 					securityRoot,
 					unknownSecurityRoot,
 					normalConversationRoot,
+					...freeMailRootIds,
 				],
 			},
 		},
@@ -111,12 +129,15 @@ async function clean() {
 	await db.followUpStep.deleteMany({ where: { id: followUpStepId } });
 	await db.followUpPlan.deleteMany({ where: { id: followUpPlanId } });
 	await db.contactRoute.deleteMany({ where: { id: routeId } });
+	await db.contactRoute.deleteMany({ where: { id: { in: freeMailRouteIds } } });
 	await db.lead.deleteMany({ where: { id: leadId } });
+	await db.lead.deleteMany({ where: { id: { in: freeMailLeadIds } } });
 	await db.lead.deleteMany({
 		where: { name: "Unknown Sender", ownerUserId: userId },
 	});
 	await db.contact.deleteMany({ where: { email: unknownPerson } });
 	await db.contact.deleteMany({ where: { id: contactId } });
+	await db.contact.deleteMany({ where: { id: { in: freeMailContactIds } } });
 	await db.company.deleteMany({ where: { id: companyId } });
 	await db.mailboxSync.deleteMany({ where: { userId } });
 	await db.user.deleteMany({ where: { id: userId } });
@@ -508,5 +529,120 @@ describe("storing a synced email", () => {
 			status: "CANCELLED",
 			cancellationReason: "Inbound reply received",
 		});
+	});
+
+	it("matches known free-mail contacts before company inference", async () => {
+		for (const [index, candidate] of freeMailCases.entries()) {
+			const contactIdForCase = freeMailContactIds[index] as string;
+			const routeIdForCase = freeMailRouteIds[index] as string;
+			const leadIdForCase = freeMailLeadIds[index] as string;
+			const rootIdForCase = freeMailRootIds[index] as string;
+			const subject = `Known ${candidate.key} contact`;
+			const domainForCase = candidate.email.split("@")[1] as string;
+			const companyCountBefore = await db.company.count({
+				where: { domain: domainForCase },
+			});
+
+			await db.contact.create({
+				data: {
+					id: contactIdForCase,
+					firstName: "Known",
+					lastName: candidate.key,
+					email: candidate.email,
+				},
+			});
+			await db.contactRoute.create({
+				data: {
+					id: routeIdForCase,
+					contactId: contactIdForCase,
+					ownerUserId: userId,
+					type: "EMAIL",
+					value: candidate.email,
+					normalizedValue: candidate.email,
+				},
+			});
+			await db.lead.create({
+				data: {
+					id: leadIdForCase,
+					name: `Known ${candidate.key}`,
+					stage: "CONTACTED",
+					contactId: contactIdForCase,
+					ownerUserId: userId,
+					createdByUserId: userId,
+				},
+			});
+
+			const outbound = await threads.store(
+				row,
+				{ mailbox, origin: "legacy" },
+				{
+					rfcMessageId: `<free-outbound-${candidate.key}-${suffix}@mail.test>`,
+					rootId: rootIdForCase,
+					subject,
+					from: { email: mailbox, name: "Test Rep" },
+					recipients: [{ email: candidate.email, name: "Known", kind: "to" }],
+					body: "Outbound message.",
+					sentAt: new Date(`2026-02-0${index + 1}T10:00:00Z`),
+				},
+				await threads.context(),
+			);
+			const inbound = await threads.store(
+				row,
+				{ mailbox, origin: "miab" },
+				{
+					rfcMessageId: `<free-inbound-${candidate.key}-${suffix}@mail.test>`,
+					rootId: `<provider-${candidate.key}-${suffix}@resend.test>`,
+					subject: `Re: ${subject}`,
+					from: { email: candidate.email, name: "Known" },
+					recipients: [{ email: mailbox, name: "Test Rep", kind: "to" }],
+					body: "Reply from the known contact.",
+					sentAt: new Date(`2026-02-0${index + 1}T11:00:00Z`),
+				},
+				await threads.context(),
+			);
+
+			expect(outbound).toBe(true);
+			expect(inbound).toBe(true);
+			expect(
+				await db.emailThread.findUnique({
+					where: {
+						mailboxId_rootMessageId: {
+							mailboxId,
+							rootMessageId: rootIdForCase,
+						},
+					},
+					select: {
+						contactId: true,
+						leadId: true,
+						companyId: true,
+						messageCount: true,
+					},
+				}),
+			).toEqual({
+				contactId: contactIdForCase,
+				leadId: leadIdForCase,
+				companyId: null,
+				messageCount: 2,
+			});
+			expect(
+				await db.contact.count({ where: { email: candidate.email } }),
+			).toBe(1);
+			expect(
+				await db.lead.count({ where: { contactId: contactIdForCase } }),
+			).toBe(1);
+			expect(
+				await db.lead.findUnique({
+					where: { id: leadIdForCase },
+					select: { stage: true, attentionState: true, handoffReason: true },
+				}),
+			).toEqual({
+				stage: "REPLIED",
+				attentionState: "NONE",
+				handoffReason: null,
+			});
+			expect(await db.company.count({ where: { domain: domainForCase } })).toBe(
+				companyCountBefore,
+			);
+		}
 	});
 });

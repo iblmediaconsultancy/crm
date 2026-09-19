@@ -119,6 +119,12 @@ export class ThreadWriterService {
 						leadId: true,
 					},
 				});
+		if (!thread && !outbound) {
+			thread = await this.findThreadByReplyIdentifier(
+				row.mailboxId,
+				parsed.rootId,
+			);
+		}
 
 		let companyId = thread?.companyId ?? null;
 		let contactId = thread?.contactId ?? null;
@@ -269,27 +275,29 @@ export class ThreadWriterService {
 				}
 				const record = existing
 					? { id: existing.threadId }
-					: await tx.emailThread.upsert({
-							where: {
-								mailboxId_rootMessageId: {
+					: thread
+						? { id: thread.id }
+						: await tx.emailThread.upsert({
+								where: {
+									mailboxId_rootMessageId: {
+										mailboxId: row.mailboxId,
+										rootMessageId: parsed.rootId,
+									},
+								},
+								create: {
 									mailboxId: row.mailboxId,
 									rootMessageId: parsed.rootId,
+									subject: parsed.subject,
+									companyId,
+									contactId,
+									leadId,
+									firstMessageAt: parsed.sentAt,
+									lastMessageAt: parsed.sentAt,
+									messageCount: 0,
 								},
-							},
-							create: {
-								mailboxId: row.mailboxId,
-								rootMessageId: parsed.rootId,
-								subject: parsed.subject,
-								companyId,
-								contactId,
-								leadId,
-								firstMessageAt: parsed.sentAt,
-								lastMessageAt: parsed.sentAt,
-								messageCount: 0,
-							},
-							update: {},
-							select: { id: true },
-						});
+								update: {},
+								select: { id: true },
+							});
 				if (leadId) {
 					await tx.emailThread.updateMany({
 						where: { id: record.id, leadId: null },
@@ -576,6 +584,53 @@ export class ThreadWriterService {
 		);
 	}
 
+	private async findThreadByReplyIdentifier(
+		mailboxId: string,
+		replyIdentifier: string,
+	) {
+		const normalized = normalizeMessageId(replyIdentifier);
+		const withoutBrackets = normalized.replace(/^<|>$/g, "");
+		const delivery = await this.db.outboundDelivery.findFirst({
+			where: {
+				providerMessageId: { in: [normalized, withoutBrackets] },
+				draft: { mailboxId },
+			},
+			orderBy: [{ sentAt: "desc" }, { createdAt: "desc" }],
+			select: {
+				draft: {
+					select: {
+						leadId: true,
+						recipientRoute: { select: { contactId: true } },
+					},
+				},
+			},
+		});
+		if (!delivery) return null;
+
+		const leadId = delivery.draft.leadId;
+		const contactId = delivery.draft.recipientRoute?.contactId ?? null;
+		if (!leadId && !contactId) return null;
+
+		return this.db.emailThread.findFirst({
+			where: {
+				mailboxId,
+				messages: { some: { direction: EmailDirection.OUTBOUND } },
+				OR: [
+					...(leadId ? [{ leadId }] : []),
+					...(contactId ? [{ contactId }] : []),
+				],
+			},
+			orderBy: { lastMessageAt: "desc" },
+			select: {
+				id: true,
+				rootMessageId: true,
+				companyId: true,
+				contactId: true,
+				leadId: true,
+			},
+		});
+	}
+
 	private async project(
 		tx: Prisma.TransactionClient,
 		emailThreadId: string,
@@ -622,4 +677,8 @@ function conversationSubject(value: string | null): string | null {
 		.replace(/^(?:(?:re|fw|fwd):\s*)+/i, "")
 		.trim();
 	return normalized || null;
+}
+
+function normalizeMessageId(value: string): string {
+	return value.trim().toLowerCase();
 }

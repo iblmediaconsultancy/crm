@@ -371,6 +371,12 @@ describe("PostgreSQL durable system-email queue", () => {
 		const outbound = sentMessages.get(`ibl-outbound:${threadDraftId}`);
 		expect(outbound?.messageId).toBe(`<ibl-${threadDraftId}@iblmedia.com>`);
 		expect(
+			await db.outboundDelivery.findUnique({
+				where: { id: threadDeliveryId },
+				select: { providerMessageId: true },
+			}),
+		).toEqual({ providerMessageId: `provider-ibl-outbound:${threadDraftId}` });
+		expect(
 			await db.emailMessage.findMany({
 				where: { mailboxId: threadMailboxId },
 				select: { direction: true, rfcMessageId: true },
@@ -410,7 +416,7 @@ describe("PostgreSQL durable system-email queue", () => {
 			{ mailbox: "outreach@iblmedia.com", origin: "miab" },
 			{
 				rfcMessageId: `<reply-${threadDraftId}@icloud.com>`,
-				rootId: outbound?.messageId ?? "",
+				rootId: `provider-ibl-outbound:${threadDraftId}`,
 				subject: "Re: Controlled thread test",
 				from: { email: threadRecipient, name: "Ihsan Bal" },
 				recipients: [

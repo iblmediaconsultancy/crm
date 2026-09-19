@@ -89,6 +89,42 @@ export class MailboxMatchService {
 		request: MatchRequest,
 		context: MatchContext,
 	): Promise<MatchResult> {
+		const participantEmails = [
+			...new Set(
+				request.participants
+					.map((participant) => participant.email.trim().toLowerCase())
+					.filter(Boolean),
+			),
+		];
+		const knownContact = await this.db.contact.findFirst({
+			where: {
+				lifecycleState: "ACTIVE",
+				OR: [
+					{ email: { in: participantEmails } },
+					{
+						contactRoutes: {
+							some: {
+								type: "EMAIL",
+								normalizedValue: { in: participantEmails },
+								lifecycleState: "ACTIVE",
+							},
+						},
+					},
+				],
+			},
+			orderBy: { createdAt: "asc" },
+			select: { id: true, companyId: true },
+		});
+		if (knownContact) {
+			return {
+				companyId: knownContact.companyId,
+				contactId: knownContact.id,
+				external: request.participants.filter((participant) =>
+					participantEmails.includes(participant.email.trim().toLowerCase()),
+				),
+			};
+		}
+
 		const external = externalParticipants(request.participants, {
 			ourDomains: context.ourDomains,
 			ourAddresses: context.ourAddresses,
