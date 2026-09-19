@@ -5,6 +5,7 @@ import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import { InjectDatabase } from "../database/database.constants";
 import { runInPrincipalTransaction } from "../database/database-context";
 import { ThreadWriterService } from "../mailbox/thread-writer.service";
+import { resolveAtlasOutreachSender } from "./atlas-sender";
 import {
 	localProviderDoubleEnabled,
 	localResendCredentialSource,
@@ -276,17 +277,11 @@ export class PostgresJobWorkerService {
 						)
 					: null);
 			const secret = await this.credentials.load();
-			const fromAddress = localProviderDoubleEnabled()
-				? preparedMailbox?.address
-				: process.env.RESEND_OUTREACH_FROM_EMAIL?.trim();
-			if (!fromAddress) throw new Error("RESEND_OUTREACH_SENDER_UNAVAILABLE");
+			const configuredSender = resolveAtlasOutreachSender();
 			const sent = await this.transport.send(secret.apiKey, {
 				from: {
-					address: fromAddress,
-					displayName:
-						process.env.RESEND_OUTREACH_FROM_NAME?.trim() ||
-						prepared.mailbox?.displayName ||
-						"IBL Media Consultancy",
+					address: configuredSender.address,
+					displayName: configuredSender.displayName,
 				},
 				to: prepared.recipientRoute?.normalizedValue ?? "",
 				subject: prepared.subject ?? "",

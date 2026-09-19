@@ -7,8 +7,15 @@ import type { ResendTransport } from "../src/providers/resend-transport";
 
 const suffix = process.env.TEST_RUN_ID ?? "postgres-queue";
 const actorUserId = `queue-user-${suffix}`;
+const approverUserId = `queue-approver-${suffix}`;
 const keyPrefix = `queue-recovery:${suffix}:`;
+const senderMailboxId = `queue-sender-mailbox-${suffix}`;
+const senderContactId = `queue-sender-contact-${suffix}`;
+const senderRouteId = `queue-sender-route-${suffix}`;
+const senderDraftId = `queue-sender-draft-${suffix}`;
+const senderDeliveryId = `queue-sender-delivery-${suffix}`;
 const previousSender = process.env.RESEND_SYSTEM_FROM_EMAIL;
+const previousOutreachSender = process.env.RESEND_OUTREACH_FROM_EMAIL;
 const adminConnectionString =
 	process.env.RLS_ADMIN_DATABASE_URL ?? process.env.DATABASE_URL;
 if (!adminConnectionString)
@@ -38,6 +45,14 @@ async function clean() {
 		'DELETE FROM "systemEmailJob" WHERE "idempotencyKey" LIKE $1',
 		[`${keyPrefix}%`],
 	);
+	await admin.query('DELETE FROM "outboundDelivery" WHERE id=$1', [
+		senderDeliveryId,
+	]);
+	await admin.query('DELETE FROM "draft" WHERE id=$1', [senderDraftId]);
+	await admin.query('DELETE FROM "contactRoute" WHERE id=$1', [senderRouteId]);
+	await admin.query('DELETE FROM "contact" WHERE id=$1', [senderContactId]);
+	await admin.query('DELETE FROM "mailbox" WHERE id=$1', [senderMailboxId]);
+	await admin.query('DELETE FROM "user" WHERE id=$1', [approverUserId]);
 	await admin.query('DELETE FROM "user" WHERE id=$1', [actorUserId]);
 }
 
@@ -51,6 +66,10 @@ beforeAll(async () => {
 		[actorUserId, `${actorUserId}@example.test`],
 	);
 	await admin.query(
+		'INSERT INTO "user" (id,name,email,"emailVerified","createdAt","updatedAt") VALUES ($1,\'Queue Approver\',$2,true,NOW(),NOW())',
+		[approverUserId, `${approverUserId}@example.test`],
+	);
+	await admin.query(
 		'INSERT INTO "providerCapability" (key,status,"verifiedAt","updatedAt") VALUES (\'RESEND_OUTBOUND\',\'VERIFIED\',NOW(),NOW()) ON CONFLICT (key) DO UPDATE SET status=\'VERIFIED\',"verifiedAt"=NOW()',
 		[],
 	);
@@ -59,6 +78,9 @@ beforeAll(async () => {
 afterAll(async () => {
 	if (previousSender === undefined) delete process.env.RESEND_SYSTEM_FROM_EMAIL;
 	else process.env.RESEND_SYSTEM_FROM_EMAIL = previousSender;
+	if (previousOutreachSender === undefined)
+		delete process.env.RESEND_OUTREACH_FROM_EMAIL;
+	else process.env.RESEND_OUTREACH_FROM_EMAIL = previousOutreachSender;
 	await clean();
 	await Promise.all([admin.end(), db.$disconnect()]);
 });
@@ -124,6 +146,86 @@ describe("PostgreSQL durable system-email queue", () => {
 			const idempotencyKey = `${keyPrefix}${name}`;
 			expect((await statusOf(idempotencyKey)).status).toBe("SUCCEEDED");
 			expect(sent.get(idempotencyKey)).toBe(1);
+		}
+	});
+
+	test("rejects an unapproved Atlas sender before calling Resend", async () => {
+		await db.mailbox.create({
+			data: {
+				id: senderMailboxId,
+				ownerUserId: actorUserId,
+				address: `outreach-${suffix}@example.test`,
+				normalizedAddress: `outreach-${suffix}@example.test`,
+				status: "VERIFIED",
+			},
+		});
+		await db.contact.create({
+			data: {
+				id: senderContactId,
+				firstName: "Recipient",
+				email: `recipient-${suffix}@example.test`,
+			},
+		});
+		await db.contactRoute.create({
+			data: {
+				id: senderRouteId,
+				contactId: senderContactId,
+				ownerUserId: actorUserId,
+				type: "EMAIL",
+				value: `recipient-${suffix}@example.test`,
+				normalizedValue: `recipient-${suffix}@example.test`,
+			},
+		});
+		await db.draft.create({
+			data: {
+				id: senderDraftId,
+				ownerUserId: actorUserId,
+				mailboxId: senderMailboxId,
+				recipientRouteId: senderRouteId,
+				subject: "Sender policy test",
+				body: "Test only",
+				status: "DRAFT",
+				approvedAt: new Date(),
+				idempotencyKey: `${keyPrefix}sender-draft`,
+			},
+		});
+		await db.outreachApproval.create({
+			data: {
+				draftId: senderDraftId,
+				requestedById: actorUserId,
+				decidedById: approverUserId,
+				status: "APPROVED",
+				decidedAt: new Date(),
+				idempotencyKey: `${keyPrefix}sender-approval`,
+			},
+		});
+		await db.draft.update({
+			where: { id: senderDraftId },
+			data: { status: "QUEUED" },
+		});
+		await db.outboundDelivery.create({
+			data: {
+				id: senderDeliveryId,
+				draftId: senderDraftId,
+				idempotencyKey: `${keyPrefix}sender-delivery`,
+			},
+		});
+
+		const previous = process.env.RESEND_OUTREACH_FROM_EMAIL;
+		process.env.RESEND_OUTREACH_FROM_EMAIL = "info@iblmedia.com";
+		try {
+			const worker = new PostgresJobWorkerService(db, credentials, transport);
+			expect(await worker.runDue("sender-policy-worker")).toBe(5);
+			expect(sent.has(`${keyPrefix}sender-delivery`)).toBe(false);
+			expect(
+				await db.outboundDelivery.findUnique({
+					where: { id: senderDeliveryId },
+					select: { status: true },
+				}),
+			).toEqual({ status: "FAILED" });
+		} finally {
+			if (previous === undefined) delete process.env.RESEND_OUTREACH_FROM_EMAIL;
+			else process.env.RESEND_OUTREACH_FROM_EMAIL = previous;
 		}
 	});
 });

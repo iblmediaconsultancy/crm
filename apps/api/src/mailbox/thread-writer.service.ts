@@ -11,6 +11,10 @@ import { Injectable, Logger } from "@nestjs/common";
 import { ActivityStampService } from "../crm/activity-stamp.service";
 import { InjectDatabase } from "../database/database.constants";
 import {
+	assessInboundSecurity,
+	SECURITY_REVIEW_REASON,
+} from "./inbound-security";
+import {
 	MailboxMatchService,
 	type MatchContext,
 } from "./mailbox-match.service";
@@ -27,6 +31,7 @@ export type IncomingMessage = {
 	recipients: { email: string; name: string | null; kind: "to" | "cc" }[];
 	body: string;
 	sentAt: Date;
+	attachmentCount?: number;
 };
 
 @Injectable()
@@ -89,6 +94,22 @@ export class ThreadWriterService {
 		const repair = existing !== null;
 		const participants = [parsed.from, ...parsed.recipients];
 		const outbound = parsed.from.email === options.mailbox;
+		const securityReview = !outbound
+			? assessInboundSecurity({
+					subject: parsed.subject,
+					body: parsed.body,
+					fromEmail: parsed.from.email,
+					fromName: parsed.from.name,
+					trustedDomains:
+						context?.ourDomains ??
+						new Set(
+							[options.mailbox.split("@").at(-1)?.toLowerCase()].filter(
+								(value): value is string => Boolean(value),
+							),
+						),
+					attachmentCount: parsed.attachmentCount,
+				})
+			: { flagged: false, signals: [] };
 
 		const thread = existing
 			? {
@@ -136,7 +157,7 @@ export class ThreadWriterService {
 			contactId = match.contactId;
 
 			if (!companyId && !contactId) {
-				return false;
+				if (!securityReview.flagged) return false;
 			}
 		}
 
@@ -154,7 +175,57 @@ export class ThreadWriterService {
 							select: { id: true },
 						})
 					: null;
-				const leadId = thread?.leadId ?? lead?.id ?? null;
+				let leadId = thread?.leadId ?? lead?.id ?? null;
+				if (securityReview.flagged && !leadId && !contactId) {
+					const existingContact = await tx.contact.findFirst({
+						where: {
+							email: { equals: parsed.from.email, mode: "insensitive" },
+						},
+						select: { id: true },
+					});
+					contactId =
+						existingContact?.id ??
+						(
+							await tx.contact.create({
+								data: {
+									firstName: parsed.from.name?.trim() || parsed.from.email,
+									lastName: null,
+									email: parsed.from.email,
+									source: RecordSource.EMAIL,
+									ownerId: row.userId,
+								},
+								select: { id: true },
+							})
+						).id;
+				}
+				if (securityReview.flagged && !leadId) {
+					const securityLead = await tx.lead.create({
+						data: {
+							name: parsed.from.name?.trim() || parsed.from.email,
+							stage: "REPLIED",
+							stageChangedAt: parsed.sentAt,
+							contactId,
+							companyId,
+							ownerUserId: row.userId,
+							createdByUserId: row.userId,
+							source: RecordSource.EMAIL,
+							originChannel: "EMAIL",
+							nextActionAt: new Date(),
+							nextActionTitle: "Ihsan security review required",
+							attentionState: "NEEDS_IHSAN",
+							blocker: SECURITY_REVIEW_REASON,
+							handoffReason: SECURITY_REVIEW_REASON,
+							handoffSummary:
+								"Inbound email requires manual security review before Atlas continues.",
+							handoffRecommendedAction:
+								"Review the message manually. Do not follow links, open attachments, or provide sensitive information.",
+							handoffAt: new Date(),
+							needsReview: true,
+						},
+						select: { id: true },
+					});
+					leadId = securityLead.id;
+				}
 				const record = existing
 					? { id: existing.threadId }
 					: await tx.emailThread.upsert({
@@ -260,6 +331,22 @@ export class ThreadWriterService {
 						}
 					}
 				}
+				if (securityReview.flagged && leadId) {
+					await tx.lead.update({
+						where: { id: leadId },
+						data: {
+							attentionState: "NEEDS_IHSAN",
+							blocker: SECURITY_REVIEW_REASON,
+							handoffReason: SECURITY_REVIEW_REASON,
+							handoffSummary:
+								"Inbound email requires manual security review before Atlas continues.",
+							handoffRecommendedAction:
+								"Review the message manually. Do not follow links, open attachments, or provide sensitive information.",
+							handoffAt: new Date(),
+							needsReview: true,
+						},
+					});
+				}
 				if (!outbound && leadId) {
 					const current = await tx.lead.findUnique({
 						where: { id: leadId },
@@ -272,10 +359,12 @@ export class ThreadWriterService {
 								stage: "REPLIED",
 								stageChangedAt: parsed.sentAt,
 								lastRepliedAt: parsed.sentAt,
-								nextActionAt: new Date(
-									parsed.sentAt.getTime() + 24 * 60 * 60 * 1000,
-								),
-								nextActionTitle: "Review reply and decide the next step",
+								nextActionAt: securityReview.flagged
+									? new Date()
+									: new Date(parsed.sentAt.getTime() + 24 * 60 * 60 * 1000),
+								nextActionTitle: securityReview.flagged
+									? "Ihsan security review required"
+									: "Review reply and decide the next step",
 							},
 						});
 						if (current.stage !== "REPLIED") {
@@ -342,6 +431,16 @@ export class ThreadWriterService {
 			if (await this.storedElsewhere(error, parsed.rfcMessageId, row.mailboxId))
 				return false;
 			throw error;
+		}
+
+		if (securityReview.flagged) {
+			this.logger.warn({
+				message: "Inbound email routed to security review",
+				mailboxId: row.mailboxId,
+				contactId,
+				reason: SECURITY_REVIEW_REASON,
+				signals: securityReview.signals,
+			});
 		}
 
 		await this.touch({ companyId, contactId }, occurredAt, parsed.rfcMessageId);

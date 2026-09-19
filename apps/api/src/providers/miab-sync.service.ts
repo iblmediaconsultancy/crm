@@ -272,6 +272,7 @@ export class MiabSyncService {
 							recipients: message.recipients,
 							body: message.body,
 							sentAt: message.sentAt,
+							attachmentCount: message.attachments.length,
 						},
 						context,
 					);
