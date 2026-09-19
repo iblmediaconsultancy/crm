@@ -21,6 +21,7 @@ const movedRoot = `outlook-conversation:${suffix}`;
 const securityRoot = `<security-${suffix}@mail.test>`;
 const unknownSecurityRoot = `<unknown-security-${suffix}@mail.test>`;
 const unknownPerson = `phisher-${suffix}@outside.test`;
+const normalConversationRoot = `<normal-conversation-${suffix}@mail.test>`;
 const companyId = `company-${suffix}`;
 const contactId = `contact-${suffix}`;
 const routeId = `route-${suffix}`;
@@ -81,11 +82,29 @@ function unknownSecurityMessage(id: string, sentAt: Date): IncomingMessage {
 	};
 }
 
+function normalReply(id: string, sentAt: Date): IncomingMessage {
+	return {
+		rfcMessageId: id,
+		rootId: normalConversationRoot,
+		subject: "Re: Pricing",
+		from: { email: person, name: "Ihsan Bal" },
+		recipients: [{ email: mailbox, name: "Test Rep", kind: "to" }],
+		body: "Thanks, happy to speak next week.",
+		sentAt,
+	};
+}
+
 async function clean() {
 	await db.emailThread.deleteMany({
 		where: {
 			rootMessageId: {
-				in: [rootId, movedRoot, securityRoot, unknownSecurityRoot],
+				in: [
+					rootId,
+					movedRoot,
+					securityRoot,
+					unknownSecurityRoot,
+					normalConversationRoot,
+				],
 			},
 		},
 	});
@@ -409,5 +428,85 @@ describe("storing a synced email", () => {
 				where: { rootMessageId: unknownSecurityRoot },
 			}),
 		).toBe(1);
+	});
+
+	it("keeps a known contact reply on the existing lead without a security handoff", async () => {
+		await db.lead.update({
+			where: { id: leadId },
+			data: {
+				stage: "CONTACTED",
+				attentionState: "NONE",
+				blocker: null,
+				handoffReason: null,
+				handoffSummary: null,
+				handoffRecommendedAction: null,
+				needsReview: false,
+			},
+		});
+		await db.followUpPlan.update({
+			where: { id: followUpPlanId },
+			data: { status: "ACTIVE", cancellationReason: null },
+		});
+		await db.followUpStep.update({
+			where: { id: followUpStepId },
+			data: { status: "PENDING", completedAt: null },
+		});
+		const sent = await threads.store(
+			row,
+			{ mailbox, origin: "legacy" },
+			{
+				...message(
+					`<normal-outbound-${suffix}@mail.test>`,
+					new Date("2026-01-05T10:00:00Z"),
+					normalConversationRoot,
+				),
+				subject: "Pricing",
+			},
+			await threads.context(),
+		);
+		const replied = await threads.store(
+			row,
+			{ mailbox, origin: "miab" },
+			normalReply(
+				`<normal-reply-${suffix}@mail.test>`,
+				new Date("2026-01-05T11:00:00Z"),
+			),
+			await threads.context(),
+		);
+
+		expect(sent).toBe(true);
+		expect(replied).toBe(true);
+		expect(
+			await db.emailThread.count({
+				where: { mailboxId, rootMessageId: normalConversationRoot },
+			}),
+		).toBe(1);
+		expect(
+			await db.emailMessage.findMany({
+				where: { mailboxId, thread: { rootMessageId: normalConversationRoot } },
+				orderBy: { sentAt: "asc" },
+				select: { direction: true },
+			}),
+		).toEqual([{ direction: "OUTBOUND" }, { direction: "INBOUND" }]);
+		expect(
+			await db.lead.findUnique({
+				where: { id: leadId },
+				select: { stage: true, attentionState: true, handoffReason: true },
+			}),
+		).toEqual({
+			stage: "REPLIED",
+			attentionState: "NONE",
+			handoffReason: null,
+		});
+		expect(await db.lead.count({ where: { contactId } })).toBe(1);
+		expect(
+			await db.followUpPlan.findUnique({
+				where: { id: followUpPlanId },
+				select: { status: true, cancellationReason: true },
+			}),
+		).toEqual({
+			status: "CANCELLED",
+			cancellationReason: "Inbound reply received",
+		});
 	});
 });

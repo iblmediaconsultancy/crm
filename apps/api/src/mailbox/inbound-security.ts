@@ -57,6 +57,9 @@ export function assessInboundSecurity(input: {
 	fromName: string | null;
 	trustedDomains: ReadonlySet<string>;
 	attachmentCount?: number;
+	knownContact?: boolean;
+	existingConversationReply?: boolean;
+	threadIdentifiersMatch?: boolean;
 }): InboundSecurityAssessment {
 	const text = `${input.subject ?? ""}\n${input.body}`.slice(0, 100_000);
 	const signals = SIGNALS.filter(({ pattern }) => pattern.test(text)).map(
@@ -66,12 +69,17 @@ export function assessInboundSecurity(input: {
 	if ((input.attachmentCount ?? 0) > 0) signals.push("SUSPICIOUS_ATTACHMENT");
 
 	const fromDomain = input.fromEmail.split("@").at(-1)?.toLowerCase();
+	const suspiciousContent = signals.length > 0;
 	if (
 		fromDomain &&
 		!input.trustedDomains.has(fromDomain) &&
 		/\b(?:atlas|ihsan|ibl(?:\s+media)?|finance|accounts)\b/i.test(
 			input.fromName ?? "",
-		)
+		) &&
+		!input.knownContact &&
+		!input.existingConversationReply &&
+		!input.threadIdentifiersMatch &&
+		suspiciousContent
 	) {
 		signals.push("IMPERSONATION");
 	}

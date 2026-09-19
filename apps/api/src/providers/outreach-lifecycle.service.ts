@@ -82,6 +82,21 @@ export class OutreachLifecycleService {
 		const mailbox = delivery.draft.mailbox;
 		const recipientRoute = delivery.draft.recipientRoute;
 		const providerMessageId = delivery.providerMessageId;
+		const storedThread = await withPrincipal(
+			this.db,
+			{ userId: null, mailboxId: mailbox.id, kind: "worker" },
+			(tx) =>
+				tx.emailThread.findFirst({
+					where: {
+						mailboxId: mailbox.id,
+						contactId: recipientRoute.contactId,
+						subject: delivery.draft.subject,
+						messages: { some: { direction: "OUTBOUND" } },
+					},
+					orderBy: { lastMessageAt: "desc" },
+					select: { rootMessageId: true },
+				}),
+		);
 		await runInPrincipalTransaction(
 			this.db,
 			{ userId: null, mailboxId: mailbox.id, kind: "worker" },
@@ -112,7 +127,7 @@ export class OutreachLifecycleService {
 					},
 					{
 						rfcMessageId: `<reply-${crypto.randomUUID()}@local.invalid>`,
-						rootId: providerMessageId,
+						rootId: storedThread?.rootMessageId ?? providerMessageId,
 						subject: delivery.draft.subject
 							? `Re: ${delivery.draft.subject.replace(/^Re:\s*/i, "")}`
 							: "Re: Outreach",
@@ -251,8 +266,7 @@ export class OutreachLifecycleService {
 					);
 			}
 			if (
-				!route ||
-				route.lifecycleState !== "ACTIVE" ||
+				route?.lifecycleState !== "ACTIVE" ||
 				route.contactId !== input.contactId ||
 				route.ownerUserId !== actorUserId ||
 				route.type !== "EMAIL" ||

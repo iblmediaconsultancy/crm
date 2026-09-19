@@ -4,6 +4,7 @@ export type ResendMessage = {
 	subject: string;
 	text: string;
 	idempotencyKey: string;
+	messageId?: string;
 };
 
 export interface ResendTransport {
@@ -29,6 +30,9 @@ export class HttpResendTransport implements ResendTransport {
 				to: [message.to],
 				subject: message.subject,
 				text: message.text,
+				...(message.messageId
+					? { headers: { "Message-ID": message.messageId } }
+					: {}),
 			}),
 		});
 		if (!response.ok) throw new Error(`RESEND_${response.status}`);

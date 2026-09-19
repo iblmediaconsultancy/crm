@@ -59,4 +59,31 @@ describe("inbound email security assessment", () => {
 			}),
 		).toEqual({ flagged: false, signals: [] });
 	});
+
+	test("does not flag a known contact replying to an existing conversation", () => {
+		expect(
+			assessInboundSecurity({
+				subject: "Re: Next week",
+				body: "Thanks, happy to speak next week.",
+				fromEmail: "balihsan@icloud.com",
+				fromName: "Ihsan Bal",
+				trustedDomains,
+				knownContact: true,
+				existingConversationReply: true,
+				threadIdentifiersMatch: true,
+			}),
+		).toEqual({ flagged: false, signals: [] });
+	});
+
+	test("requires suspicious content before adding an impersonation signal", () => {
+		expect(
+			assessInboundSecurity({
+				subject: "Hello",
+				body: "I would like to continue the conversation.",
+				fromEmail: "ihsan@icloud.com",
+				fromName: "Ihsan",
+				trustedDomains,
+			}),
+		).toEqual({ flagged: false, signals: [] });
+	});
 });

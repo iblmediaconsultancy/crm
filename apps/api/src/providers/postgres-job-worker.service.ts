@@ -1,10 +1,9 @@
 import { sendSystemEmail } from "@crm/auth";
-import type { Db } from "@crm/db";
+import { ActivityType, type Db } from "@crm/db";
 import { withPrincipal } from "@crm/db/security";
-import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
+import { Inject, Injectable, Logger } from "@nestjs/common";
 import { InjectDatabase } from "../database/database.constants";
-import { runInPrincipalTransaction } from "../database/database-context";
-import { ThreadWriterService } from "../mailbox/thread-writer.service";
+import { snippetOf } from "../mailbox/message-text";
 import { resolveAtlasOutreachSender } from "./atlas-sender";
 import {
 	localProviderDoubleEnabled,
@@ -77,7 +76,6 @@ export class PostgresJobWorkerService {
 		private readonly credentials: ResendCredentialSource,
 		@Inject(WORKER_RESEND_TRANSPORT)
 		private readonly transport: ResendTransport,
-		@Optional() private readonly threadWriter?: ThreadWriterService,
 	) {}
 
 	async runDue(workerId: string): Promise<number> {
@@ -220,10 +218,12 @@ export class PostgresJobWorkerService {
 									id: true,
 									type: true,
 									normalizedValue: true,
-									contact: { select: { id: true, lifecycleState: true } },
+									contact: {
+										select: { id: true, lifecycleState: true, companyId: true },
+									},
 								},
 							},
-							lead: { select: { id: true, stage: true } },
+							lead: { select: { id: true, stage: true, companyId: true } },
 						},
 					});
 					const consent = draft.recipientRoute
@@ -260,7 +260,7 @@ export class PostgresJobWorkerService {
 			const preparedMailboxId = prepared.mailboxId;
 			const preparedMailbox =
 				prepared.mailbox ??
-				(localProviderDoubleEnabled() && preparedMailboxId
+				(preparedMailboxId
 					? await withPrincipal(
 							this.db,
 							{ userId: null, mailboxId: preparedMailboxId, kind: "worker" },
@@ -276,8 +276,10 @@ export class PostgresJobWorkerService {
 								}),
 						)
 					: null);
+			if (!preparedMailbox) throw new Error("OUTBOUND_MAILBOX_MISSING");
 			const secret = await this.credentials.load();
 			const configuredSender = resolveAtlasOutreachSender();
+			const outboundMessageId = `<ibl-${prepared.id}@iblmedia.com>`;
 			const sent = await this.transport.send(secret.apiKey, {
 				from: {
 					address: configuredSender.address,
@@ -287,64 +289,8 @@ export class PostgresJobWorkerService {
 				subject: prepared.subject ?? "",
 				text: prepared.body,
 				idempotencyKey: `ibl-outbound:${prepared.id}`,
+				messageId: outboundMessageId,
 			});
-			if (
-				localProviderDoubleEnabled() &&
-				this.threadWriter &&
-				preparedMailbox
-			) {
-				const sentAt = new Date();
-				const mailbox = preparedMailbox;
-				const threadWriter = this.threadWriter;
-				await runInPrincipalTransaction(
-					this.db,
-					{ userId: null, mailboxId: mailbox.id, kind: "worker" },
-					async () =>
-						threadWriter.store(
-							{
-								id: `local-sync-${mailbox.id}`,
-								userId: mailbox.ownerUserId,
-								source: "local-double",
-								mailboxId: mailbox.id,
-								status: "IDLE",
-								cursor: null,
-								lastSyncedAt: null,
-								lastError: null,
-								retryAfter: null,
-								attemptCount: 0,
-								leaseOwner: null,
-								lastErrorCode: null,
-								autoCreate: false,
-								createdAt: sentAt,
-								updatedAt: sentAt,
-							},
-							{
-								mailbox: mailbox.address.toLowerCase(),
-								origin: "legacy",
-								exactContactId: prepared.recipientRoute?.contact?.id,
-								projectActivity: false,
-							},
-							{
-								rfcMessageId: `<${sent.providerMessageId}@local.invalid>`,
-								rootId: sent.providerMessageId,
-								subject: prepared.subject,
-								from: {
-									email: mailbox.address.toLowerCase(),
-									name: mailbox.displayName,
-								},
-								recipients: [
-									{
-										email: prepared.recipientRoute?.normalizedValue ?? "",
-										name: null,
-										kind: "to",
-									},
-								],
-								body: prepared.body,
-								sentAt,
-							},
-						),
-				);
-			}
 			await withPrincipal(
 				this.db,
 				{ userId: null, kind: "worker" },
@@ -365,6 +311,96 @@ export class PostgresJobWorkerService {
 					await tx.draft.update({
 						where: { id: prepared.id },
 						data: { status: "SENT", sentAt },
+					});
+					const thread = await tx.emailThread.upsert({
+						where: {
+							mailboxId_rootMessageId: {
+								mailboxId: preparedMailbox.id,
+								rootMessageId: outboundMessageId,
+							},
+						},
+						create: {
+							mailboxId: preparedMailbox.id,
+							rootMessageId: outboundMessageId,
+							subject: prepared.subject,
+							companyId:
+								prepared.recipientRoute?.contact?.companyId ??
+								prepared.lead?.companyId ??
+								null,
+							contactId: prepared.recipientRoute?.contact?.id ?? null,
+							leadId: prepared.lead?.id ?? null,
+							firstMessageAt: sentAt,
+							lastMessageAt: sentAt,
+							messageCount: 0,
+						},
+						update: {},
+						select: { id: true },
+					});
+					await tx.emailMessage.upsert({
+						where: {
+							mailboxId_rfcMessageId: {
+								mailboxId: preparedMailbox.id,
+								rfcMessageId: outboundMessageId,
+							},
+						},
+						create: {
+							threadId: thread.id,
+							mailboxId: preparedMailbox.id,
+							rfcMessageId: outboundMessageId,
+							syncedByUserId: prepared.ownerUserId,
+							direction: "OUTBOUND",
+							fromEmail: configuredSender.address,
+							fromName: configuredSender.displayName,
+							recipients: [
+								{
+									email: prepared.recipientRoute?.normalizedValue ?? "",
+									name: null,
+									kind: "to",
+								},
+							],
+							subject: prepared.subject,
+							snippet: snippetOf(prepared.body),
+							body: prepared.body,
+							sentAt,
+						},
+						update: {},
+						select: { id: true },
+					});
+					const stats = await tx.emailMessage.aggregate({
+						where: { threadId: thread.id },
+						_count: { _all: true },
+						_min: { sentAt: true },
+						_max: { sentAt: true },
+					});
+					await tx.emailThread.update({
+						where: { id: thread.id },
+						data: {
+							messageCount: stats._count._all,
+							firstMessageAt: stats._min.sentAt ?? sentAt,
+							lastMessageAt: stats._max.sentAt ?? sentAt,
+						},
+					});
+					await tx.activity.upsert({
+						where: { emailThreadId: thread.id },
+						create: {
+							type: ActivityType.EMAIL,
+							subject: prepared.subject ?? "(no subject)",
+							body: snippetOf(prepared.body),
+							occurredAt: sentAt,
+							companyId:
+								prepared.recipientRoute?.contact?.companyId ??
+								prepared.lead?.companyId ??
+								null,
+							contactId: prepared.recipientRoute?.contact?.id ?? null,
+							leadId: prepared.lead?.id ?? null,
+							createdById: prepared.ownerUserId,
+							emailThreadId: thread.id,
+							meta: { synced: true, source: "outbound" },
+						},
+						update: {
+							body: snippetOf(prepared.body),
+							occurredAt: sentAt,
+						},
 					});
 					if (prepared.coldOutreach) {
 						const settings = await tx.appSetting.findUnique({

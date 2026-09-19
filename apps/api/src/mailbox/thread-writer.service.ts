@@ -81,6 +81,7 @@ export class ThreadWriterService {
 				threadId: true,
 				thread: {
 					select: {
+						rootMessageId: true,
 						companyId: true,
 						contactId: true,
 						leadId: true,
@@ -94,26 +95,11 @@ export class ThreadWriterService {
 		const repair = existing !== null;
 		const participants = [parsed.from, ...parsed.recipients];
 		const outbound = parsed.from.email === options.mailbox;
-		const securityReview = !outbound
-			? assessInboundSecurity({
-					subject: parsed.subject,
-					body: parsed.body,
-					fromEmail: parsed.from.email,
-					fromName: parsed.from.name,
-					trustedDomains:
-						context?.ourDomains ??
-						new Set(
-							[options.mailbox.split("@").at(-1)?.toLowerCase()].filter(
-								(value): value is string => Boolean(value),
-							),
-						),
-					attachmentCount: parsed.attachmentCount,
-				})
-			: { flagged: false, signals: [] };
 
-		const thread = existing
+		let thread = existing
 			? {
 					id: existing.threadId,
+					rootMessageId: existing.thread.rootMessageId,
 					companyId: existing.thread.companyId,
 					contactId: existing.thread.contactId,
 					leadId: existing.thread.leadId,
@@ -125,14 +111,22 @@ export class ThreadWriterService {
 							rootMessageId: parsed.rootId,
 						},
 					},
-					select: { id: true, companyId: true, contactId: true, leadId: true },
+					select: {
+						id: true,
+						rootMessageId: true,
+						companyId: true,
+						contactId: true,
+						leadId: true,
+					},
 				});
 
 		let companyId = thread?.companyId ?? null;
 		let contactId = thread?.contactId ?? null;
+		let knownContact = Boolean(contactId);
 
 		if (!thread && options.exactContactId) {
 			contactId = options.exactContactId;
+			knownContact = true;
 		} else if (!thread) {
 			if (!context) throw new Error("Mailbox match context is required.");
 			const repliedTo =
@@ -155,11 +149,58 @@ export class ThreadWriterService {
 
 			companyId = match.companyId;
 			contactId = match.contactId;
+			knownContact = Boolean(contactId);
 
 			if (!companyId && !contactId) {
+				const securityReview = assessInboundSecurity({
+					subject: parsed.subject,
+					body: parsed.body,
+					fromEmail: parsed.from.email,
+					fromName: parsed.from.name,
+					trustedDomains: context.ourDomains,
+					attachmentCount: parsed.attachmentCount,
+					knownContact,
+					existingConversationReply: false,
+					threadIdentifiersMatch: false,
+				});
 				if (!securityReview.flagged) return false;
 			}
 		}
+
+		if (!thread && contactId && !outbound) {
+			const related = await this.findConversationThread(
+				row.mailboxId,
+				contactId,
+				parsed.subject,
+			);
+			if (related) {
+				thread = related;
+				companyId = related.companyId;
+				contactId = related.contactId;
+			}
+		}
+
+		const securityReview = !outbound
+			? assessInboundSecurity({
+					subject: parsed.subject,
+					body: parsed.body,
+					fromEmail: parsed.from.email,
+					fromName: parsed.from.name,
+					trustedDomains:
+						context?.ourDomains ??
+						new Set(
+							[options.mailbox.split("@").at(-1)?.toLowerCase()].filter(
+								(value): value is string => Boolean(value),
+							),
+						),
+					attachmentCount: parsed.attachmentCount,
+					knownContact,
+					existingConversationReply: Boolean(thread),
+					threadIdentifiersMatch: Boolean(
+						thread && !existing && thread.rootMessageId === parsed.rootId,
+					),
+				})
+			: { flagged: false, signals: [] };
 
 		let occurredAt: Date;
 
@@ -501,6 +542,40 @@ export class ThreadWriterService {
 		return found !== null;
 	}
 
+	private async findConversationThread(
+		mailboxId: string,
+		contactId: string,
+		subject: string | null,
+	) {
+		const normalizedSubject = conversationSubject(subject);
+		if (!normalizedSubject) return null;
+
+		const candidates = await this.db.emailThread.findMany({
+			where: {
+				mailboxId,
+				contactId,
+				messages: { some: { direction: EmailDirection.OUTBOUND } },
+			},
+			orderBy: { lastMessageAt: "desc" },
+			take: 20,
+			select: {
+				id: true,
+				rootMessageId: true,
+				companyId: true,
+				contactId: true,
+				leadId: true,
+				subject: true,
+			},
+		});
+
+		return (
+			candidates.find(
+				(candidate) =>
+					conversationSubject(candidate.subject) === normalizedSubject,
+			) ?? null
+		);
+	}
+
 	private async project(
 		tx: Prisma.TransactionClient,
 		emailThreadId: string,
@@ -538,4 +613,13 @@ export class ThreadWriterService {
 
 		return activity.createdAt;
 	}
+}
+
+function conversationSubject(value: string | null): string | null {
+	const normalized = value
+		?.trim()
+		.toLowerCase()
+		.replace(/^(?:(?:re|fw|fwd):\s*)+/i, "")
+		.trim();
+	return normalized || null;
 }

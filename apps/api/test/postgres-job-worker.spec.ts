@@ -1,9 +1,18 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { db } from "@crm/db";
 import pg from "pg";
+import type { AgentTriggerService } from "../src/agent/agent-trigger.service";
+import { CompanyDirectoryService } from "../src/companies/company-directory.service";
+import { ActivityStampService } from "../src/crm/activity-stamp.service";
+import { EnrichmentLogService } from "../src/crm/enrichment-log.service";
+import { MailboxMatchService } from "../src/mailbox/mailbox-match.service";
+import { ThreadWriterService } from "../src/mailbox/thread-writer.service";
 import { PostgresJobWorkerService } from "../src/providers/postgres-job-worker.service";
 import type { ResendCredentialSource } from "../src/providers/provider-credentials";
-import type { ResendTransport } from "../src/providers/resend-transport";
+import type {
+	ResendMessage,
+	ResendTransport,
+} from "../src/providers/resend-transport";
 
 const suffix = process.env.TEST_RUN_ID ?? "postgres-queue";
 const actorUserId = `queue-user-${suffix}`;
@@ -14,6 +23,15 @@ const senderContactId = `queue-sender-contact-${suffix}`;
 const senderRouteId = `queue-sender-route-${suffix}`;
 const senderDraftId = `queue-sender-draft-${suffix}`;
 const senderDeliveryId = `queue-sender-delivery-${suffix}`;
+const threadMailboxId = `queue-thread-mailbox-${suffix}`;
+const threadContactId = `queue-thread-contact-${suffix}`;
+const threadRouteId = `queue-thread-route-${suffix}`;
+const threadLeadId = `queue-thread-lead-${suffix}`;
+const threadDraftId = `queue-thread-draft-${suffix}`;
+const threadDeliveryId = `queue-thread-delivery-${suffix}`;
+const threadPlanId = `queue-thread-plan-${suffix}`;
+const threadStepId = `queue-thread-step-${suffix}`;
+const threadRecipient = `thread-recipient-${suffix}@example.test`;
 const previousSender = process.env.RESEND_SYSTEM_FROM_EMAIL;
 const previousOutreachSender = process.env.RESEND_OUTREACH_FROM_EMAIL;
 const adminConnectionString =
@@ -27,15 +45,23 @@ const credentials: ResendCredentialSource = {
 	load: async () => ({ apiKey: "test-only" }),
 };
 const sent = new Map<string, number>();
+const sentMessages = new Map<string, ResendMessage>();
 const transport: ResendTransport = {
 	send: async (_apiKey, message) => {
 		sent.set(
 			message.idempotencyKey,
 			(sent.get(message.idempotencyKey) ?? 0) + 1,
 		);
+		sentMessages.set(message.idempotencyKey, message);
 		return { providerMessageId: `provider-${message.idempotencyKey}` };
 	},
 };
+
+const agent = {
+	contactCreated: async () => undefined,
+	companyCreated: async () => undefined,
+	companyRequested: async () => undefined,
+} as unknown as AgentTriggerService;
 
 async function clean() {
 	await admin.query('DELETE FROM "securityAuditEvent" WHERE "actorUserId"=$1', [
@@ -48,6 +74,26 @@ async function clean() {
 	await admin.query('DELETE FROM "outboundDelivery" WHERE id=$1', [
 		senderDeliveryId,
 	]);
+	await admin.query('DELETE FROM "followUpStep" WHERE id=$1', [threadStepId]);
+	await admin.query('DELETE FROM "followUpPlan" WHERE id=$1', [threadPlanId]);
+	await admin.query(
+		'DELETE FROM "activity" WHERE "emailThreadId" IN (SELECT id FROM "emailThread" WHERE "mailboxId"=$1)',
+		[threadMailboxId],
+	);
+	await admin.query('DELETE FROM "emailThread" WHERE "mailboxId"=$1', [
+		threadMailboxId,
+	]);
+	await admin.query('DELETE FROM "outboundDelivery" WHERE id=$1', [
+		threadDeliveryId,
+	]);
+	await admin.query('DELETE FROM "draft" WHERE id=$1', [threadDraftId]);
+	await admin.query('DELETE FROM "leadStageHistory" WHERE "leadId"=$1', [
+		threadLeadId,
+	]);
+	await admin.query('DELETE FROM "lead" WHERE id=$1', [threadLeadId]);
+	await admin.query('DELETE FROM "contactRoute" WHERE id=$1', [threadRouteId]);
+	await admin.query('DELETE FROM "contact" WHERE id=$1', [threadContactId]);
+	await admin.query('DELETE FROM "mailbox" WHERE id=$1', [threadMailboxId]);
 	await admin.query('DELETE FROM "draft" WHERE id=$1', [senderDraftId]);
 	await admin.query('DELETE FROM "contactRoute" WHERE id=$1', [senderRouteId]);
 	await admin.query('DELETE FROM "contact" WHERE id=$1', [senderContactId]);
@@ -227,5 +273,183 @@ describe("PostgreSQL durable system-email queue", () => {
 			if (previous === undefined) delete process.env.RESEND_OUTREACH_FROM_EMAIL;
 			else process.env.RESEND_OUTREACH_FROM_EMAIL = previous;
 		}
+	});
+
+	test("persists outbound CRM mail and merges the inbound reply into one lead thread", async () => {
+		await db.mailbox.create({
+			data: {
+				id: threadMailboxId,
+				ownerUserId: actorUserId,
+				address: `thread-mailbox-${suffix}@example.test`,
+				normalizedAddress: `thread-mailbox-${suffix}@example.test`,
+				status: "VERIFIED",
+			},
+		});
+		await db.contact.create({
+			data: {
+				id: threadContactId,
+				firstName: "Ihsan",
+				lastName: "Bal",
+				email: threadRecipient,
+			},
+		});
+		await db.contactRoute.create({
+			data: {
+				id: threadRouteId,
+				contactId: threadContactId,
+				ownerUserId: actorUserId,
+				type: "EMAIL",
+				value: threadRecipient,
+				normalizedValue: threadRecipient,
+			},
+		});
+		await db.lead.create({
+			data: {
+				id: threadLeadId,
+				name: "Ihsan Bal",
+				stage: "READY",
+				contactId: threadContactId,
+				ownerUserId: actorUserId,
+				createdByUserId: actorUserId,
+			},
+		});
+		await db.followUpPlan.create({
+			data: {
+				id: threadPlanId,
+				contactId: threadContactId,
+				routeId: threadRouteId,
+				ownerUserId: actorUserId,
+				leadId: threadLeadId,
+			},
+		});
+		await db.followUpStep.create({
+			data: {
+				id: threadStepId,
+				planId: threadPlanId,
+				position: 1,
+				dueAt: new Date("2030-01-02T10:00:00Z"),
+				idempotencyKey: `${keyPrefix}thread-step`,
+			},
+		});
+		await db.draft.create({
+			data: {
+				id: threadDraftId,
+				ownerUserId: actorUserId,
+				mailboxId: threadMailboxId,
+				recipientRouteId: threadRouteId,
+				leadId: threadLeadId,
+				subject: "Controlled thread test",
+				body: "Thanks for connecting.",
+				status: "DRAFT",
+				idempotencyKey: `${keyPrefix}thread-draft`,
+			},
+		});
+		await db.outreachApproval.create({
+			data: {
+				draftId: threadDraftId,
+				requestedById: actorUserId,
+				decidedById: approverUserId,
+				status: "APPROVED",
+				decidedAt: new Date(),
+				idempotencyKey: `${keyPrefix}thread-approval`,
+			},
+		});
+		await db.draft.update({
+			where: { id: threadDraftId },
+			data: { status: "QUEUED", approvedAt: new Date() },
+		});
+		await db.outboundDelivery.create({
+			data: {
+				id: threadDeliveryId,
+				draftId: threadDraftId,
+				idempotencyKey: `${keyPrefix}thread-delivery`,
+			},
+		});
+
+		const worker = new PostgresJobWorkerService(db, credentials, transport);
+		expect(await worker.runDue("thread-worker")).toBe(1);
+		const outbound = sentMessages.get(`ibl-outbound:${threadDraftId}`);
+		expect(outbound?.messageId).toBe(`<ibl-${threadDraftId}@iblmedia.com>`);
+		expect(
+			await db.emailMessage.findMany({
+				where: { mailboxId: threadMailboxId },
+				select: { direction: true, rfcMessageId: true },
+			}),
+		).toEqual([
+			{
+				direction: "OUTBOUND",
+				rfcMessageId: `<ibl-${threadDraftId}@iblmedia.com>`,
+			},
+		]);
+
+		const stamp = new ActivityStampService(db);
+		const directory = new CompanyDirectoryService(db, agent);
+		const log = new EnrichmentLogService(db, stamp);
+		const match = new MailboxMatchService(db, directory, agent, log, {
+			detectContact: async () => [],
+		} as never);
+		const threads = new ThreadWriterService(db, match, stamp);
+		await threads.store(
+			{
+				id: `sync-${threadMailboxId}`,
+				userId: actorUserId,
+				source: "miab",
+				mailboxId: threadMailboxId,
+				status: "IDLE",
+				cursor: null,
+				lastSyncedAt: null,
+				lastError: null,
+				retryAfter: null,
+				attemptCount: 0,
+				leaseOwner: null,
+				lastErrorCode: null,
+				autoCreate: false,
+				createdAt: new Date(),
+				updatedAt: new Date(),
+			} as never,
+			{ mailbox: "outreach@iblmedia.com", origin: "miab" },
+			{
+				rfcMessageId: `<reply-${threadDraftId}@icloud.com>`,
+				rootId: outbound?.messageId ?? "",
+				subject: "Re: Controlled thread test",
+				from: { email: threadRecipient, name: "Ihsan Bal" },
+				recipients: [
+					{
+						email: "outreach@iblmedia.com",
+						name: "IBL Media Team",
+						kind: "to",
+					},
+				],
+				body: "Interested in hearing more.",
+				sentAt: new Date("2026-01-05T11:00:00Z"),
+			},
+			await threads.context(),
+		);
+
+		expect(
+			await db.emailThread.findMany({
+				where: { mailboxId: threadMailboxId },
+				select: { messageCount: true, contactId: true, leadId: true },
+			}),
+		).toEqual([
+			{ messageCount: 2, contactId: threadContactId, leadId: threadLeadId },
+		]);
+		expect(
+			await db.lead.findMany({
+				where: { contactId: threadContactId },
+				select: { stage: true, attentionState: true, handoffReason: true },
+			}),
+		).toEqual([
+			{ stage: "REPLIED", attentionState: "NONE", handoffReason: null },
+		]);
+		expect(
+			await db.followUpPlan.findUnique({
+				where: { id: threadPlanId },
+				select: { status: true, cancellationReason: true },
+			}),
+		).toEqual({
+			status: "CANCELLED",
+			cancellationReason: "Inbound reply received",
+		});
 	});
 });
