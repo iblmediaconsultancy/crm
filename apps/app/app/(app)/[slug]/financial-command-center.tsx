@@ -30,7 +30,11 @@ function money(value: number | null, currency: string) {
 	return value === null ? "Not available" : formatMoneyCompact(value, currency);
 }
 
-export function FinancialCommandCenter() {
+export function FinancialCommandCenter({
+	compact = false,
+}: {
+	compact?: boolean;
+}) {
 	const trpc = useTRPC();
 	const workspaceUrl = useWorkspaceUrl();
 	const [scope] = useQueryState("scope", overviewParsers.scope);
@@ -46,21 +50,35 @@ export function FinancialCommandCenter() {
 		placeholderData: (previous) => previous,
 	});
 
+	if (query.error) {
+		return <FinanceUnavailable workspaceUrl={workspaceUrl} />;
+	}
 	if (!query.data) return null;
-	return <CommandCenterContent data={query.data} workspaceUrl={workspaceUrl} />;
+	return (
+		<CommandCenterContent
+			data={query.data}
+			workspaceUrl={workspaceUrl}
+			compact={compact}
+		/>
+	);
 }
 
 function CommandCenterContent({
 	data,
 	workspaceUrl,
+	compact,
 }: {
 	data: CommandCenter;
 	workspaceUrl: (path: string) => string;
+	compact: boolean;
 }) {
 	const { financial, pipeline, goal, reportingCurrency, team } = data;
 	const nextMilestone = goal?.milestones.find(
 		(milestone) => new Date(milestone.date) > new Date(),
 	);
+	if (compact) {
+		return <CompactCommandCenter data={data} workspaceUrl={workspaceUrl} />;
+	}
 	return (
 		<div className="flex flex-col gap-6">
 			<StatGroup>
@@ -281,6 +299,109 @@ function CommandCenterContent({
 				</Link>
 			) : null}
 		</div>
+	);
+}
+
+function FinanceUnavailable({
+	workspaceUrl,
+}: {
+	workspaceUrl: (path: string) => string;
+}) {
+	return (
+		<Card>
+			<CardHeader>
+				<CardTitle>Finance</CardTitle>
+				<CardDescription>
+					The finance feed is temporarily unavailable, so no figures are shown.
+				</CardDescription>
+			</CardHeader>
+			<CardContent>
+				<Link
+					href={workspaceUrl("/settings/finance")}
+					className="text-sm underline underline-offset-4 hover:no-underline"
+				>
+					Open finance settings
+				</Link>
+			</CardContent>
+		</Card>
+	);
+}
+
+function CompactCommandCenter({
+	data,
+	workspaceUrl,
+}: {
+	data: CommandCenter;
+	workspaceUrl: (path: string) => string;
+}) {
+	const { financial, pipeline, goal, reportingCurrency } = data;
+	const money = (value: number | null) =>
+		value === null
+			? "Not available"
+			: formatMoneyCompact(value, reportingCurrency);
+	const targetDescription = goal
+		? goal.progress === null
+			? "Target set · progress restricted"
+			: `${formatPercent(goal.progress)} of ${money(goal.targetCents)} target`
+		: "No MRR target set";
+
+	return (
+		<section aria-label="Essential business numbers" className="grid gap-3">
+			<StatGroup>
+				<StatCard
+					label="Current MRR"
+					value={money(financial.currentMrrCents)}
+					description={targetDescription}
+				/>
+				<StatCard
+					label="Revenue this month"
+					value={money(financial.monthlyRevenueCents)}
+					description="Collected from active client relationships"
+				/>
+				<StatCard
+					label="Outstanding payments"
+					value={money(financial.outstandingCents)}
+					description="Open client balances"
+				/>
+				<StatCard
+					label="Estimated profit"
+					value={money(financial.estimatedProfitCents)}
+					description={
+						financial.estimatedMargin === null
+							? "Margin not available"
+							: `${formatPercent(financial.estimatedMargin)} estimated margin`
+					}
+				/>
+				<StatCard
+					label="Weighted pipeline"
+					value={money(pipeline.weightedMrrCents)}
+					description={
+						pipeline.openDeals === 0
+							? "No open opportunities"
+							: `${formatCount(pipeline.warmOpportunities, "warm opportunity")} · ${formatCount(pipeline.openDeals, "open deal")}`
+					}
+				/>
+			</StatGroup>
+			<div className="flex flex-wrap items-center justify-between gap-2 text-muted-foreground text-xs">
+				<span>All figures in {reportingCurrency}.</span>
+				<div className="flex flex-wrap gap-x-4 gap-y-1">
+					{financial.outstandingCents && financial.outstandingCents > 0 ? (
+						<Link
+							href={workspaceUrl("/operations")}
+							className="underline underline-offset-4 hover:no-underline"
+						>
+							Review payments
+						</Link>
+					) : null}
+					<Link
+						href={workspaceUrl("/settings/finance")}
+						className="underline underline-offset-4 hover:no-underline"
+					>
+						Open finance
+					</Link>
+				</div>
+			</div>
+		</section>
 	);
 }
 

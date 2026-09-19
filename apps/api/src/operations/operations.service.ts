@@ -39,6 +39,13 @@ import type {
 
 type Input<T extends z.ZodType> = z.infer<T>;
 
+const OWNER_SELECT = {
+	id: true,
+	name: true,
+	email: true,
+	image: true,
+} as const;
+
 function startOfDay(): Date {
 	const date = new Date();
 	date.setHours(0, 0, 0, 0);
@@ -547,6 +554,226 @@ export class OperationsService {
 				drafts,
 				approvals,
 				leads,
+			};
+		});
+	}
+
+	async leadById(userId: string, id: string) {
+		return this.run(userId, async (tx) => {
+			const lead = await tx.lead.findUnique({
+				where: { id },
+				select: {
+					id: true,
+					name: true,
+					status: true,
+					stage: true,
+					stageChangedAt: true,
+					priority: true,
+					originChannel: true,
+					source: true,
+					sourceKey: true,
+					nextActionAt: true,
+					nextActionTitle: true,
+					outcome: true,
+					outcomeNote: true,
+					blocker: true,
+					attentionState: true,
+					handoffReason: true,
+					handoffSummary: true,
+					handoffRecommendedAction: true,
+					handoffSuggestedResponses: true,
+					handoffAt: true,
+					handoffDeadlineAt: true,
+					ihsanTakenOverAt: true,
+					lastContactedAt: true,
+					lastRepliedAt: true,
+					parkedUntil: true,
+					lastLanguage: true,
+					needsReview: true,
+					createdAt: true,
+					updatedAt: true,
+					owner: { select: OWNER_SELECT },
+					createdBy: { select: OWNER_SELECT },
+					company: {
+						select: {
+							id: true,
+							name: true,
+							domain: true,
+							linkedinUrl: true,
+						},
+					},
+					contact: {
+						select: {
+							id: true,
+							firstName: true,
+							lastName: true,
+							email: true,
+							title: true,
+							linkedinUrl: true,
+							company: { select: { id: true, name: true } },
+							contactRoutes: {
+								where: { lifecycleState: "ACTIVE" },
+								orderBy: { updatedAt: "desc" },
+								select: {
+									id: true,
+									type: true,
+									value: true,
+									label: true,
+									visibility: true,
+									verifiedAt: true,
+								},
+							},
+						},
+					},
+					deal: {
+						select: {
+							id: true,
+							name: true,
+							stage: true,
+							amount: true,
+							currency: true,
+						},
+					},
+					activities: {
+						orderBy: [{ occurredAt: "asc" }, { createdAt: "asc" }],
+						select: {
+							id: true,
+							type: true,
+							subject: true,
+							body: true,
+							occurredAt: true,
+							createdAt: true,
+							meta: true,
+							lifecycleState: true,
+							createdBy: { select: OWNER_SELECT },
+						},
+					},
+					emailThreads: {
+						orderBy: { firstMessageAt: "asc" },
+						select: {
+							id: true,
+							subject: true,
+							firstMessageAt: true,
+							lastMessageAt: true,
+							messageCount: true,
+							messages: {
+								orderBy: { sentAt: "asc" },
+								select: {
+									id: true,
+									direction: true,
+									fromEmail: true,
+									fromName: true,
+									recipients: true,
+									subject: true,
+									snippet: true,
+									body: true,
+									sentAt: true,
+								},
+							},
+						},
+					},
+					stageHistory: {
+						orderBy: { createdAt: "asc" },
+						select: {
+							id: true,
+							fromStage: true,
+							toStage: true,
+							reason: true,
+							createdAt: true,
+							actor: { select: OWNER_SELECT },
+						},
+					},
+					tasks: {
+						orderBy: { createdAt: "asc" },
+						select: {
+							id: true,
+							title: true,
+							status: true,
+							dueAt: true,
+							completedAt: true,
+						},
+					},
+					notes: {
+						orderBy: { createdAt: "asc" },
+						select: {
+							id: true,
+							body: true,
+							createdAt: true,
+							author: { select: OWNER_SELECT },
+						},
+					},
+					meetingRequests: {
+						orderBy: { createdAt: "asc" },
+						select: {
+							id: true,
+							status: true,
+							title: true,
+							startsAt: true,
+							endsAt: true,
+							calendarId: true,
+							createdAt: true,
+						},
+					},
+				},
+			});
+
+			if (!lead) throw new NotFoundException(`No lead with id ${id}.`);
+
+			const iso = (value: Date | null) => value?.toISOString() ?? null;
+			return {
+				...lead,
+				stageChangedAt: lead.stageChangedAt.toISOString(),
+				nextActionAt: iso(lead.nextActionAt),
+				handoffAt: iso(lead.handoffAt),
+				handoffDeadlineAt: iso(lead.handoffDeadlineAt),
+				ihsanTakenOverAt: iso(lead.ihsanTakenOverAt),
+				lastContactedAt: iso(lead.lastContactedAt),
+				lastRepliedAt: iso(lead.lastRepliedAt),
+				parkedUntil: iso(lead.parkedUntil),
+				createdAt: lead.createdAt.toISOString(),
+				updatedAt: lead.updatedAt.toISOString(),
+				contact: lead.contact
+					? {
+							...lead.contact,
+							contactRoutes: lead.contact.contactRoutes.map((route) => ({
+								...route,
+								verifiedAt: iso(route.verifiedAt),
+							})),
+						}
+					: null,
+				activities: lead.activities.map((activity) => ({
+					...activity,
+					occurredAt: iso(activity.occurredAt),
+					createdAt: activity.createdAt.toISOString(),
+				})),
+				emailThreads: lead.emailThreads.map((thread) => ({
+					...thread,
+					firstMessageAt: thread.firstMessageAt.toISOString(),
+					lastMessageAt: thread.lastMessageAt.toISOString(),
+					messages: thread.messages.map((message) => ({
+						...message,
+						sentAt: message.sentAt.toISOString(),
+					})),
+				})),
+				stageHistory: lead.stageHistory.map((entry) => ({
+					...entry,
+					createdAt: entry.createdAt.toISOString(),
+				})),
+				tasks: lead.tasks.map((task) => ({
+					...task,
+					dueAt: iso(task.dueAt),
+					completedAt: iso(task.completedAt),
+				})),
+				notes: lead.notes.map((note) => ({
+					...note,
+					createdAt: note.createdAt.toISOString(),
+				})),
+				meetingRequests: lead.meetingRequests.map((request) => ({
+					...request,
+					startsAt: request.startsAt.toISOString(),
+					endsAt: request.endsAt.toISOString(),
+					createdAt: request.createdAt.toISOString(),
+				})),
 			};
 		});
 	}

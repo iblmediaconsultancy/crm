@@ -60,12 +60,9 @@ async function Summary({
 	const hasExplicitScope = Object.hasOwn(rawSearchParams, "scope");
 	const financeScope =
 		workspace.viewerRole === "admin" && !hasExplicitScope ? "everyone" : scope;
-	await Promise.all([
-		queryClient.prefetchQuery(trpc.dashboard.summary.queryOptions({ scope })),
-		queryClient.prefetchQuery(
-			trpc.finance.commandCenter.queryOptions({ scope: financeScope }),
-		),
-	]);
+	await queryClient.prefetchQuery(
+		trpc.finance.commandCenter.queryOptions({ scope: financeScope }),
+	);
 
 	return (
 		<HydrateClient>

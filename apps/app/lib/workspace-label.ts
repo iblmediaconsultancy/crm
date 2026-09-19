@@ -1,4 +1,4 @@
-import { DEFAULT_WORKSPACE_NAME } from "@crm/auth";
+const DEFAULT_WORKSPACE_NAME = "CRM";
 
 export function workspaceLabel(name: string | undefined): string {
 	const trimmed = name?.trim();

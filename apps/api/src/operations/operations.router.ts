@@ -24,6 +24,7 @@ import {
 	footballProfileInput,
 	leadCreateInput,
 	leadHandoffInput,
+	leadIdInput,
 	leadTransitionInput,
 	noteCreateInput,
 	operationsListInput,
@@ -64,6 +65,14 @@ export class OperationsRouter {
 		@Input() input: z.infer<typeof operationsListInput>,
 	) {
 		return this.operations.selectors(ctx.user.id, input);
+	}
+
+	@Query({ input: leadIdInput, meta: { permission: "crm.read" } })
+	leadById(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof leadIdInput>,
+	) {
+		return this.operations.leadById(ctx.user.id, input.id);
 	}
 	@Query({ input: operationsListInput, meta: { permission: "crm.read" } })
 	directory(

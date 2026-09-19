@@ -9,6 +9,8 @@ export const operationsListInput = z.object({
 	skip: z.number().int().min(0).max(10000).default(0),
 });
 
+export const leadIdInput = z.object({ id });
+
 export const footballProfileInput = z.object({
 	contactId: id,
 	kind: z.enum(["PLAYER", "FOOTBALL_AGENT"]),

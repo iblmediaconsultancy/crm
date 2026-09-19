@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { type Db, Prisma } from "@crm/db";
 import { OPEN_DEAL_STAGES } from "@crm/db/deal-stage";
 import { applyRate } from "@crm/db/fx";
@@ -1503,47 +1504,68 @@ export class FinanceService {
 		lostMrr: Prisma.Decimal;
 		activeClients: number;
 	}) {
-		await this.db.companyFinancialSnapshot.upsert({
-			where: {
-				currency_periodStart: {
-					currency: input.currency,
-					periodStart: input.periodStart,
-				},
-			},
-			create: {
-				periodStart: input.periodStart,
-				currency: input.currency,
-				lifecycleState: "ACTIVE",
-				recurringRevenueBase: input.totals.mrr,
-				oneOffRevenueBase: input.totals.oneOffRevenue,
-				revenueBase: input.totals.revenue,
-				directClientCostBase: input.totals.directClientCosts,
-				commissionBase: input.totals.commissions,
-				operatingCostBase: input.totals.operatingCosts,
-				estimatedProfitBase: input.totals.profit,
-				margin: input.totals.margin,
-				outstandingBase: input.totals.outstanding,
-				newMrrBase: input.newMrr.isZero() ? null : input.newMrr,
-				lostMrrBase: input.lostMrr.isZero() ? null : input.lostMrr,
-				activeClients: input.activeClients,
-				data: { capturedAt: new Date().toISOString() },
-			},
-			update: {
-				recurringRevenueBase: input.totals.mrr,
-				oneOffRevenueBase: input.totals.oneOffRevenue,
-				revenueBase: input.totals.revenue,
-				directClientCostBase: input.totals.directClientCosts,
-				commissionBase: input.totals.commissions,
-				operatingCostBase: input.totals.operatingCosts,
-				estimatedProfitBase: input.totals.profit,
-				margin: input.totals.margin,
-				outstandingBase: input.totals.outstanding,
-				newMrrBase: input.newMrr.isZero() ? null : input.newMrr,
-				lostMrrBase: input.lostMrr.isZero() ? null : input.lostMrr,
-				activeClients: input.activeClients,
-				data: { capturedAt: new Date().toISOString() },
-			},
-		});
+		const capturedAt = JSON.stringify({ capturedAt: new Date().toISOString() });
+		await this.db.$executeRaw`
+			INSERT INTO "companyFinancialSnapshot" (
+				"id",
+				"periodStart",
+				"currency",
+				"recurringRevenueBase",
+				"oneOffRevenueBase",
+				"revenueBase",
+				"directClientCostBase",
+				"commissionBase",
+				"operatingCostBase",
+				"estimatedProfitBase",
+				"margin",
+				"outstandingBase",
+				"newMrrBase",
+				"lostMrrBase",
+				"activeClients",
+				"lifecycleState",
+				"data",
+				"createdAt",
+				"updatedAt"
+			)
+			VALUES (
+				${randomUUID()},
+				${input.periodStart},
+				${input.currency},
+				${input.totals.mrr},
+				${input.totals.oneOffRevenue},
+				${input.totals.revenue},
+				${input.totals.directClientCosts},
+				${input.totals.commissions},
+				${input.totals.operatingCosts},
+				${input.totals.profit},
+				${input.totals.margin},
+				${input.totals.outstanding},
+				${input.newMrr.isZero() ? null : input.newMrr},
+				${input.lostMrr.isZero() ? null : input.lostMrr},
+				${input.activeClients},
+				'ACTIVE',
+				${capturedAt}::jsonb,
+				NOW(),
+				NOW()
+			)
+			ON CONFLICT ("currency", "periodStart")
+			WHERE "lifecycleState" = 'ACTIVE'
+			DO UPDATE SET
+				"recurringRevenueBase" = EXCLUDED."recurringRevenueBase",
+				"oneOffRevenueBase" = EXCLUDED."oneOffRevenueBase",
+				"revenueBase" = EXCLUDED."revenueBase",
+				"directClientCostBase" = EXCLUDED."directClientCostBase",
+				"commissionBase" = EXCLUDED."commissionBase",
+				"operatingCostBase" = EXCLUDED."operatingCostBase",
+				"estimatedProfitBase" = EXCLUDED."estimatedProfitBase",
+				"margin" = EXCLUDED."margin",
+				"outstandingBase" = EXCLUDED."outstandingBase",
+				"newMrrBase" = EXCLUDED."newMrrBase",
+				"lostMrrBase" = EXCLUDED."lostMrrBase",
+				"activeClients" = EXCLUDED."activeClients",
+				"data" = EXCLUDED."data",
+				"updatedAt" = NOW()
+		`;
 	}
 
 	private async assertWorkspaceUser(userId: string) {

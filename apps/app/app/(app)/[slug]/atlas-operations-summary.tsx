@@ -36,12 +36,201 @@ export function AtlasOperationsSummary({
 	const query = useQuery(trpc.operations.outreachWorkspace.queryOptions());
 
 	if (!query.data) return null;
+	if (mode === "command") {
+		return (
+			<CommandAtlasSummary data={query.data} workspaceUrl={workspaceUrl} />
+		);
+	}
 	return (
 		<AtlasOperationsSummaryContent
 			data={query.data}
 			mode={mode}
 			workspaceUrl={workspaceUrl}
 		/>
+	);
+}
+
+function CommandAtlasSummary({
+	data,
+	workspaceUrl,
+}: {
+	data: Workspace;
+	workspaceUrl: (path: string) => string;
+}) {
+	const needsIhsan = data.leads.filter(
+		(lead) => lead.attentionState === "NEEDS_IHSAN",
+	);
+	const warm = data.leads
+		.filter((lead) => ["WARM", "MEETING", "OPPORTUNITY"].includes(lead.stage))
+		.slice(0, 5);
+	const followUps = data.leads
+		.filter((lead) => lead.nextActionAt)
+		.sort(
+			(a, b) =>
+				new Date(a.nextActionAt ?? 0).getTime() -
+				new Date(b.nextActionAt ?? 0).getTime(),
+		)
+		.slice(0, 5);
+	const stageCounts = data.dailyReport.leadStageCounts;
+
+	return (
+		<div className="grid gap-4">
+			<Card>
+				<CardHeader
+					className={
+						needsIhsan.length ? "border-destructive border-l-4 pl-4" : undefined
+					}
+				>
+					<div className="flex flex-wrap items-start justify-between gap-3">
+						<div className="grid gap-1">
+							<CardTitle>NEEDS_IHSAN</CardTitle>
+							<CardDescription>
+								The decisions and serious handoffs Atlas has paused for you.
+							</CardDescription>
+						</div>
+						<Badge variant={needsIhsan.length ? "destructive" : "outline"}>
+							{needsIhsan.length} waiting
+						</Badge>
+					</div>
+				</CardHeader>
+				<CardContent>
+					{needsIhsan.length ? (
+						<div className="grid gap-2">
+							{needsIhsan.slice(0, 4).map((lead) => (
+								<div
+									key={lead.id}
+									className="grid gap-1 rounded-md border p-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
+								>
+									<div className="min-w-0">
+										<p className="truncate font-medium text-sm">{lead.name}</p>
+										<p className="truncate text-muted-foreground text-xs">
+											{lead.company?.name ?? "No company linked"} · {lead.stage}
+										</p>
+										<p className="mt-1 line-clamp-2 text-sm">
+											{lead.handoffRecommendedAction ??
+												lead.handoffSummary ??
+												"Review the handoff and choose the next action."}
+										</p>
+									</div>
+									{lead.handoffAt ? (
+										<LocalRelativeTime date={lead.handoffAt} />
+									) : null}
+								</div>
+							))}
+							{needsIhsan.length > 4 ? (
+								<Link
+									href={workspaceUrl("/outreach")}
+									className="text-sm underline underline-offset-4 hover:no-underline"
+								>
+									View all {needsIhsan.length} items in Outreach
+								</Link>
+							) : null}
+						</div>
+					) : (
+						<p className="text-muted-foreground text-sm">
+							Nothing needs your decision right now.
+						</p>
+					)}
+				</CardContent>
+			</Card>
+
+			<Card>
+				<CardHeader>
+					<div className="flex flex-wrap items-start justify-between gap-3">
+						<div className="grid gap-1">
+							<CardTitle>Atlas today</CardTitle>
+							<CardDescription>
+								Status, safety gates and persisted activity for this operating
+								day.
+							</CardDescription>
+						</div>
+						<Badge variant="outline">
+							{data.readiness.agent === "READY" ? "ACTIVE" : "PAUSED"}
+						</Badge>
+					</div>
+				</CardHeader>
+				<CardContent className="grid gap-4">
+					<div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+						<StatusRow label="Bridge" value={data.readiness.agent} />
+						<StatusRow label="Mailbox" value={data.readiness.mailbox} />
+						<StatusRow label="Delivery" value={data.readiness.delivery} />
+						<StatusRow
+							label="Live outreach"
+							value="DISABLED"
+							detail="Human approval required"
+						/>
+					</div>
+					<div className="grid grid-cols-2 gap-3 border-t pt-4 sm:grid-cols-3 lg:grid-cols-6">
+						<Metric label="Emails sent" value={data.dailyReport.outreachSent} />
+						<Metric label="Replies" value={data.dailyReport.outreachReplies} />
+						<Metric label="Meetings" value={data.dailyReport.meetings} />
+						<Metric label="New leads" value={stageCounts.NEW ?? 0} />
+						<Metric label="Warm" value={stageCounts.WARM ?? 0} />
+						<Metric label="Blocked" value={needsIhsan.length} />
+					</div>
+					<div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t pt-3 text-xs">
+						<span className="text-muted-foreground">
+							Cold quota:{" "}
+							{data.dailyReport.quota
+								? `${data.dailyReport.quota.coldEmailSent}/${data.dailyReport.quota.coldEmailLimit}`
+								: "not set"}
+						</span>
+						{data.atlasDailyReport ? (
+							<span className="text-muted-foreground">
+								Last report: {data.atlasDailyReport.summary}
+							</span>
+						) : null}
+						<Link
+							href={workspaceUrl("/outreach")}
+							className="underline underline-offset-4 hover:no-underline"
+						>
+							Open Atlas activity
+						</Link>
+					</div>
+				</CardContent>
+			</Card>
+
+			{followUps.length || warm.length ? (
+				<div className="grid gap-4 @3xl/page-content:grid-cols-2">
+					{followUps.length ? (
+						<QueueCard
+							title="Upcoming follow-ups"
+							description="The next actions already recorded."
+							empty="No follow-ups are scheduled."
+						>
+							{followUps.map((lead) => (
+								<QueueRow
+									key={lead.id}
+									title={lead.name}
+									detail={lead.nextActionTitle ?? "Next action not described"}
+									meta={
+										lead.nextActionAt ? (
+											<LocalRelativeTime date={lead.nextActionAt} />
+										) : null
+									}
+								/>
+							))}
+						</QueueCard>
+					) : null}
+					{warm.length ? (
+						<QueueCard
+							title="Warm opportunities"
+							description="The conversations closest to a human decision."
+							empty="No warm opportunities yet."
+						>
+							{warm.map((lead) => (
+								<QueueRow
+									key={lead.id}
+									title={lead.name}
+									detail={lead.nextActionTitle ?? "No next action recorded"}
+									meta={attentionLabels[lead.attentionState] ?? lead.stage}
+								/>
+							))}
+						</QueueCard>
+					) : null}
+				</div>
+			) : null}
+		</div>
 	);
 }
 
