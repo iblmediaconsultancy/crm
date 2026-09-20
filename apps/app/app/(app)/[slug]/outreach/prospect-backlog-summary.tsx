@@ -106,12 +106,15 @@ export function ProspectBacklogSummary() {
 											{candidate.rank}. {candidate.item.displayName}
 										</span>
 										<span className="text-muted-foreground text-xs">
-											{candidate.language} · {candidate.routeQuality}
+											{candidate.language} · {candidate.routeVisibility.toLowerCase()} · {candidate.priority.toLowerCase()} · research {candidate.researchConfidence.toLowerCase()}
 										</span>
 									</div>
 									<p className="text-muted-foreground text-xs">
 										{candidate.item.agencyName ?? "No agency"} ·{" "}
 										{candidate.whyNow}
+									</p>
+									<p className="text-muted-foreground text-xs">
+										{candidate.ctaApproach} · route {candidate.routeConfidence.toLowerCase()}
 									</p>
 								</div>
 							))}

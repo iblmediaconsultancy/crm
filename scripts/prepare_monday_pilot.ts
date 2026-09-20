@@ -3,6 +3,14 @@ import { db } from "../packages/db/src/index";
 
 const filename = "IBL_Football_CRM_Master_Deduplicated_Expanded(1).xlsx";
 const supportedLanguages = new Set(["English", "Dutch", "Turkish"]);
+const senderSignature = "Kind regards,\n\nIhsan | Founder, IBL Media Consultancy\niblmedia.com\nWhatsApp: +31 6 27833383";
+
+function withSenderSignature(body: string, language: string): string {
+	const signature = language === "Dutch"
+		? "Met vriendelijke groet,\n\nIhsan | Founder, IBL Media Consultancy\niblmedia.com\nWhatsApp: +31 6 27833383"
+		: senderSignature;
+	return `${body.replace(/\n\n(?:Best,|Groet,)\nIhsan$/, "")}\n\n${signature}`;
+}
 
 const candidates = [
 	{
@@ -13,7 +21,7 @@ const candidates = [
 		playerEntryPoint: "Anan Khalaili is the timely public reference; ask whether he or another current BG Sports player is the appropriate entry point.",
 		language: "English",
 		proposedSubject: "Anan Khalaili's next chapter",
-		proposedBody: "Hi Boaz,\n\nUnion Saint-Gilloise has just announced Anan Khalaili's move to Crystal Palace after two seasons in Brussels. That is a timely moment in an Israeli-to-Premier League story, and it made me wonder whether there is a useful media angle around the next chapter rather than only the transfer itself.\n\nI work with IBL Media Consultancy on focused football media and player positioning. Would a short conversation be useful to see whether Khalaili, or another BG Sports player with a current news moment, is the right fit for that kind of work?\n\nBest,\nIhsan",
+		proposedBody: "Hi BG Sports team,\n\nAnan Khalaili's move from Union Saint-Gilloise to Crystal Palace is a strong next step in his career. The media around a move like that usually has a short window to work well, especially across matchday content and the player's own channels.\n\nWe already manage media for players across Premier League, international and emerging-talent environments. How do you currently handle that for Khalaili, or is another BG Sports player the better place to start?\n\nBest,\nIhsan",
 		sourceUrls: ["https://www.footballagencies.com/football-agency/bg-sports-management-by-boaz-goren/", "https://rusg.brussels/en/news/khalaili-makes-move-premier-league"],
 	},
 	{
@@ -24,7 +32,7 @@ const candidates = [
 		playerEntryPoint: "Alexandre Penetra is the specific public hook; confirm with Diogo whether he is the right current client for an IBL conversation.",
 		language: "English",
 		proposedSubject: "Alexandre Penetra's AZ chapter",
-		proposedBody: "Hi Diogo,\n\nAZ's decision to extend Alexandre Penetra through 2029, followed by his late winner against Excelsior this season, caught my attention. It is a strong moment in a player's story because the contract commitment and the match impact are happening together.\n\nI work with IBL Media Consultancy on focused football media and player positioning. Would it be useful to compare notes on whether Penetra, or another SPORTSBLOOM player with a timely story, is the right place for a selective media idea?\n\nBest,\nIhsan",
+		proposedBody: "Hi SPORTSBLOOM team,\n\nAlexandre Penetra has the kind of AZ moment that is worth keeping visible: a new contract through 2029 and a late winner this season.\n\nFor players in that position, we usually help keep matchday content, Stories and the longer-term account direction consistent. Does Alexandre already have that covered, or would another player in the SPORTSBLOOM roster be more relevant?\n\nBest,\nIhsan",
 		sourceUrls: ["https://www.footballagencies.com/football-agency/sportsbloom/", "https://www.az.nl/inside-az/nieuws/2025/december/penetra-langer-in-alkmaar", "https://www.az.nl/inside-az/nieuws/2026/februari/liveblog-excelsior-rotterdam-az"],
 	},
 	{
@@ -35,7 +43,7 @@ const candidates = [
 		playerEntryPoint: "Kaiky Naves is the timely public reference; ask Diogo whether Naves or another Web Soccer player is the appropriate entry point.",
 		language: "English",
 		proposedSubject: "Kaiky Naves after the Alverca loan",
-		proposedBody: "Hi Diogo,\n\nFC Alverca has announced that Kaiky Naves' loan has ended after 34 appearances and three goals, with the defender returning to his parent club. That makes the next step in his European story a clear moment to communicate carefully, without assuming what the next move will be.\n\nI work with IBL Media Consultancy on focused football media and player positioning. Would you be open to a short conversation about whether Naves, or another Web Soccer player at a similar transition point, is worth exploring now?\n\nBest,\nIhsan",
+		proposedBody: "Hi Web Soccer team,\n\nKaiky Naves is coming off a 34-game spell at Alverca and is now back with his parent club. That is a useful point to make sure the story does not go quiet between one decision and the next.\n\nAt IBL, that can mean account management, matchday content and a few well-timed Stories rather than a heavy campaign. Does Naves already have that support, or is another Web Soccer player at a similar moment a better conversation?\n\nBest,\nIhsan",
 		sourceUrls: ["https://www.footballagencies.com/football-agency/web-soccer-do-brasil/", "https://www.alvercasad.pt/kaiky-naves-termina-emprestimo/"],
 	},
 	{
@@ -46,7 +54,7 @@ const candidates = [
 		playerEntryPoint: "Jorge Sánchez is the specific public hook; use the primary Eduardo route only and do not also contact the second shared route.",
 		language: "English",
 		proposedSubject: "Jorge Sánchez and the September Mexico window",
-		proposedBody: "Hi Eduardo,\n\nAtlas FC announced this week that Jorge Sánchez has been called into Mexico's September-October international window, shortly after beginning a new chapter with the club. That combination of a fresh club setting and an immediate national-team moment feels like a timely story to handle with care.\n\nI work with IBL Media Consultancy on focused football media and player positioning. Would a short conversation be useful to see whether Sánchez, or another PROMOFUT player with a current moment, is the right fit for a selective media idea?\n\nBest,\nIhsan",
+		proposedBody: "Hi PROMOFUT team,\n\nJorge Sánchez has a new Atlas chapter and an immediate Mexico window around it. That gives his channels something real to work with now, not just another transfer announcement.\n\nWe already manage media for players across Premier League, international and emerging-talent environments. How are you handling Jorge's content around this window, and who would be the right person to speak with if support is useful?\n\nBest,\nIhsan",
 		sourceUrls: ["https://www.footballagencies.com/football-agency/promofut/", "https://www.atlasfc.com.mx/post/de-la-academia-al-tricolor-jorge-sanchez-el-primer-seleccionado-nacional-de-la-era-grupo-prodi-en-atlas-fc"],
 	},
 	{
@@ -57,30 +65,30 @@ const candidates = [
 		playerEntryPoint: "Álvaro Carreras is the specific public hook; ask Ginés whether Carreras or another Be Loyal player is the appropriate conversation.",
 		language: "English",
 		proposedSubject: "Álvaro Carreras after the Rayo win",
-		proposedBody: "Hi Ginés,\n\nÁlvaro Carreras' performance against Rayo Vallecano on 12 September stood out: he won the penalty for Real Madrid's opener and scored the second in a 4-1 Bernabéu win. That is the kind of current moment where a player's story can be shaped beyond the match report, if the timing is right.\n\nI work with IBL Media Consultancy on focused football media and player positioning. Would you be open to a short conversation about whether Carreras, or another Be Loyal player, has a story worth developing now?\n\nBest,\nIhsan",
+		proposedBody: "Hi Be Loyal team,\n\nÁlvaro Carreras winning the penalty and scoring against Rayo Vallecano on 12 September was a very clear public moment. The useful question is what happens to that attention after the match.\n\nWe help with the practical side: matchday content, captions, Stories and keeping the account moving when a player is in the spotlight. Does Carreras already have that support, or is another Be Loyal player more relevant?\n\nBest,\nIhsan",
 		sourceUrls: ["https://www.footballagencies.com/football-agency/be-loyal-by-gines-carvajal/", "https://www.realmadrid.com/es-ES/noticias/futbol/primer-equipo/actualidad/carreras-destaco-la-intensidad-desde-el-primer-minuto-12-09-2026"],
 	},
 	{
-		key: "AGT-0277",
-		routeQuality: "Exact workbook route jim@solution.as; named agency mailbox among multiple shared routes; contact-once required",
-		researchSummary: "Identity is consistent with Jim Solbakken and Player Solution. The agency profile describes a Nordic-to-Europe focus. Molde announced on 13 July 2026 that Mathias Fjørtoft Løvik returned home after 18 months abroad, with a possible immediate return debut. Confidence: medium-high.",
-		whyNow: "Løvik's return to Molde after time abroad is a concrete re-entry moment for a Nordic player pathway. Because Player Solution has several shared routes, the pilot uses one named route only and asks Jim to identify the right story.",
-		playerEntryPoint: "Mathias Fjørtoft Løvik is the specific public hook; use jim@solution.as only and do not duplicate the message to other Player Solution routes.",
+		key: "AGT-0426",
+		routeQuality: "Exact workbook route office@beckster.international; shared Beckster agency route; contact-once required",
+		researchSummary: "Identity is consistent with Mikkel Beck and Beckster International. The staged route is a published professional agency inbox. HB Køge officially announced on 2 September 2026 that Fisnik Isaki joined from B.93 on a three-year contract; current public Beckster activity identifies the move as part of its player work. Confidence: medium-high.",
+		whyNow: "Isaki's three-year move to HB Køge is a fresh agency-and-player moment, with the first match and new club story still current. It gives Beckster a concrete reason to discuss media support while leaving room for another player in its wider roster.",
+		playerEntryPoint: "Fisnik Isaki is the current public hook; use the shared Beckster inbox once and ask whether he or another player is the better starting point.",
 		language: "English",
-		proposedSubject: "Mathias Løvik's return to Molde",
-		proposedBody: "Hi Jim,\n\nMolde announced in July that Mathias Fjørtoft Løvik had returned home after 18 months abroad, describing the move as the next step after his experience in Italy and Turkey. That kind of return gives a player story a real before-and-after moment, rather than just another transfer update.\n\nI work with IBL Media Consultancy on focused football media and player positioning. Would it be useful to compare notes on whether Løvik, or another Player Solution player at a similar transition point, is worth exploring now?\n\nBest,\nIhsan",
-		sourceUrls: ["https://www.footballagencies.com/football-agency/jim-solbakken-player-solution/", "https://www.moldefk.no/nyheter/mathias-lovik-vender-hjem-til-molde", "https://www.trabzonspor.org.tr/tr/haberler/kamuoyuna-duyuru-61-13-07-2026"],
+		proposedSubject: "Fisnik Isaki's new chapter at HB Køge",
+		proposedBody: "Hi Beckster team,\n\nFisnik Isaki has just joined HB Køge on a three-year deal after his time at B.93. A new club and a fresh role give his channels something specific to build around now.\n\nAt IBL, we help with the practical side of those moments: social media management, matchday content and keeping the account consistent as the player settles in. Is Fisnik already covered, or is another Beckster player more relevant?\n\nBest,\nIhsan",
+		sourceUrls: ["https://www.footballagencies.com/football-agency/beckster-international-sarl/", "https://www.hbkoge.dk/nyhed/hb-koege-koeber-isaki-fri-af-b-93/", "https://www.sotwe.com/hashtag/becksterinternational?lang=en"],
 	},
 	{
-		key: "AGT-0376",
-		routeQuality: "Exact workbook route mark.volders@profimanagement.be; named agency contact; shared route; contact-once required",
-		researchSummary: "Identity is consistent with Mark Volders and Profi-Management. The agency profile identifies a Belgian goalkeeper-specialist focus and lists Senne Lammens. Manchester United's current profile says Lammens is in Belgium's 2026 World Cup squad, while the Premier League named him 2025/26 Transfer of the Season after 32 appearances and eight clean sheets. Confidence: high for the player event, medium for agency affiliation.",
-		whyNow: "Lammens' award-winning first United season and World Cup status give a goalkeeper-specific story a clear current platform. That is a stronger opening than a generic introduction to a specialist agency.",
-		playerEntryPoint: "Senne Lammens is the specific public hook; ask Mark whether Lammens or another Profi goalkeeper is the appropriate conversation.",
+		key: "AGY-0166",
+		routeQuality: "Exact workbook route gestifute@gestifute.com; shared Gestifute agency route; contact-once required",
+		researchSummary: "The staged agency record identifies Gestifute by Jorge Mendes and two shared professional inboxes. Gestifute sources identify Mateus Fernandes as a current client; Tottenham officially announced his move from West Ham on 2 July 2026 and included him in its submitted 2026/27 Premier League squad on 3 September. Confidence: medium-high.",
+		whyNow: "Fernandes is now entering a first Tottenham Premier League season after a major move from West Ham, making the club transition and ongoing content around it genuinely current. The hook opens naturally to another Gestifute player without treating the shared inbox as a personal address.",
+		playerEntryPoint: "Mateus Fernandes is the specific public hook; use gestifute@gestifute.com once and ask whether another Gestifute player is more relevant for media support.",
 		language: "English",
-		proposedSubject: "Senne Lammens after his United breakthrough",
-		proposedBody: "Hi Mark,\n\nSenne Lammens' first Manchester United season has created a very specific media moment: the Premier League named him its 2025/26 Transfer of the Season, and United list him in Belgium's 2026 World Cup squad. For a goalkeeper, that combination of performance, recognition and international visibility is unusually clear.\n\nI work with IBL Media Consultancy on focused football media and player positioning. Would you be open to a short conversation about whether Lammens, or another Profi goalkeeper, is the right fit for a selective story now?\n\nBest,\nIhsan",
-		sourceUrls: ["https://www.footballagencies.com/football-agency/profi-management-agency/", "https://www.manutd.com/en/teams/mens-team/senne-lammens", "https://www.premierleague.com/en/news/4672279/lammens-named-barclays-transfer-of-the-season"],
+		proposedSubject: "Mateus Fernandes' first Tottenham season",
+		proposedBody: "Hi Gestifute team,\n\nMateus Fernandes has moved from West Ham into his first Tottenham season, with the club now listing him in its 2026/27 Premier League squad. That is the point where the story shifts from transfer announcement to the player's day-to-day presence at a new club.\n\nWe already manage media for players across Premier League, international and emerging-talent environments. How is Mateus' media handled around this transition, or is another Gestifute player the better place to start?\n\nBest,\nIhsan",
+		sourceUrls: ["https://www.footballagencies.com/football-agency/gestifute-by-jorge-mendes/", "https://www.footballagencies.com/news/jorge-mendes-and-gestifute-deliver-record-ps85m-mateus-fernandes-move-to-tottenham/", "https://www.tottenhamhotspur.com/news/1076042/mateus-fernandes-signs", "https://www.tottenhamhotspur.com/news/1088296/squad-confirmed-for-202627"],
 	},
 	{
 		key: "AGT-0407",
@@ -90,10 +98,135 @@ const candidates = [
 		playerEntryPoint: "Andreas Skov Olsen is the specific public hook; use Michael's route once and confirm whether he is the right current player for an IBL conversation.",
 		language: "English",
 		proposedSubject: "Andreas Skov Olsen's Rangers chapter",
-		proposedBody: "Hi Michael,\n\nRangers' announcement of Andreas Skov Olsen's move from Wolfsburg into Scottish football, followed by his involvement across the season, caught my attention. It is a useful moment in a Denmark-to-new-market story because the move itself is now becoming a body of work rather than just a transfer headline.\n\nI work with IBL Media Consultancy on focused football media and player positioning. Would a short conversation be useful to see whether Skov Olsen, or another MB Sports player crossing into a new market, is the right fit for a selective media idea?\n\nBest,\nIhsan",
+		proposedBody: "Hi MB Sports team,\n\nAndreas Skov Olsen's move into Scottish football is now more than a transfer announcement; Rangers is becoming his day-to-day setting.\n\nThat is where consistent matchday content and personal-brand work can help. How do you currently handle that for Andreas, or is another MB Sports player the more useful place to begin?\n\nBest,\nIhsan",
 		sourceUrls: ["https://www.footballagencies.com/football-agency/mb-sports-aps/", "https://dbu.dk/uddannelse/football-agents/list-of-registered-football-agents/", "https://www.rangers.co.uk/article/rangers-announce-signing-of-andreas-skov-olsen/1RceWlSmRl4hnxDKH7plXw", "https://www.rangers.co.uk/article/team-news-rohl-makes-three-changes-for-old-firm/5mnVgoICLQI1UqoZW24nnR"],
 	},
+	{
+		key: "AGT-0010",
+		routeQuality: "Exact workbook route brazil@rocnation.com; shared Roc Nation route linked to multiple people and the agency; contact-once required",
+		researchSummary: "Identity is consistent with Alan Redmond and Roc Nation Sports. The current workbook route is a shared Brazil mailbox. Olympique Lyonnais published the transfer of Malick Fofana to Sunderland on 2 September 2026; the move is also covered in current agency reporting. Confidence: medium-high for the transfer, medium for the route-to-person relationship.",
+		whyNow: "Fofana's deadline-window move to Sunderland is a fresh change of club and market. It gives Roc Nation a concrete reason to discuss how the player's public story is handled after the announcement, while the shared route requires one route-level contact only.",
+		playerEntryPoint: "Malick Fofana is the specific public hook; use the shared Brazil route once and ask whether Alan or another Roc Nation colleague is the right person.",
+		language: "English",
+		proposedSubject: "Malick Fofana after the Sunderland move",
+		proposedBody: "Hi Roc Nation Brazil team,\n\nMalick Fofana's move from Lyon to Sunderland on 2 September is a clear change of club, league and country. It is also the point where the story needs to continue beyond the announcement.\n\nIBL supports the content and personal-brand side of those transitions. Could you point me to the person handling Fofana's media, or let me know if another Roc Nation player is more relevant?\n\nBest,\nIhsan",
+		sourceUrls: ["https://finance.ol.fr/en/recent-announcements/", "https://fifa.sportsagentinstitute.com/en/blog/roc-nation-sports", "https://www.rocnation.com/news/category/news/"],
+	},
+	{
+		key: "AGT-0059",
+		routeQuality: "Exact workbook route mail@esselsports.nl; shared agency route linked to multiple people and the agency; contact-once required",
+		researchSummary: "Identity is consistent with Bas Schothorst and Essel Sports Management. Essel's own site lists Melle Roede among its players, while AZ announced his return in June 2026 and his Jong AZ starting debut followed in August. Confidence: high for the player and club events, medium for the route-to-person relationship.",
+		whyNow: "Roede's return to AZ after a development season away, followed by his first Jong AZ start, is a clean Dutch-language development story. The shared mailbox should be contacted once at agency level, not separately for every linked person.",
+		playerEntryPoint: "Melle Roede is the specific public hook; ask whether Roede has dedicated support or whether another Essel player is more relevant.",
+		language: "Dutch",
+		proposedSubject: "Melle Roede terug bij AZ",
+		proposedBody: "Hoi Essel-team,\n\nMelle Roede is terug bij AZ, heeft bijgetekend tot 2028 en is inmiddels gestart bij Jong AZ. Dat is een mooie volgende stap in zijn ontwikkeling.\n\nBij IBL helpen we spelers met social media, content rond wedstrijddagen en personal branding wanneer zo'n moment zich aandient. Heeft Melle daar al vaste ondersteuning voor, of is een andere Essel-speler op dit moment relevanter?\n\nGroet,\nIhsan",
+		sourceUrls: ["https://www.esselsports.nl/portfolio/melle-roede/", "https://www.az.nl/inside-az/nieuws/2026/juni/melle-roede-keert-terug-bij-az", "https://az.nl/inside-az/nieuws/2026/augustus/liveblog-jong-az-mvv-maastricht"],
+	},
 ] as const;
+
+const reviewMetadata = {
+	"AGT-0072": {
+		routeVisibility: "SHARED",
+		routeConfidence: "MEDIUM",
+		researchConfidence: "HIGH",
+		credibilityAngle: "IBL already manages media across Premier League, international and emerging-talent environments; the route-level message keeps the proof relevant without naming an unrelated player.",
+		ctaApproach: "Ask how the BG Sports team handles media for Khalaili, or whether another roster player is the better starting point.",
+		ctaWhy: "The route is shared, so the message addresses the team and leaves room for internal routing across the wider roster.",
+		followUpApproach: "Follow-up one asks whether media is handled centrally or by individual players; follow-up two is a short close-the-loop note.",
+		priority: "HIGH",
+	},
+	"AGT-0140": {
+		routeVisibility: "SHARED",
+		routeConfidence: "MEDIUM",
+		researchConfidence: "HIGH",
+		credibilityAngle: "Concrete matchday content, Stories and account direction around a contract and first-team performance moment.",
+		ctaApproach: "Ask whether Penetra is already supported or whether another SPORTSBLOOM player is more relevant.",
+		ctaWhy: "The shared route should be easy to forward internally rather than assuming the recipient personally owns Penetra's media.",
+		followUpApproach: "Follow-up one asks who currently owns Penetra's media; follow-up two offers a short example of how IBL would structure a contract-and-matchday cycle.",
+		priority: "HIGH",
+	},
+	"AGT-0141": {
+		routeVisibility: "SHARED",
+		routeConfidence: "MEDIUM",
+		researchConfidence: "HIGH",
+		credibilityAngle: "Practical account management, matchday content and Stories that keep a player visible between clubs without speculating about the next move.",
+		ctaApproach: "Ask whether Naves is covered or whether another Web Soccer player at a similar point is more useful.",
+		ctaWhy: "The route is shared and the transition is only the entry point into a wider roster conversation.",
+		followUpApproach: "Follow-up one adds a practical observation about keeping content consistent between clubs; follow-up two closes politely without pressure.",
+		priority: "HIGH",
+	},
+	"AGT-0155": {
+		routeVisibility: "SHARED",
+		routeConfidence: "MEDIUM",
+		researchConfidence: "HIGH",
+		credibilityAngle: "IBL manages the content and personal-brand layer around club changes and international-team windows.",
+		ctaApproach: "Ask how the PROMOFUT team handles Jorge's media and who should receive a short overview if useful.",
+		ctaWhy: "The route is shared, so the CTA prioritizes correct internal routing over forcing a meeting.",
+		followUpApproach: "Follow-up one asks whether PROMOFUT has an internal media lead for Jorge; follow-up two offers to send a brief outline rather than forcing a meeting.",
+		priority: "HIGH",
+	},
+	"AGT-0217": {
+		routeVisibility: "SHARED",
+		routeConfidence: "MEDIUM",
+		researchConfidence: "HIGH",
+		credibilityAngle: "IBL handles the practical content layer after high-visibility performances: matchday content, captions, Stories and account rhythm.",
+		ctaApproach: "Ask whether Carreras is already supported or whether another Be Loyal player is more relevant.",
+		ctaWhy: "The shared route and current match hook make a support check more natural than a generic sales call.",
+		followUpApproach: "Follow-up one references the difference between one strong match and a repeatable content rhythm; follow-up two is a light close-the-loop note.",
+		priority: "HIGH",
+	},
+	"AGT-0426": {
+		routeVisibility: "SHARED",
+		routeConfidence: "MEDIUM",
+		researchConfidence: "MEDIUM",
+		credibilityAngle: "IBL provides practical social media management, matchday content and account consistency around a player's move into a new club.",
+		ctaApproach: "Ask whether Isaki is already covered or whether another Beckster player is more relevant.",
+		ctaWhy: "The shared agency route is addressed at team level and keeps the conversation open beyond the named player.",
+		followUpApproach: "Follow-up one asks who handles Isaki's media internally; follow-up two offers a short overview and then parks the route.",
+		priority: "HIGH",
+	},
+	"AGY-0166": {
+		routeVisibility: "SHARED",
+		routeConfidence: "MEDIUM",
+		researchConfidence: "HIGH",
+		credibilityAngle: "IBL already manages media across Premier League, international and emerging-talent environments, relevant to a player starting a major new club chapter.",
+		ctaApproach: "Ask how Mateus Fernandes' media is handled at Tottenham or whether another Gestifute player is more relevant.",
+		ctaWhy: "The route is a shared agency inbox, so the CTA asks for the right internal entry point rather than assuming a personal owner.",
+		followUpApproach: "Follow-up one asks who owns Fernandes' media internally; follow-up two offers a short outline and then parks the shared route.",
+		priority: "HIGH",
+	},
+	"AGT-0407": {
+		routeVisibility: "SHARED",
+		routeConfidence: "MEDIUM",
+		researchConfidence: "HIGH",
+		credibilityAngle: "IBL supports the ongoing matchday content and personal-brand work that follows a move into a new football market.",
+		ctaApproach: "Ask how the MB Sports team handles that for Skov Olsen, or whether another player is more pressing.",
+		ctaWhy: "The shared route is addressed at agency level and deliberately leaves room for a better roster entry point.",
+		followUpApproach: "Follow-up one asks whether the current priority is matchday content or longer-term personal-brand work; follow-up two is a short close.",
+		priority: "NORMAL",
+	},
+	"AGT-0010": {
+		routeVisibility: "SHARED",
+		routeConfidence: "MEDIUM",
+		researchConfidence: "MEDIUM",
+		credibilityAngle: "IBL supports the content and personal-brand layer after a cross-border transfer, with the focus on continuity after the announcement.",
+		ctaApproach: "Ask the Roc Nation Brazil team to route the message to Fofana's media contact or suggest another relevant player.",
+		ctaWhy: "The route is shared and not verified as Alan's personal inbox, so internal routing is the safe, useful next step.",
+		followUpApproach: "Follow-up one asks for the correct internal contact; follow-up two briefly offers to send a one-page outline and then parks the route.",
+		priority: "HIGH",
+	},
+	"AGT-0059": {
+		routeVisibility: "SHARED",
+		routeConfidence: "MEDIUM",
+		researchConfidence: "HIGH",
+		credibilityAngle: "Nederlandstalige ondersteuning voor social media, wedstrijddag-content en personal branding rond een volgende ontwikkelingsstap.",
+		ctaApproach: "Vraag of Roede al vaste ondersteuning heeft, of dat een andere Essel-speler relevanter is.",
+		ctaWhy: "De route is een gedeelde inbox, dus de tekst kan intern worden doorgestuurd zonder aan te nemen dat Bas dit persoonlijk beheert.",
+		followUpApproach: "Follow-up one asks who handles Roede's media internally; follow-up two is a short Dutch close-the-loop message.",
+		priority: "NORMAL",
+	},
+} as const;
 
 async function main() {
 	const batch = await db.prospectSourceBatch.findFirst({
@@ -111,7 +244,24 @@ async function main() {
 		create: { id: randomUUID(), batchId: batch.id, name: "Monday controlled pilot", status: "PREPARED" },
 		update: { status: "PREPARED", preparedAt: new Date() },
 	});
+	for (const replacedKey of ["AGT-0277", "AGT-0376"]) {
+		const replacedItem = await db.prospectBacklogItem.findUnique({
+			where: { batchId_canonicalKey: { batchId: batch.id, canonicalKey: replacedKey } },
+		});
+		if (replacedItem) {
+			await db.prospectBacklogItem.update({
+				where: { id: replacedItem.id },
+				data: {
+					state: "NOT_REVIEWED",
+					lastProcessedAt: new Date(),
+					reviewReason: "Removed from the Monday pilot because the current hook was not fresh enough; returned to staged backlog for later review.",
+				},
+			});
+		}
+	}
+	await db.prospectBacklogPilotItem.deleteMany({ where: { pilotId: pilot.id, rank: { in: [6, 7] } } });
 	for (const [index, candidate] of candidates.entries()) {
+		const metadata = reviewMetadata[candidate.key];
 		const item = await db.prospectBacklogItem.findUnique({
 			where: { batchId_canonicalKey: { batchId: batch.id, canonicalKey: candidate.key } },
 		});
@@ -129,15 +279,25 @@ async function main() {
 			create: {
 				id: randomUUID(), pilotId: pilot.id, itemId: item.id, rank: index + 1,
 				routeQuality: candidate.routeQuality, researchSummary: candidate.researchSummary,
+				routeVisibility: metadata.routeVisibility, routeConfidence: metadata.routeConfidence,
+				researchConfidence: metadata.researchConfidence,
 				whyNow: candidate.whyNow, playerEntryPoint: candidate.playerEntryPoint,
+				credibilityAngle: metadata.credibilityAngle, ctaApproach: metadata.ctaApproach,
+				ctaWhy: metadata.ctaWhy, followUpApproach: metadata.followUpApproach,
 				language: candidate.language, proposedSubject: candidate.proposedSubject,
-				proposedBody: candidate.proposedBody, sourceUrls: candidate.sourceUrls, status: "PREPARED",
+				priority: metadata.priority,
+				proposedBody: withSenderSignature(candidate.proposedBody, candidate.language), sourceUrls: candidate.sourceUrls, status: "PREPARED",
 			},
 			update: {
 				rank: index + 1, routeQuality: candidate.routeQuality, researchSummary: candidate.researchSummary,
+				routeVisibility: metadata.routeVisibility, routeConfidence: metadata.routeConfidence,
+				researchConfidence: metadata.researchConfidence,
 				whyNow: candidate.whyNow, playerEntryPoint: candidate.playerEntryPoint,
+				credibilityAngle: metadata.credibilityAngle, ctaApproach: metadata.ctaApproach,
+				ctaWhy: metadata.ctaWhy, followUpApproach: metadata.followUpApproach,
 				language: candidate.language, proposedSubject: candidate.proposedSubject,
-				proposedBody: candidate.proposedBody, sourceUrls: candidate.sourceUrls, status: "PREPARED",
+				priority: metadata.priority,
+				proposedBody: withSenderSignature(candidate.proposedBody, candidate.language), sourceUrls: candidate.sourceUrls, status: "PREPARED",
 			},
 		});
 	}

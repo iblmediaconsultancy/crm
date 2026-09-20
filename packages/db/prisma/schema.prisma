@@ -2150,10 +2150,18 @@ model ProspectBacklogPilotItem {
 	item               ProspectBacklogItem    @relation(fields: [itemId], references: [id], onDelete: Cascade)
 	rank               Int
 	routeQuality       String
+	routeVisibility    ContactRouteVisibility @default(PRIVATE)
+	routeConfidence    String
 	researchSummary    String
+	researchConfidence String
 	whyNow             String
 	playerEntryPoint   String?
+	credibilityAngle   String
+	ctaApproach        String
+	ctaWhy             String
+	followUpApproach   String
 	language           String
+	priority           LeadPriority @default(NORMAL)
 	proposedSubject    String
 	proposedBody       String
 	sourceUrls         Json
