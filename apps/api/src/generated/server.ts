@@ -503,6 +503,8 @@ const appRouter = t.router({
       .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OperationsRouter["overview"]>>),
     outreachWorkspace: publicProcedure
       .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OperationsRouter["outreachWorkspace"]>>),
+    prospectBacklog: publicProcedure
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OperationsRouter["prospectBacklog"]>>),
     selectors: publicProcedure
       .input(operationsListInput)
       .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OperationsRouter["selectors"]>>),

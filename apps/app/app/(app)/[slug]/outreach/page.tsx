@@ -12,6 +12,7 @@ import { AtlasOperationsSummary } from "../atlas-operations-summary";
 import { OperationsDirectory } from "../operations/directory-client";
 import { OutreachLifecycleControls } from "./outreach-lifecycle-controls";
 import { OutreachWorkbench } from "./outreach-workbench";
+import { ProspectBacklogSummary } from "./prospect-backlog-summary";
 export const instant = false;
 
 export const metadata: Metadata = { title: "Outreach" };
@@ -30,6 +31,7 @@ export default async function Page() {
 			</PageShellHeader>
 			<PageShellContent>
 				<AtlasOperationsSummary mode="outreach" />
+				<ProspectBacklogSummary />
 				<details className="group rounded-lg border">
 					<summary className="cursor-pointer list-none px-4 py-3 font-medium text-sm hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:px-6">
 						Manual approval workspace

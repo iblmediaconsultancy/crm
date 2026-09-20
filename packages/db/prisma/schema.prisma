@@ -1668,13 +1668,46 @@ enum RepresentationStatus {
 }
 
 enum ContactRouteType {
-  EMAIL
-  PHONE
+	EMAIL
+	PHONE
   WHATSAPP
   LINKEDIN
   INSTAGRAM
   SOCIAL
-  OTHER
+	OTHER
+}
+
+enum ProspectBacklogState {
+	NOT_REVIEWED
+	REVIEWED
+	NEEDS_ENRICHMENT
+	ELIGIBLE
+	READY
+	CONTACTED
+	REPLIED
+	WARM
+	WITH_IHSAN
+	PARKED
+	SUPPRESSED
+	INVALID
+}
+
+enum ProspectBacklogEntityType {
+	PERSON
+	COMPANY
+	PLAYER
+}
+
+enum ProspectBacklogMatchStatus {
+	NONE
+	EXACT_EMAIL
+	EXACT_LINKEDIN
+	CRM_NAME_REVIEW
+}
+
+enum ProspectBacklogPilotStatus {
+	PREPARED
+	REVIEW_REQUIRED
 }
 
 enum ContactRouteVisibility {
@@ -1988,7 +2021,147 @@ model SharedRoutePolicy {
   @@index([routeId, revokedAt])
   @@index([granteeContactId])
   @@index([granteeCompanyId])
-  @@map("sharedRoutePolicy")
+	@@map("sharedRoutePolicy")
+}
+
+model ProspectSourceBatch {
+	id            String   @id @default(cuid())
+	filename      String
+	sourceHash    String
+	importedAt    DateTime @default(now())
+	sourceSheetCount Int
+	recordCount   Int
+	provenance    Json
+	records      ProspectSourceRecord[]
+	backlogItems  ProspectBacklogItem[]
+	routes        ProspectBacklogRoute[]
+	pilots        ProspectBacklogPilot[]
+	createdAt     DateTime @default(now())
+
+	@@unique([filename, sourceHash])
+	@@index([importedAt])
+	@@map("prospectSourceBatch")
+}
+
+model ProspectSourceRecord {
+	id               String                    @id @default(cuid())
+	batchId          String
+	batch            ProspectSourceBatch      @relation(fields: [batchId], references: [id], onDelete: Cascade)
+	sourceSheet      String
+	originalEntityId String?
+	originalRowId    Int
+	rawValues        Json
+	provenance       Json
+	backlogItemId    String?
+	backlogItem      ProspectBacklogItem?     @relation(fields: [backlogItemId], references: [id], onDelete: SetNull)
+	createdAt        DateTime                  @default(now())
+
+	@@unique([batchId, sourceSheet, originalRowId])
+	@@index([batchId, sourceSheet])
+	@@index([backlogItemId])
+	@@map("prospectSourceRecord")
+}
+
+model ProspectBacklogItem {
+	id                    String                    @id @default(cuid())
+	batchId               String
+	batch                 ProspectSourceBatch      @relation(fields: [batchId], references: [id], onDelete: Cascade)
+	canonicalKey          String
+	entityType            ProspectBacklogEntityType
+	displayName           String
+	normalizedName        String?
+	normalizedEmail       String?
+	normalizedLinkedInUrl String?
+	agencyName            String?
+	state                 ProspectBacklogState     @default(NOT_REVIEWED)
+	matchStatus           ProspectBacklogMatchStatus @default(NONE)
+	matchCandidateIds     Json?
+	reviewReason          String?
+	crmContactId          String?
+	crmCompanyId          String?
+	crmLeadId             String?
+	lastProcessedAt       DateTime?
+	nextReviewAt          DateTime?
+	sourceRecords         ProspectSourceRecord[]
+	routes                ProspectBacklogRouteLink[]
+	pilotItems            ProspectBacklogPilotItem[]
+	createdAt             DateTime                  @default(now())
+	updatedAt             DateTime                  @updatedAt
+
+	@@unique([batchId, canonicalKey])
+	@@index([batchId, state])
+	@@index([batchId, normalizedEmail])
+	@@index([batchId, normalizedLinkedInUrl])
+	@@index([batchId, matchStatus])
+	@@map("prospectBacklogItem")
+}
+
+model ProspectBacklogRoute {
+	id               String                    @id @default(cuid())
+	batchId          String
+	batch            ProspectSourceBatch      @relation(fields: [batchId], references: [id], onDelete: Cascade)
+	type             ContactRouteType
+	value            String
+	normalizedValue  String
+	isShared         Boolean                   @default(false)
+	contactOnce      Boolean                   @default(true)
+	linkedEntityKeys  Json?
+	items            ProspectBacklogRouteLink[]
+	createdAt        DateTime                  @default(now())
+	updatedAt        DateTime                  @updatedAt
+
+	@@unique([batchId, type, normalizedValue])
+	@@index([batchId, isShared])
+	@@map("prospectBacklogRoute")
+}
+
+model ProspectBacklogRouteLink {
+	id        String                @id @default(cuid())
+	routeId   String
+	route     ProspectBacklogRoute  @relation(fields: [routeId], references: [id], onDelete: Cascade)
+	itemId    String
+	item      ProspectBacklogItem   @relation(fields: [itemId], references: [id], onDelete: Cascade)
+	relationship String?
+
+	@@unique([routeId, itemId])
+	@@index([itemId])
+	@@map("prospectBacklogRouteLink")
+}
+
+model ProspectBacklogPilot {
+	id          String                    @id @default(cuid())
+	batchId     String
+	batch       ProspectSourceBatch      @relation(fields: [batchId], references: [id], onDelete: Cascade)
+	name        String
+	status      ProspectBacklogPilotStatus @default(PREPARED)
+	preparedAt  DateTime                  @default(now())
+	items       ProspectBacklogPilotItem[]
+	createdAt   DateTime                  @default(now())
+
+	@@unique([batchId, name])
+	@@map("prospectBacklogPilot")
+}
+
+model ProspectBacklogPilotItem {
+	id                 String                  @id @default(cuid())
+	pilotId            String
+	pilot              ProspectBacklogPilot   @relation(fields: [pilotId], references: [id], onDelete: Cascade)
+	itemId             String
+	item               ProspectBacklogItem    @relation(fields: [itemId], references: [id], onDelete: Cascade)
+	rank               Int
+	routeQuality       String
+	researchSummary    String
+	whyNow             String
+	playerEntryPoint   String?
+	language           String
+	proposedSubject    String
+	proposedBody       String
+	sourceUrls         Json
+	status             ProspectBacklogPilotStatus @default(PREPARED)
+
+	@@unique([pilotId, itemId])
+	@@unique([pilotId, rank])
+	@@map("prospectBacklogPilotItem")
 }
 
 model Representation {

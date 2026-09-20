@@ -424,6 +424,114 @@ export class OperationsService {
 		});
 	}
 
+	async prospectBacklog(userId: string) {
+		return this.run(userId, async (tx) => {
+			const batch = await tx.prospectSourceBatch.findFirst({
+				orderBy: { importedAt: "desc" },
+				select: {
+					id: true,
+					filename: true,
+					sourceHash: true,
+					importedAt: true,
+					sourceSheetCount: true,
+					recordCount: true,
+					createdAt: true,
+				},
+			});
+			if (!batch) return null;
+			const [
+				stateRows,
+				canonicalProspects,
+				sourceRecords,
+				sharedRoutes,
+				ambiguous,
+				pilot,
+			] = await Promise.all([
+				tx.prospectBacklogItem.groupBy({
+					by: ["state"],
+					where: { batchId: batch.id },
+					_count: { _all: true },
+				}),
+				tx.prospectBacklogItem.count({ where: { batchId: batch.id } }),
+				tx.prospectSourceRecord.count({ where: { batchId: batch.id } }),
+				tx.prospectBacklogRoute.count({
+					where: { batchId: batch.id, isShared: true },
+				}),
+				tx.prospectBacklogItem.count({
+					where: { batchId: batch.id, matchStatus: "CRM_NAME_REVIEW" },
+				}),
+				tx.prospectBacklogPilot.findFirst({
+					where: { batchId: batch.id },
+					orderBy: { preparedAt: "desc" },
+					select: {
+						name: true,
+						status: true,
+						preparedAt: true,
+						items: {
+							orderBy: { rank: "asc" },
+							select: {
+								rank: true,
+								item: {
+									select: {
+										id: true,
+										displayName: true,
+										entityType: true,
+										state: true,
+										agencyName: true,
+									},
+								},
+								routeQuality: true,
+								whyNow: true,
+								playerEntryPoint: true,
+								language: true,
+								proposedSubject: true,
+								proposedBody: true,
+								status: true,
+							},
+						},
+					},
+				}),
+			]);
+			const stateCounts: Record<string, number> = Object.fromEntries(
+				[
+					"NOT_REVIEWED",
+					"REVIEWED",
+					"NEEDS_ENRICHMENT",
+					"ELIGIBLE",
+					"READY",
+					"CONTACTED",
+					"REPLIED",
+					"WARM",
+					"WITH_IHSAN",
+					"PARKED",
+					"SUPPRESSED",
+					"INVALID",
+				].map((state) => [
+					state,
+					stateRows.find((row) => row.state === state)?._count._all ?? 0,
+				]),
+			);
+			const remainingBacklog =
+				(stateCounts.NOT_REVIEWED ?? 0) +
+				(stateCounts.REVIEWED ?? 0) +
+				(stateCounts.NEEDS_ENRICHMENT ?? 0) +
+				(stateCounts.ELIGIBLE ?? 0) +
+				(stateCounts.READY ?? 0);
+			return {
+				batch,
+				counts: {
+					canonicalProspects,
+					sourceRecords,
+					sharedRoutes,
+					ambiguousIdentities: ambiguous,
+					remainingBacklog,
+				},
+				stateCounts,
+				pilot,
+			};
+		});
+	}
+
 	async selectors(userId: string, input: Input<typeof operationsListInput>) {
 		return this.run(userId, async (tx) => {
 			const term = input.q.trim();

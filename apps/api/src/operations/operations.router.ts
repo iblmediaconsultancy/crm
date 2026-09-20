@@ -59,6 +59,11 @@ export class OperationsRouter {
 		return this.operations.outreachWorkspace(ctx.user.id);
 	}
 
+	@Query({ meta: { permission: "crm.read" } })
+	prospectBacklog(@Ctx() ctx: AuthedTrpcContext) {
+		return this.operations.prospectBacklog(ctx.user.id);
+	}
+
 	@Query({ input: operationsListInput, meta: { permission: "crm.read" } })
 	selectors(
 		@Ctx() ctx: AuthedTrpcContext,
