@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { db } from "../packages/db/src/index";
 import { findProtectedPlayerMatches } from "../packages/db/src/player-protection";
 
@@ -210,21 +209,22 @@ async function writeEnrichment(
 			: {}),
 	};
 	await db.prospectBacklogEnrichment.create({
-		id: randomUUID(),
-		itemId: item.id,
-		runLabel,
-		status: decision.kind === "SUPPRESS" ? "REJECTED" : "DEFERRED",
-		routeConfidence,
-		researchConfidence: decision.sourceUrls.length > 0 ? "LOW-MEDIUM" : "LOW",
-		commercialPriority: commercialScore >= 13 ? "HIGH" : "NORMAL",
-		commercialScore,
-		tier: "C",
-		notes:
-			"Fast eligibility completed from staged identity, route, CRM safety and provenance checks.",
-		missingReason:
-			decision.kind === "PASS" ? "DEEP_RESEARCH_REQUIRED" : decision.reason,
-		sourceUrls: decision.sourceUrls,
-		evidence,
+		data: {
+			itemId: item.id,
+			runLabel,
+			status: decision.kind === "SUPPRESS" ? "REJECTED" : "DEFERRED",
+			routeConfidence,
+			researchConfidence: decision.sourceUrls.length > 0 ? "LOW-MEDIUM" : "LOW",
+			commercialPriority: commercialScore >= 13 ? "HIGH" : "NORMAL",
+			commercialScore,
+			tier: "C",
+			notes:
+				"Fast eligibility completed from staged identity, route, CRM safety and provenance checks.",
+			missingReason:
+				decision.kind === "PASS" ? "DEEP_RESEARCH_REQUIRED" : decision.reason,
+			sourceUrls: decision.sourceUrls,
+			evidence,
+		},
 	});
 	await db.prospectBacklogItem.update({
 		where: { id: item.id },
