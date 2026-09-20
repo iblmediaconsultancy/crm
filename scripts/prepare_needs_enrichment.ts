@@ -173,11 +173,15 @@ async function decide(
 		route.routeUsage === "CONTACT_ONCE" &&
 		reservedRoutes.has(route.normalizedValue)
 	)
-		return { kind: "DEFER", reason: "SHARED_ROUTE_CONTACT_ONCE", sourceUrls };
-	if (route.mailboxType === "UNKNOWN")
-		return { kind: "DEFER", reason: "MAILBOX_TYPE_UNCONFIRMED", sourceUrls };
-	if (sourceUrls.length === 0)
-		return { kind: "DEFER", reason: "RESEARCH_SOURCE_MISSING", sourceUrls };
+		return { kind: "DEFER", reason: "SHARED_ROUTE_NON_PRIMARY", sourceUrls };
+
+	const domain = item.normalizedEmail.split("@")[1] ?? "";
+	const freeMail =
+		/^(gmail|googlemail|hotmail|icloud|live|outlook|proton|protonmail|wanadoo|yahoo)\./.test(
+			domain,
+		);
+	if (freeMail && route.mailboxType !== "PERSONAL")
+		return { kind: "DEFER", reason: "ROUTE_DOMAIN_UNSAFE", sourceUrls };
 
 	return { kind: "PASS", route, sourceUrls };
 }
