@@ -1,4 +1,10 @@
-import { type Db, Prisma } from "@crm/db";
+import {
+	type Db,
+	isProtectedPlayerContact,
+	normalizePlayerName,
+	PROTECTED_PLAYER_STATE,
+	Prisma,
+} from "@crm/db";
 import { withPrincipal } from "@crm/db/security";
 import {
 	BadRequestException,
@@ -27,6 +33,8 @@ import type {
 	noteCreateInput,
 	operationsListInput,
 	organizationProfileInput,
+	playerProtectionActiveInput,
+	playerProtectionCreateInput,
 	proofCreateInput,
 	proposalCreateInput,
 	representationCreateInput,
@@ -447,6 +455,7 @@ export class OperationsService {
 				reusableRoutes,
 				mailboxTypeRows,
 				ambiguous,
+				protectedPlayers,
 				pilot,
 			] = await Promise.all([
 				tx.prospectBacklogItem.groupBy({
@@ -470,6 +479,21 @@ export class OperationsService {
 				tx.prospectBacklogItem.count({
 					where: { batchId: batch.id, matchStatus: "CRM_NAME_REVIEW" },
 				}),
+				tx.prospectPlayerProtection.findMany({
+					where: { active: true, state: PROTECTED_PLAYER_STATE },
+					orderBy: { displayName: "asc" },
+					select: {
+						id: true,
+						displayName: true,
+						normalizedName: true,
+						reason: true,
+						source: true,
+						contactId: true,
+						aliases: {
+							select: { displayName: true, normalizedName: true },
+						},
+					},
+				}),
 				tx.prospectBacklogPilot.findFirst({
 					where: { batchId: batch.id },
 					orderBy: { preparedAt: "desc" },
@@ -481,6 +505,16 @@ export class OperationsService {
 							orderBy: { rank: "asc" },
 							select: {
 								rank: true,
+								routeId: true,
+								route: {
+									select: {
+										type: true,
+										value: true,
+										normalizedValue: true,
+										mailboxType: true,
+										routeUsage: true,
+									},
+								},
 								item: {
 									select: {
 										id: true,
@@ -539,6 +573,22 @@ export class OperationsService {
 				(stateCounts.NEEDS_ENRICHMENT ?? 0) +
 				(stateCounts.ELIGIBLE ?? 0) +
 				(stateCounts.READY ?? 0);
+			const protectedPilotItems =
+				pilot?.items.filter(
+					(item) =>
+						item.playerEntryPoint &&
+						protectedPlayers.some((player) => {
+							const normalized = normalizePlayerName(
+								item.playerEntryPoint ?? "",
+							);
+							return [
+								player.normalizedName,
+								...player.aliases.map((alias) => alias.normalizedName),
+							].some(
+								(name) => normalized === name || normalized.includes(name),
+							);
+						}),
+				) ?? [];
 			return {
 				batch,
 				counts: {
@@ -553,8 +603,130 @@ export class OperationsService {
 					remainingBacklog,
 				},
 				stateCounts,
+				protectedPlayers,
+				protectedPilotItems: protectedPilotItems.map((item) => ({
+					rank: item.rank,
+					name: item.item.displayName,
+					playerEntryPoint: item.playerEntryPoint,
+					state: item.item.state,
+					status: item.status,
+				})),
 				pilot,
 			};
+		});
+	}
+
+	async playerProtections(userId: string) {
+		return this.run(userId, (tx) =>
+			tx.prospectPlayerProtection.findMany({
+				orderBy: [{ active: "desc" }, { displayName: "asc" }],
+				select: {
+					id: true,
+					displayName: true,
+					normalizedName: true,
+					state: true,
+					active: true,
+					reason: true,
+					source: true,
+					contactId: true,
+					aliases: {
+						select: { displayName: true, normalizedName: true },
+					},
+					createdAt: true,
+					updatedAt: true,
+				},
+			}),
+		);
+	}
+
+	async upsertPlayerProtection(
+		userId: string,
+		input: Input<typeof playerProtectionCreateInput>,
+	) {
+		const normalizedName = normalizePlayerName(input.displayName);
+		if (!normalizedName)
+			throw new BadRequestException("Player name is required.");
+		return this.run(userId, async (tx) => {
+			if (input.contactId) {
+				const player = await tx.footballPlayer.findUnique({
+					where: { contactId: input.contactId },
+					select: { contactId: true },
+				});
+				if (!player)
+					throw new BadRequestException(
+						"Player protection may only link to a football player contact.",
+					);
+			}
+			const protection = await tx.prospectPlayerProtection.upsert({
+				where: { normalizedName },
+				create: {
+					normalizedName,
+					displayName: input.displayName,
+					state: PROTECTED_PLAYER_STATE,
+					active: true,
+					reason: input.reason ?? null,
+					source: input.source ?? "IHSAN_MANAGED",
+					contactId: input.contactId ?? null,
+				},
+				update: {
+					displayName: input.displayName,
+					state: PROTECTED_PLAYER_STATE,
+					active: true,
+					reason: input.reason ?? null,
+					source: input.source ?? "IHSAN_MANAGED",
+					contactId: input.contactId ?? null,
+				},
+			});
+			await tx.domainAuditEvent.create({
+				data: {
+					actorUserId: userId,
+					action: "PLAYER_PROTECTION_UPSERTED",
+					entityType: "PLAYER",
+					entityId: protection.id,
+					outcome: "SUCCESS",
+					metadata: {
+						displayName: protection.displayName,
+						active: protection.active,
+						state: protection.state,
+					},
+				},
+			});
+			return protection;
+		});
+	}
+
+	async setPlayerProtectionActive(
+		userId: string,
+		input: Input<typeof playerProtectionActiveInput>,
+	) {
+		return this.run(userId, async (tx) => {
+			const protection = await tx.prospectPlayerProtection.findUnique({
+				where: { id: input.id },
+				select: { id: true },
+			});
+			if (!protection)
+				throw new NotFoundException("Player protection not found.");
+			const updated = await tx.prospectPlayerProtection.update({
+				where: { id: input.id },
+				data: { active: input.active },
+			});
+			await tx.domainAuditEvent.create({
+				data: {
+					actorUserId: userId,
+					action: input.active
+						? "PLAYER_PROTECTION_ACTIVATED"
+						: "PLAYER_PROTECTION_DEACTIVATED",
+					entityType: "PLAYER",
+					entityId: updated.id,
+					outcome: "SUCCESS",
+					metadata: {
+						displayName: updated.displayName,
+						active: updated.active,
+						state: updated.state,
+					},
+				},
+			});
+			return updated;
 		});
 	}
 
@@ -1350,6 +1522,23 @@ export class OperationsService {
 
 	async createLead(userId: string, input: Input<typeof leadCreateInput>) {
 		return this.run(userId, async (tx) => {
+			if (input.contactId) {
+				const contact = await tx.contact.findUnique({
+					where: { id: input.contactId },
+					select: { id: true, firstName: true, lastName: true },
+				});
+				if (
+					contact &&
+					(await isProtectedPlayerContact(
+						tx,
+						contact.id,
+						`${contact.firstName} ${contact.lastName ?? ""}`,
+					))
+				)
+					throw new BadRequestException(
+						"Protected players cannot be created as new outreach leads.",
+					);
+			}
 			const ownerUserId =
 				(await this.roleOf(tx, userId)) === "contributor"
 					? userId

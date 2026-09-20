@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+	assertPreparedPlayerAllowed,
 	classifyProspectBacklogRoute,
 	db,
 	validatePreparedOutreach,
@@ -32,7 +33,7 @@ const candidates = [
 		language: "English",
 		proposedSubject: "Anan Khalaili's next chapter",
 		proposedBody:
-			"Hi BG Sports team,\n\nAnan Khalaili's move from Union Saint-Gilloise to Crystal Palace is a strong next step in his career. The media around a move like that usually has a short window to work well, especially across matchday content and the player's own channels.\n\nWe already manage media for players across Premier League, international and emerging-talent environments. How do you currently handle that for Khalaili, or is another BG Sports player the better place to start?\n\nBest,\nIhsan",
+			"Hi Boaz,\n\nAnan Khalaili's move from Union Saint-Gilloise to Crystal Palace is a strong next step in his career. The media around a move like that usually has a short window to work well, especially across matchday content and the player's own channels.\n\nWe already manage media for players across Premier League, international and emerging-talent environments. How do you currently handle that for Khalaili, or is another BG Sports player the better place to start?\n\nBest,\nIhsan",
 		sourceUrls: [
 			"https://www.footballagencies.com/football-agency/bg-sports-management-by-boaz-goren/",
 			"https://rusg.brussels/en/news/khalaili-makes-move-premier-league",
@@ -446,6 +447,7 @@ async function main() {
 			sourceUrls: [...candidate.sourceUrls],
 		});
 		if (!quality.valid) throw new Error(`${candidate.key}: ${quality.reason}`);
+		await assertPreparedPlayerAllowed(db, [candidate.playerEntryPoint]);
 		await db.prospectBacklogItem.update({
 			where: { id: item.id },
 			data: {
@@ -461,6 +463,7 @@ async function main() {
 				id: randomUUID(),
 				pilotId: pilot.id,
 				itemId: item.id,
+				routeId: route.route.id,
 				rank: index + 1,
 				routeQuality: candidate.routeQuality,
 				researchSummary: candidate.researchSummary,
@@ -491,6 +494,7 @@ async function main() {
 				status: "PREPARED",
 			},
 			update: {
+				routeId: route.route.id,
 				rank: index + 1,
 				routeQuality: candidate.routeQuality,
 				researchSummary: candidate.researchSummary,

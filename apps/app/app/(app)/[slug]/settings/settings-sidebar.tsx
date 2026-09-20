@@ -20,6 +20,7 @@ const ITEMS: SettingsNavItem[] = [
 	{ title: "Mailbox", href: `${ROOT}/mailbox` },
 	{ title: "Connections", href: `${ROOT}/connections` },
 	{ title: "Provider Status", href: `${ROOT}/providers` },
+	{ title: "Protected players", href: `${ROOT}/protected-players` },
 	{ title: "Financials", href: `${ROOT}/finance` },
 ];
 

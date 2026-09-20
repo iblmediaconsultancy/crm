@@ -1,4 +1,4 @@
-import { db, Prisma } from "@crm/db";
+import { db, isProtectedPlayerContact, Prisma } from "@crm/db";
 import { withPrincipal } from "@crm/db/security";
 import { hasUnsupportedOutcomeClaim } from "./atlas-playbook";
 import type { PurposeContext } from "./session-purpose";
@@ -106,8 +106,8 @@ export async function listAtlasOutreachQueue(ctx: PurposeContext) {
 	return withPrincipal(
 		db,
 		{ userId: ATLAS_OPERATOR_ID, kind: "service" },
-		async (tx) =>
-			tx.lead.findMany({
+		async (tx) => {
+			const leads = await tx.lead.findMany({
 				where: {
 					stage: { in: ["NEW", "READY"] },
 					attentionState: "NONE",
@@ -115,7 +115,7 @@ export async function listAtlasOutreachQueue(ctx: PurposeContext) {
 					contact: { lifecycleState: "ACTIVE", outreachState: "ALLOWED" },
 				},
 				orderBy: [{ priority: "desc" }, { nextActionAt: "asc" }],
-				take: 20,
+				take: 100,
 				select: {
 					id: true,
 					name: true,
@@ -128,6 +128,7 @@ export async function listAtlasOutreachQueue(ctx: PurposeContext) {
 							id: true,
 							firstName: true,
 							lastName: true,
+							playerProfile: { select: { contactId: true } },
 							email: true,
 							title: true,
 							company: { select: { name: true } },
@@ -139,7 +140,22 @@ export async function listAtlasOutreachQueue(ctx: PurposeContext) {
 						},
 					},
 				},
-			}),
+			});
+			const eligible: typeof leads = [];
+			for (const lead of leads) {
+				if (
+					lead.contact?.playerProfile &&
+					(await isProtectedPlayerContact(
+						tx,
+						lead.contact.id,
+						`${lead.contact.firstName} ${lead.contact.lastName ?? ""}`,
+					))
+				)
+					continue;
+				eligible.push(lead);
+			}
+			return eligible.slice(0, 20);
+		},
 	);
 }
 
@@ -189,6 +205,8 @@ export async function sendAtlasEmail(ctx: PurposeContext, input: AtlasInput) {
 						contact: {
 							select: {
 								id: true,
+								firstName: true,
+								lastName: true,
 								lifecycleState: true,
 								outreachState: true,
 								email: true,
@@ -223,6 +241,14 @@ export async function sendAtlasEmail(ctx: PurposeContext, input: AtlasInput) {
 				)
 			)
 				throw new Error("Lead contact is not eligible for outreach.");
+			if (
+				await isProtectedPlayerContact(
+					tx,
+					lead.contact.id,
+					`${lead.contact.firstName} ${lead.contact.lastName ?? ""}`,
+				)
+			)
+				throw new Error("Protected players cannot be prospecting targets.");
 			if (!mailbox)
 				throw new Error(
 					"A verified mailbox is required as the outbound envelope.",

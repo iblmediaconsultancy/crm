@@ -1,5 +1,5 @@
 import { sendSystemEmail } from "@crm/auth";
-import { ActivityType, type Db } from "@crm/db";
+import { ActivityType, type Db, isProtectedPlayerContact } from "@crm/db";
 import { withPrincipal } from "@crm/db/security";
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import { InjectDatabase } from "../database/database.constants";
@@ -219,7 +219,13 @@ export class PostgresJobWorkerService {
 									type: true,
 									normalizedValue: true,
 									contact: {
-										select: { id: true, lifecycleState: true, companyId: true },
+										select: {
+											id: true,
+											firstName: true,
+											lastName: true,
+											lifecycleState: true,
+											companyId: true,
+										},
 									},
 								},
 							},
@@ -232,10 +238,18 @@ export class PostgresJobWorkerService {
 								select: { status: true },
 							})
 						: null;
+					const protectedPlayer = draft.recipientRoute?.contact
+						? await isProtectedPlayerContact(
+								tx,
+								draft.recipientRoute.contact.id,
+								`${draft.recipientRoute.contact.firstName} ${draft.recipientRoute.contact.lastName ?? ""}`,
+							)
+						: false;
 					if (
 						draft.status !== "QUEUED" ||
 						draft.recipientRoute?.type !== "EMAIL" ||
 						draft.recipientRoute.contact?.lifecycleState !== "ACTIVE" ||
+						protectedPlayer ||
 						consent?.status === "DO_NOT_CONTACT"
 					) {
 						await tx.outboundDelivery.update({
@@ -244,7 +258,9 @@ export class PostgresJobWorkerService {
 								status: "CANCELLED",
 								leaseOwner: null,
 								leasedUntil: null,
-								lastErrorCode: "OUTBOUND_CANCELLED_BY_POLICY",
+								lastErrorCode: protectedPlayer
+									? "OUTBOUND_PROTECTED_PLAYER"
+									: "OUTBOUND_CANCELLED_BY_POLICY",
 							},
 						});
 						await tx.draft.update({

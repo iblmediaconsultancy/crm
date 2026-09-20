@@ -439,6 +439,7 @@ model Contact {
   meetingRequests       MeetingRequest[]
   fieldValues           FieldValue[]
   playerProfile         FootballPlayer?
+  playerProtections     ProspectPlayerProtection[] @relation("PlayerProtectionContact")
   footballAgentProfile  FootballAgent?
   contactRoutes         ContactRoute[]
   sharedRoutePolicies   SharedRoutePolicy[]
@@ -1706,8 +1707,20 @@ enum ProspectBacklogMatchStatus {
 }
 
 enum ProspectBacklogPilotStatus {
-	PREPARED
-	REVIEW_REQUIRED
+  PREPARED
+  REVIEW_REQUIRED
+}
+
+enum ProspectBacklogEnrichmentStatus {
+  COMPLETED
+  DEFERRED
+  REJECTED
+}
+
+enum ProspectBacklogTier {
+  A
+  B
+  C
 }
 
 enum ContactRouteVisibility {
@@ -1952,6 +1965,42 @@ model FootballPlayer {
   @@map("footballPlayer")
 }
 
+enum ProspectPlayerProtectionState {
+  DO_NOT_PROSPECT_PLAYER
+}
+
+model ProspectPlayerProtection {
+  id             String                          @id @default(cuid())
+  normalizedName String                          @unique
+  displayName    String
+  state          ProspectPlayerProtectionState   @default(DO_NOT_PROSPECT_PLAYER)
+  active         Boolean                         @default(true)
+  reason         String?
+  source         String?
+  contactId      String?
+  contact        Contact?                        @relation("PlayerProtectionContact", fields: [contactId], references: [id], onDelete: SetNull)
+  aliases        ProspectPlayerProtectionAlias[]
+  createdAt      DateTime                        @default(now())
+  updatedAt      DateTime                        @updatedAt
+
+  @@index([active, state])
+  @@index([contactId])
+  @@map("prospectPlayerProtection")
+}
+
+model ProspectPlayerProtectionAlias {
+  id             String                   @id @default(cuid())
+  protectionId   String
+  protection     ProspectPlayerProtection @relation(fields: [protectionId], references: [id], onDelete: Cascade)
+  displayName    String
+  normalizedName String                   @unique
+  source         String?
+  createdAt      DateTime                 @default(now())
+
+  @@index([protectionId])
+  @@map("prospectPlayerProtectionAlias")
+}
+
 model FootballAgent {
   contactId      String   @id
   contact        Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
@@ -2106,9 +2155,18 @@ model ProspectBacklogItem {
 	crmLeadId             String?
 	lastProcessedAt       DateTime?
 	nextReviewAt          DateTime?
+	lastEnrichedAt        DateTime?
+	routeConfidence       String?
+	researchConfidence    String?
+	commercialPriority    LeadPriority?
+	commercialScore       Int?
+	tier                  ProspectBacklogTier?
+	enrichmentNotes       String?
+	enrichmentEvidence    Json?
 	sourceRecords         ProspectSourceRecord[]
 	routes                ProspectBacklogRouteLink[]
 	pilotItems            ProspectBacklogPilotItem[]
+	enrichments           ProspectBacklogEnrichment[]
 	createdAt             DateTime                  @default(now())
 	updatedAt             DateTime                  @updatedAt
 
@@ -2117,7 +2175,33 @@ model ProspectBacklogItem {
 	@@index([batchId, normalizedEmail])
 	@@index([batchId, normalizedLinkedInUrl])
 	@@index([batchId, matchStatus])
+	@@index([batchId, tier, commercialPriority])
 	@@map("prospectBacklogItem")
+}
+
+model ProspectBacklogEnrichment {
+	id                  String                           @id @default(cuid())
+	itemId              String
+	item                ProspectBacklogItem              @relation(fields: [itemId], references: [id], onDelete: Cascade)
+	runLabel            String
+	status              ProspectBacklogEnrichmentStatus
+	routeConfidence     String?
+	researchConfidence  String?
+	commercialPriority  LeadPriority?
+	commercialScore     Int?
+	tier                ProspectBacklogTier?
+	playerEntryPoint    String?
+	hookType            ProspectBacklogHookType?
+	whyNow              String?
+	notes               String?
+	missingReason       String?
+	sourceUrls          Json?
+	evidence            Json?
+	createdAt           DateTime                         @default(now())
+
+	@@index([itemId, createdAt])
+	@@index([runLabel, status])
+	@@map("prospectBacklogEnrichment")
 }
 
 model ProspectBacklogRoute {
@@ -2132,6 +2216,7 @@ model ProspectBacklogRoute {
 	routeUsage           ProspectBacklogRouteUsage      @default(CONTACT_ONCE)
 	linkedEntityKeys     Json?
 	items                ProspectBacklogRouteLink[]
+	pilotItems           ProspectBacklogPilotItem[]
 	createdAt            DateTime                       @default(now())
 	updatedAt            DateTime                       @updatedAt
 
@@ -2174,6 +2259,8 @@ model ProspectBacklogPilotItem {
 	pilot              ProspectBacklogPilot   @relation(fields: [pilotId], references: [id], onDelete: Cascade)
 	itemId             String
 	item               ProspectBacklogItem    @relation(fields: [itemId], references: [id], onDelete: Cascade)
+	routeId            String?
+	route              ProspectBacklogRoute?  @relation(fields: [routeId], references: [id], onDelete: SetNull)
 	rank               Int
 	routeQuality       String
 	routeVisibility    ContactRouteVisibility @default(PRIVATE)
@@ -2199,6 +2286,7 @@ model ProspectBacklogPilotItem {
 
 	@@unique([pilotId, itemId])
 	@@unique([pilotId, rank])
+	@@index([routeId])
 	@@map("prospectBacklogPilotItem")
 }
 

@@ -29,6 +29,8 @@ import {
 	noteCreateInput,
 	operationsListInput,
 	organizationProfileInput,
+	playerProtectionActiveInput,
+	playerProtectionCreateInput,
 	proofCreateInput,
 	proposalCreateInput,
 	representationCreateInput,
@@ -137,6 +139,33 @@ export class OperationsRouter {
 		@Input() input: z.infer<typeof representationTransitionInput>,
 	) {
 		return this.operations.transitionRepresentation(ctx.user.id, input);
+	}
+
+	@Query({ meta: { permission: "football.manage" } })
+	playerProtections(@Ctx() ctx: AuthedTrpcContext) {
+		return this.operations.playerProtections(ctx.user.id);
+	}
+
+	@Mutation({
+		input: playerProtectionCreateInput,
+		meta: { permission: "football.manage" },
+	})
+	upsertPlayerProtection(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof playerProtectionCreateInput>,
+	) {
+		return this.operations.upsertPlayerProtection(ctx.user.id, input);
+	}
+
+	@Mutation({
+		input: playerProtectionActiveInput,
+		meta: { permission: "football.manage" },
+	})
+	setPlayerProtectionActive(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof playerProtectionActiveInput>,
+	) {
+		return this.operations.setPlayerProtectionActive(ctx.user.id, input);
 	}
 
 	@Mutation({

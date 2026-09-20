@@ -1,4 +1,4 @@
-import type { Db } from "@crm/db";
+import { type Db, isProtectedPlayerContact } from "@crm/db";
 import { ProviderCapabilityError, withPrincipal } from "@crm/db/security";
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { InjectDatabase } from "../database/database.constants";
@@ -32,7 +32,14 @@ export class OutboundDeliveryService {
 							id: true,
 							type: true,
 							lifecycleState: true,
-							contact: { select: { lifecycleState: true } },
+							contact: {
+								select: {
+									id: true,
+									firstName: true,
+									lastName: true,
+									lifecycleState: true,
+								},
+							},
 						},
 					},
 					outreachApproval: {
@@ -54,13 +61,22 @@ export class OutboundDeliveryService {
 			}
 			if (
 				draft.status !== "APPROVED" ||
-					draft.mailbox?.status !== "VERIFIED" ||
-					draft.recipientRoute?.type !== "EMAIL" ||
-					draft.recipientRoute?.lifecycleState !== "ACTIVE" ||
-					draft.recipientRoute.contact?.lifecycleState !== "ACTIVE"
+				draft.mailbox?.status !== "VERIFIED" ||
+				draft.recipientRoute?.type !== "EMAIL" ||
+				draft.recipientRoute?.lifecycleState !== "ACTIVE" ||
+				draft.recipientRoute.contact?.lifecycleState !== "ACTIVE"
 			) {
 				throw new Error("OUTBOUND_DRAFT_NOT_SENDABLE");
 			}
+			if (
+				draft.recipientRoute.contact &&
+				(await isProtectedPlayerContact(
+					tx,
+					draft.recipientRoute.contact.id,
+					`${draft.recipientRoute.contact.firstName} ${draft.recipientRoute.contact.lastName ?? ""}`,
+				))
+			)
+				throw new Error("OUTBOUND_PROTECTED_PLAYER");
 			if (
 				draft.outreachApproval?.status !== "APPROVED" ||
 				!draft.outreachApproval.decidedById ||

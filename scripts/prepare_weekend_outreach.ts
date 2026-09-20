@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+	assertPreparedPlayerAllowed,
 	classifyProspectBacklogRoute,
 	db,
 	validatePreparedOutreach,
@@ -148,6 +149,7 @@ async function main() {
 			sourceUrls: [...candidate.sourceUrls],
 		});
 		if (!quality.valid) throw new Error(`${candidate.key}: ${quality.reason}`);
+		await assertPreparedPlayerAllowed(db, [candidate.playerEntryPoint]);
 		const [
 			existingContactRoute,
 			suppressedEmail,
@@ -217,6 +219,7 @@ async function main() {
 		const common = {
 			pilotId: pilot.id,
 			itemId: item.id,
+			routeId: route.route.id,
 			routeQuality: candidate.routeQuality,
 			routeVisibility:
 				classification.routeUsage === "CONTACT_ONCE"

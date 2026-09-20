@@ -47,6 +47,18 @@ export const representationTransitionInput = z.object({
 	reason: z.string().trim().min(1).max(1000),
 });
 
+export const playerProtectionCreateInput = z.object({
+	displayName: z.string().trim().min(2).max(200),
+	contactId: optionalId,
+	reason: z.string().trim().max(1000).nullable().optional(),
+	source: z.string().trim().max(200).nullable().optional(),
+});
+
+export const playerProtectionActiveInput = z.object({
+	id,
+	active: z.boolean(),
+});
+
 export const contactRouteCreateInput = z.object({
 	contactId: optionalId,
 	companyId: optionalId,
