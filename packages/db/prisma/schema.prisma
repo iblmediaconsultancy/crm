@@ -1715,6 +1715,30 @@ enum ContactRouteVisibility {
   SHARED
 }
 
+enum ProspectBacklogMailboxType {
+  PERSONAL
+  ROLE
+  GENERAL
+  UNKNOWN
+}
+
+enum ProspectBacklogRouteUsage {
+  CONTACT_ONCE
+  REUSABLE
+}
+
+enum ProspectBacklogHookType {
+  CURRENT_EVENT
+  MEDIA_GAP
+  FIRST_TEAM_BREAKTHROUGH
+  INTERNATIONAL_VISIBILITY
+  EMERGING_TALENT
+  NEW_SEASON_ROLE_MARKET
+  ROSTER_MEDIA_GAP
+  EXISTING_RELATIONSHIP
+  OTHER_SPECIFIC_OPPORTUNITY
+}
+
 enum LeadStatus {
   NEW
   QUALIFIED
@@ -2097,21 +2121,23 @@ model ProspectBacklogItem {
 }
 
 model ProspectBacklogRoute {
-	id               String                    @id @default(cuid())
-	batchId          String
-	batch            ProspectSourceBatch      @relation(fields: [batchId], references: [id], onDelete: Cascade)
-	type             ContactRouteType
-	value            String
-	normalizedValue  String
-	isShared         Boolean                   @default(false)
-	contactOnce      Boolean                   @default(true)
-	linkedEntityKeys  Json?
-	items            ProspectBacklogRouteLink[]
-	createdAt        DateTime                  @default(now())
-	updatedAt        DateTime                  @updatedAt
+	id                   String                         @id @default(cuid())
+	batchId              String
+	batch                ProspectSourceBatch           @relation(fields: [batchId], references: [id], onDelete: Cascade)
+	type                 ContactRouteType
+	value                String
+	normalizedValue      String
+	mailboxType          ProspectBacklogMailboxType     @default(UNKNOWN)
+	mailboxTypeEvidence  String?
+	routeUsage           ProspectBacklogRouteUsage      @default(CONTACT_ONCE)
+	linkedEntityKeys     Json?
+	items                ProspectBacklogRouteLink[]
+	createdAt            DateTime                       @default(now())
+	updatedAt            DateTime                       @updatedAt
 
 	@@unique([batchId, type, normalizedValue])
-	@@index([batchId, isShared])
+	@@index([batchId, mailboxType])
+	@@index([batchId, routeUsage])
 	@@map("prospectBacklogRoute")
 }
 
@@ -2151,9 +2177,13 @@ model ProspectBacklogPilotItem {
 	rank               Int
 	routeQuality       String
 	routeVisibility    ContactRouteVisibility @default(PRIVATE)
+	mailboxType        ProspectBacklogMailboxType @default(UNKNOWN)
+	mailboxTypeEvidence String?
+	routeUsage         ProspectBacklogRouteUsage @default(CONTACT_ONCE)
 	routeConfidence    String
 	researchSummary    String
 	researchConfidence String
+	hookType           ProspectBacklogHookType @default(CURRENT_EVENT)
 	whyNow             String
 	playerEntryPoint   String?
 	credibilityAngle   String

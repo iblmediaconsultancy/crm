@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { db, Prisma } from "../packages/db/src/index";
+import {
+	classifyProspectBacklogRoute,
+	db,
+	Prisma,
+} from "../packages/db/src/index";
 
 type Cell = string | number | boolean | null;
 type SourceRow = { rowId: number; values: Record<string, Cell> };
@@ -458,18 +462,33 @@ async function main() {
 	for (const group of chunk(sourceData, 500))
 		await db.prospectSourceRecord.createMany({ data: group as never[] });
 
-	const routeData = [...routes.values()].map((route) => ({
-		id: randomUUID(),
-		batchId,
-		type: route.type,
-		value: route.value,
-		normalizedValue: route.normalizedValue,
-		isShared: route.entityKeys.size > 1,
-		contactOnce: true,
-		linkedEntityKeys: [...route.entityKeys],
-		createdAt: new Date(),
-		updatedAt: new Date(),
-	}));
+	const routeData = [...routes.values()].map((route) => {
+		const linkedEntityKeys = [...route.entityKeys];
+		const classification = classifyProspectBacklogRoute({
+			type: route.type,
+			value: route.value,
+			linkedEntityKeys,
+			entityNames: linkedEntityKeys.flatMap((key) => {
+				const entity = entities.get(key);
+				return entity && entity.entityType === "PERSON"
+					? [entity.displayName]
+					: [];
+			}),
+		});
+		return {
+			id: randomUUID(),
+			batchId,
+			type: route.type,
+			value: route.value,
+			normalizedValue: route.normalizedValue,
+			mailboxType: classification.mailboxType,
+			mailboxTypeEvidence: classification.mailboxTypeEvidence,
+			routeUsage: classification.routeUsage,
+			linkedEntityKeys,
+			createdAt: new Date(),
+			updatedAt: new Date(),
+		};
+	});
 	for (const group of chunk(routeData, 500))
 		await db.prospectBacklogRoute.createMany({ data: group as never[] });
 	const storedRoutes = await db.prospectBacklogRoute.findMany({
@@ -498,8 +517,8 @@ async function main() {
 		where: { batchId },
 		_count: { _all: true },
 	});
-	const sharedRouteCount = await db.prospectBacklogRoute.count({
-		where: { batchId, isShared: true },
+	const contactOnceRouteCount = await db.prospectBacklogRoute.count({
+		where: { batchId, routeUsage: "CONTACT_ONCE" },
 	});
 	const sourceRecordCount = await db.prospectSourceRecord.count({
 		where: { batchId },
@@ -511,7 +530,7 @@ async function main() {
 				stagedRecords: sourceRecordCount,
 				canonicalProspects: itemData.length,
 				routes: routeData.length,
-				sharedRoutes: sharedRouteCount,
+				contactOnceRoutes: contactOnceRouteCount,
 				stateCounts,
 			},
 			null,

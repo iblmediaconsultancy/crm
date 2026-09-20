@@ -62,15 +62,31 @@ export function ProspectBacklogSummary() {
 				</div>
 			</CardHeader>
 			<CardContent className="grid gap-4">
-				<div className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-5">
+				<div className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-6">
 					<Summary
 						label="Canonical prospects"
 						value={counts.canonicalProspects}
 					/>
 					<Summary label="Source rows" value={counts.sourceRecords} />
-					<Summary label="Shared routes" value={counts.sharedRoutes} />
+					<Summary
+						label="Contact once routes"
+						value={counts.contactOnceRoutes}
+					/>
+					<Summary label="Reusable routes" value={counts.reusableRoutes} />
 					<Summary label="Ihsan review" value={counts.ambiguousIdentities} />
 					<Summary label="Remaining" value={counts.remainingBacklog} />
+				</div>
+				<div className="grid gap-2 border-t pt-4 sm:grid-cols-2 lg:grid-cols-4">
+					{(["PERSONAL", "ROLE", "GENERAL", "UNKNOWN"] as const).map((type) => (
+						<div className="flex items-center justify-between gap-3" key={type}>
+							<span className="text-muted-foreground text-xs">
+								{label(type)} mailboxes
+							</span>
+							<strong className="tabular-nums">
+								{counts.mailboxTypeCounts[type] ?? 0}
+							</strong>
+						</div>
+					))}
 				</div>
 				<div className="grid gap-2 border-t pt-4 sm:grid-cols-3 lg:grid-cols-4">
 					{states.map((state) => (
@@ -106,7 +122,11 @@ export function ProspectBacklogSummary() {
 											{candidate.rank}. {candidate.item.displayName}
 										</span>
 										<span className="text-muted-foreground text-xs">
-											{candidate.language} · {candidate.routeVisibility.toLowerCase()} · {candidate.priority.toLowerCase()} · research {candidate.researchConfidence.toLowerCase()}
+											{candidate.language} ·{" "}
+											{candidate.mailboxType.toLowerCase()} ·{" "}
+											{candidate.routeUsage.toLowerCase()} ·{" "}
+											{candidate.priority.toLowerCase()} · research{" "}
+											{candidate.researchConfidence.toLowerCase()}
 										</span>
 									</div>
 									<p className="text-muted-foreground text-xs">
@@ -114,7 +134,8 @@ export function ProspectBacklogSummary() {
 										{candidate.whyNow}
 									</p>
 									<p className="text-muted-foreground text-xs">
-										{candidate.ctaApproach} · route {candidate.routeConfidence.toLowerCase()}
+										{candidate.ctaApproach} · route{" "}
+										{candidate.routeConfidence.toLowerCase()}
 									</p>
 								</div>
 							))}

@@ -443,7 +443,9 @@ export class OperationsService {
 				stateRows,
 				canonicalProspects,
 				sourceRecords,
-				sharedRoutes,
+				contactOnceRoutes,
+				reusableRoutes,
+				mailboxTypeRows,
 				ambiguous,
 				pilot,
 			] = await Promise.all([
@@ -455,7 +457,15 @@ export class OperationsService {
 				tx.prospectBacklogItem.count({ where: { batchId: batch.id } }),
 				tx.prospectSourceRecord.count({ where: { batchId: batch.id } }),
 				tx.prospectBacklogRoute.count({
-					where: { batchId: batch.id, isShared: true },
+					where: { batchId: batch.id, routeUsage: "CONTACT_ONCE" },
+				}),
+				tx.prospectBacklogRoute.count({
+					where: { batchId: batch.id, routeUsage: "REUSABLE" },
+				}),
+				tx.prospectBacklogRoute.groupBy({
+					by: ["mailboxType"],
+					where: { batchId: batch.id },
+					_count: { _all: true },
 				}),
 				tx.prospectBacklogItem.count({
 					where: { batchId: batch.id, matchStatus: "CRM_NAME_REVIEW" },
@@ -482,9 +492,13 @@ export class OperationsService {
 								},
 								routeQuality: true,
 								routeVisibility: true,
+								mailboxType: true,
+								mailboxTypeEvidence: true,
+								routeUsage: true,
 								routeConfidence: true,
 								whyNow: true,
 								researchConfidence: true,
+								hookType: true,
 								playerEntryPoint: true,
 								credibilityAngle: true,
 								ctaApproach: true,
@@ -530,7 +544,11 @@ export class OperationsService {
 				counts: {
 					canonicalProspects,
 					sourceRecords,
-					sharedRoutes,
+					contactOnceRoutes,
+					reusableRoutes,
+					mailboxTypeCounts: Object.fromEntries(
+						mailboxTypeRows.map((row) => [row.mailboxType, row._count._all]),
+					),
 					ambiguousIdentities: ambiguous,
 					remainingBacklog,
 				},
