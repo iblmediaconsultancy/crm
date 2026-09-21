@@ -873,14 +873,27 @@ export class OutreachLifecycleService {
 							select: { atlasLiveOutreachEnabled: true },
 						})
 					: null;
+				const currentAuthorization =
+					draft?.coldOutreach && draft.status === "DRAFT" && !draft.authorization
+						? await tx.outreachAuthorization.findFirst({
+								where: {
+									scope: "STANDARD_COLD_OUTREACH",
+									status: "ACTIVE",
+									OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+								},
+								orderBy: { issuedAt: "desc" },
+								select: { id: true, scope: true, status: true, expiresAt: true },
+							})
+						: null;
+				const authorization = draft?.authorization ?? currentAuthorization;
 				const autonomous = Boolean(
 					draft?.coldOutreach &&
 					draft.status === "DRAFT" &&
 					draft.atlasAuthorizedAt &&
-					draft.authorization?.scope === "STANDARD_COLD_OUTREACH" &&
-					draft.authorization.status === "ACTIVE" &&
-					(draft.authorization.expiresAt === null ||
-						draft.authorization.expiresAt > new Date()) &&
+					authorization?.scope === "STANDARD_COLD_OUTREACH" &&
+					authorization.status === "ACTIVE" &&
+					(authorization.expiresAt === null ||
+						authorization.expiresAt > new Date()) &&
 					settings?.atlasLiveOutreachEnabled === true &&
 					process.env.ATLAS_LIVE_OUTREACH_ENABLED?.trim().toLowerCase() ===
 						"true" &&
@@ -927,6 +940,14 @@ export class OutreachLifecycleService {
 					where: { id: draft.id },
 					data: {
 						status: "QUEUED",
+						authorizationId:
+							autonomous && !draft.authorization
+								? currentAuthorization?.id
+								: undefined,
+						atlasAuthorizedAt:
+							autonomous && !draft.atlasAuthorizedAt
+								? new Date()
+								: undefined,
 						approvedAt: autonomous ? new Date() : undefined,
 					},
 				});
