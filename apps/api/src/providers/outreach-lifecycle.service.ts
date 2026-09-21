@@ -455,7 +455,6 @@ export class OutreachLifecycleService {
 						draft: { coldOutreach: true },
 					},
 					orderBy: { sentAt: "asc" },
-					take: 25,
 					select: {
 						id: true,
 						sentAt: true,
