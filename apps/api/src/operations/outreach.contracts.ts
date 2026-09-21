@@ -22,3 +22,10 @@ export const localReplyInput = z.object({
 	deliveryId: z.string().min(1),
 	body: z.string().trim().min(1).max(10000),
 });
+export const atlasAuthorizationIssueInput = z.object({
+	expiresAt: z.coerce.date().nullable().optional(),
+});
+export const atlasAuthorizationRevokeInput = z.object({
+	id: z.string().min(1),
+	reason: z.string().trim().min(3).max(500),
+});

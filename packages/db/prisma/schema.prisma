@@ -62,6 +62,8 @@ model User {
   ownedProposals             Proposal[]                    @relation("ProposalOwner")
   requestedApprovals         OutreachApproval[]            @relation("OutreachApprovalRequester")
   decidedApprovals           OutreachApproval[]            @relation("OutreachApprovalApprover")
+  outreachAuthorizations    OutreachAuthorization[]       @relation("OutreachAuthorizationIssuer")
+  revokedAuthorizations     OutreachAuthorization[]       @relation("OutreachAuthorizationRevoker")
   receivedAssignments        Assignment[]                  @relation("AssignmentAssignee")
   createdAssignments         Assignment[]                  @relation("AssignmentCreator")
   lifecycleEvents            LifecycleEvent[]              @relation("LifecycleEventActor")
@@ -1886,6 +1888,12 @@ enum OutreachApprovalStatus {
   REVOKED
 }
 
+enum OutreachAuthorizationStatus {
+  ACTIVE
+  REVOKED
+  EXPIRED
+}
+
 enum DomainEntityType {
   COMPANY
   CONTACT
@@ -2556,6 +2564,8 @@ model Draft {
   body               String
   leadId             String?
   lead               Lead?              @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  authorizationId    String?
+  authorization     OutreachAuthorization? @relation(fields: [authorizationId], references: [id], onDelete: SetNull)
   coldOutreach       Boolean            @default(false)
   language           String?
   atlasAuthorizedAt  DateTime?
@@ -2575,6 +2585,7 @@ model Draft {
   @@index([mailboxId, status])
   @@index([recipientRouteId])
   @@index([leadId, status])
+  @@index([authorizationId, status])
   @@index([atlasAuthorizedAt])
   @@index([templateId])
   @@map("draft")
@@ -2609,12 +2620,51 @@ model OutboundDelivery {
   retryAt           DateTime?
   lastErrorCode     String?
   sentAt            DateTime?
+  sentSyncStatus    SentSyncStatus        @default(SKIPPED)
+  sentSyncAttempts  Int                   @default(0)
+  sentSyncRetryAt   DateTime?
+  sentSyncErrorCode String?
+  sentSyncAt        DateTime?
+  sentSyncFolder    String?
+  sentSyncUid       String?
+  sentSyncLeaseOwner String?
+  sentSyncLeasedUntil DateTime?
   createdAt         DateTime               @default(now())
   updatedAt         DateTime               @updatedAt
 
   @@index([status, retryAt, leasedUntil])
   @@index([draftId, createdAt])
+  @@index([sentSyncStatus, sentSyncRetryAt])
   @@map("outboundDelivery")
+}
+
+enum SentSyncStatus {
+  PENDING
+  RETRY
+  SYNCED
+  FAILED
+  SKIPPED
+}
+
+model OutreachAuthorization {
+  id             String                      @id @default(cuid())
+  authorizedById String
+  authorizedBy   User                        @relation("OutreachAuthorizationIssuer", fields: [authorizedById], references: [id], onDelete: Restrict)
+  revokedById    String?
+  revokedBy      User?                       @relation("OutreachAuthorizationRevoker", fields: [revokedById], references: [id], onDelete: SetNull)
+  scope          String                      @default("STANDARD_COLD_OUTREACH")
+  status         OutreachAuthorizationStatus @default(ACTIVE)
+  issuedAt       DateTime                    @default(now())
+  expiresAt      DateTime?
+  revokedAt      DateTime?
+  revocationReason String?
+  drafts         Draft[]
+  createdAt      DateTime                    @default(now())
+  updatedAt      DateTime                    @updatedAt
+
+  @@index([status, expiresAt])
+  @@index([authorizedById, status])
+  @@map("outreachAuthorization")
 }
 
 model Proposal {
@@ -3181,7 +3231,7 @@ model FollowUpPlan {
   contactId          String
   routeId            String
   ownerUserId        String
-  sourceDraftId      String?
+  sourceDraftId      String?            @unique
   leadId             String?
   lead               Lead?              @relation(fields: [leadId], references: [id], onDelete: SetNull)
   maxSteps           Int                @default(3)

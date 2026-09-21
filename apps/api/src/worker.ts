@@ -41,6 +41,7 @@ async function bootstrap() {
 		try {
 			const jobsProcessed = await jobs.runDue(workerId);
 			const allocationsProcessed = await allocation.runDue(workerId);
+			const followUpPlansMaterialized = await outreach.materializePendingPlans();
 			const followUpsProcessed = await outreach.runDue(workerId);
 			const attachmentsProcessed = await attachments.runDue(workerId);
 			const mailboxesProcessed = await miab.runDue(workerId);
@@ -48,6 +49,7 @@ async function bootstrap() {
 				message: "Worker tick",
 				jobsProcessed,
 				allocationsProcessed,
+				followUpPlansMaterialized,
 				followUpsProcessed,
 				attachmentsProcessed,
 				mailboxesProcessed,

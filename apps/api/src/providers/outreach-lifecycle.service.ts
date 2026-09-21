@@ -33,6 +33,132 @@ export class OutreachLifecycleService {
 		private readonly threadWriter?: ThreadWriterService,
 	) {}
 
+	async listAtlasAuthorizations(actor: {
+		userId: string;
+		role: "admin" | "team" | "contributor";
+	}) {
+		if (actor.role === "contributor")
+			throw new ConflictException("Manager access is required.");
+		return withPrincipal(
+			this.db,
+			{ userId: actor.userId, kind: "user" },
+			(tx) =>
+				tx.outreachAuthorization.findMany({
+					where: { scope: "STANDARD_COLD_OUTREACH" },
+					orderBy: { issuedAt: "desc" },
+					take: 25,
+					select: {
+						id: true,
+						scope: true,
+						status: true,
+						issuedAt: true,
+						expiresAt: true,
+						revokedAt: true,
+						revocationReason: true,
+						authorizedBy: { select: { id: true, name: true } },
+						revokedBy: { select: { id: true, name: true } },
+					},
+				}),
+		);
+	}
+
+	async issueAtlasAuthorization(
+		actor: {
+			userId: string;
+			role: "admin" | "team" | "contributor";
+		},
+		input: { expiresAt?: Date | null },
+	) {
+		if (actor.role === "contributor")
+			throw new ConflictException("Manager access is required.");
+		const now = new Date();
+		if (input.expiresAt && input.expiresAt <= now)
+			throw new ConflictException("Authorization expiry must be in the future.");
+		return withPrincipal(
+			this.db,
+			{ userId: actor.userId, kind: "user" },
+			async (tx) => {
+				await tx.outreachAuthorization.updateMany({
+					where: { scope: "STANDARD_COLD_OUTREACH", status: "ACTIVE" },
+					data: {
+						status: "REVOKED",
+						revokedById: actor.userId,
+						revokedAt: now,
+						revocationReason: "Superseded by a newer authorization",
+					},
+				});
+				const authorization = await tx.outreachAuthorization.create({
+					data: {
+						authorizedById: actor.userId,
+						expiresAt: input.expiresAt ?? null,
+					},
+				});
+				await tx.domainAuditEvent.create({
+					data: {
+						actorUserId: actor.userId,
+						action: "ATLAS_OUTREACH_AUTHORIZATION_ISSUED",
+						entityType: "OUTREACH",
+						entityId: authorization.id,
+						outcome: "SUCCESS",
+						requestId: `atlas-authorization:issued:${authorization.id}`,
+						metadata: {
+							scope: authorization.scope,
+							expiresAt: authorization.expiresAt?.toISOString() ?? null,
+						},
+					},
+				});
+				return authorization;
+			},
+		);
+	}
+
+	async revokeAtlasAuthorization(
+		actor: {
+			userId: string;
+			role: "admin" | "team" | "contributor";
+		},
+		input: { id: string; reason: string },
+	) {
+		if (actor.role === "contributor")
+			throw new ConflictException("Manager access is required.");
+		const now = new Date();
+		return withPrincipal(
+			this.db,
+			{ userId: actor.userId, kind: "user" },
+			async (tx) => {
+				const changed = await tx.outreachAuthorization.updateMany({
+					where: {
+						id: input.id,
+						scope: "STANDARD_COLD_OUTREACH",
+						status: "ACTIVE",
+					},
+					data: {
+						status: "REVOKED",
+						revokedById: actor.userId,
+						revokedAt: now,
+						revocationReason: input.reason,
+					},
+				});
+				if (changed.count !== 1)
+					throw new ConflictException(
+						"This authorization is not active or was not found.",
+					);
+				await tx.domainAuditEvent.create({
+					data: {
+						actorUserId: actor.userId,
+						action: "ATLAS_OUTREACH_AUTHORIZATION_REVOKED",
+						entityType: "OUTREACH",
+						entityId: input.id,
+						outcome: "SUCCESS",
+						requestId: `atlas-authorization:revoked:${input.id}:${now.toISOString()}`,
+						metadata: { reason: input.reason },
+					},
+				});
+				return { id: input.id, status: "REVOKED" as const };
+			},
+		);
+	}
+
 	async simulateLocalReply(userId: string, deliveryId: string, body: string) {
 		if (!localProviderDoubleEnabled() || !this.threadWriter) {
 			throw new ConflictException("The local provider double is not enabled.");
@@ -318,6 +444,136 @@ export class OutreachLifecycleService {
 		});
 	}
 
+	async materializePendingPlans() {
+		return withPrincipal(
+			this.db,
+			{ userId: null, kind: "worker" },
+			async (tx) => {
+				const deliveries = await tx.outboundDelivery.findMany({
+					where: {
+						status: { in: ["SENT", "DELIVERED"] },
+						draft: { coldOutreach: true },
+					},
+					orderBy: { sentAt: "asc" },
+					take: 25,
+					select: {
+						id: true,
+						sentAt: true,
+						draft: {
+							select: {
+								id: true,
+								ownerUserId: true,
+								mailboxId: true,
+								recipientRouteId: true,
+								leadId: true,
+								authorizationId: true,
+								atlasAuthorizedAt: true,
+								atlasPolicyVersion: true,
+								language: true,
+								subject: true,
+								body: true,
+								recipientRoute: { select: { contactId: true } },
+							},
+						},
+					},
+				});
+				let created = 0;
+				for (const delivery of deliveries) {
+					const source = delivery.draft;
+					if (
+						!delivery.sentAt ||
+						!source.mailboxId ||
+						!source.recipientRouteId ||
+						!source.recipientRoute.contactId ||
+						!source.leadId
+					)
+						continue;
+					const existing = await tx.followUpPlan.findUnique({
+						where: { sourceDraftId: source.id },
+						select: { id: true },
+					});
+					if (existing) continue;
+					const activePlan = await tx.followUpPlan.findFirst({
+						where: {
+							contactId: source.recipientRoute.contactId,
+							status: "ACTIVE",
+						},
+						select: { id: true },
+					});
+					if (activePlan) continue;
+					const lead = await tx.lead.findUnique({
+						where: { id: source.leadId },
+						select: { id: true, stage: true, attentionState: true },
+					});
+					if (
+						!lead ||
+						[
+							"REPLIED",
+							"WARM",
+							"MEETING",
+							"OPPORTUNITY",
+							"WON",
+							"LOST",
+						].includes(lead.stage) ||
+						lead.attentionState !== "NONE"
+					)
+						continue;
+					const dueAt = [
+						businessDaysAfter(delivery.sentAt, 3, "Europe/Amsterdam"),
+						businessDaysAfter(delivery.sentAt, 7, "Europe/Amsterdam"),
+					];
+					const draftIds: string[] = [];
+					for (const position of [1, 2]) {
+						const followUpDraft = await tx.draft.upsert({
+							where: {
+								idempotencyKey: `followup-draft:${source.id}:${position}`,
+							},
+							create: {
+								ownerUserId: source.ownerUserId,
+								mailboxId: source.mailboxId,
+								recipientRouteId: source.recipientRouteId,
+								leadId: source.leadId,
+								authorizationId: source.authorizationId,
+								atlasAuthorizedAt: source.atlasAuthorizedAt,
+								atlasPolicyVersion: source.atlasPolicyVersion,
+								coldOutreach: true,
+								language: source.language,
+								status: "DRAFT",
+								subject: followUpSubject(source.subject, position),
+								body: followUpBody(source.subject, position, source.language),
+								idempotencyKey: `followup-draft:${source.id}:${position}`,
+							},
+							update: {},
+							select: { id: true },
+						});
+						draftIds.push(followUpDraft.id);
+					}
+					const plan = await tx.followUpPlan.create({
+						data: {
+							contactId: source.recipientRoute.contactId,
+							routeId: source.recipientRouteId,
+							ownerUserId: source.ownerUserId,
+							leadId: source.leadId,
+							maxSteps: 2,
+							sourceDraftId: source.id,
+						},
+					});
+					await tx.followUpStep.createMany({
+						data: draftIds.map((draftId, index) => ({
+							planId: plan.id,
+							position: index,
+							dueAt: dueAt[index]!,
+							draftId,
+							idempotencyKey: `followup:${plan.id}:${index}`,
+						})),
+					});
+					created += 1;
+				}
+				return { inspected: deliveries.length, created };
+			},
+		);
+	}
+
 	async listPlans(actor: {
 		userId: string;
 		role: "admin" | "team" | "contributor";
@@ -590,6 +846,12 @@ export class OutreachLifecycleService {
 					select: {
 						id: true,
 						status: true,
+						coldOutreach: true,
+						atlasAuthorizedAt: true,
+						authorization: {
+							select: { scope: true, status: true, expiresAt: true },
+						},
+						mailbox: { select: { address: true } },
 						recipientRoute: {
 							select: {
 								id: true,
@@ -605,10 +867,32 @@ export class OutreachLifecycleService {
 							where: { routeId: draft.recipientRoute.id },
 						})
 					: null;
+				const settings = draft?.coldOutreach
+					? await tx.appSetting.findUnique({
+							where: { id: "app" },
+							select: { atlasLiveOutreachEnabled: true },
+						})
+					: null;
+				const autonomous = Boolean(
+					draft?.coldOutreach &&
+					draft.status === "DRAFT" &&
+					draft.atlasAuthorizedAt &&
+					draft.authorization?.scope === "STANDARD_COLD_OUTREACH" &&
+					draft.authorization.status === "ACTIVE" &&
+					(draft.authorization.expiresAt === null ||
+						draft.authorization.expiresAt > new Date()) &&
+					settings?.atlasLiveOutreachEnabled === true &&
+					process.env.ATLAS_LIVE_OUTREACH_ENABLED?.trim().toLowerCase() ===
+						"true" &&
+					draft.mailbox?.address.toLowerCase() === "outreach@iblmedia.com",
+				);
+				const manuallyApproved = Boolean(
+					draft?.status === "APPROVED" &&
+					draft.outreachApproval?.status === "APPROVED",
+				);
 				if (
 					plan?.status !== "ACTIVE" ||
-					draft?.status !== "APPROVED" ||
-					draft.outreachApproval?.status !== "APPROVED" ||
+					(!manuallyApproved && !autonomous) ||
 					draft.recipientRoute?.contact?.lifecycleState !== "ACTIVE" ||
 					consent?.status === "DO_NOT_CONTACT"
 				) {
@@ -641,7 +925,10 @@ export class OutreachLifecycleService {
 				});
 				await tx.draft.update({
 					where: { id: draft.id },
-					data: { status: "QUEUED" },
+					data: {
+						status: "QUEUED",
+						approvedAt: autonomous ? new Date() : undefined,
+					},
 				});
 				await tx.followUpStep.updateMany({
 					where: { id: step.id, leaseOwner: workerId },
@@ -723,4 +1010,62 @@ export class OutreachLifecycleService {
 		}
 		return { cancelled: ids.length };
 	}
+}
+
+export function businessDaysAfter(base: Date, days: number, timeZone: string): Date {
+	let candidate = new Date(base);
+	let remaining = days;
+	while (remaining > 0) {
+		candidate = new Date(candidate.getTime() + 24 * 60 * 60 * 1000);
+		const weekday = new Intl.DateTimeFormat("en-US", {
+			timeZone,
+			weekday: "short",
+		}).format(candidate);
+		if (weekday !== "Sat" && weekday !== "Sun") remaining -= 1;
+	}
+	const parts = new Intl.DateTimeFormat("en-CA", {
+		timeZone,
+		year: "numeric",
+		month: "2-digit",
+		day: "2-digit",
+		hour: "2-digit",
+		minute: "2-digit",
+		hourCycle: "h23",
+	}).formatToParts(candidate);
+	const value = (type: string) =>
+		parts.find((part) => part.type === type)?.value ?? "00";
+	const minutes = Number(value("hour")) * 60 + Number(value("minute"));
+	if (minutes >= 9 * 60 && minutes < 18 * 60) return candidate;
+	return new Date(
+		`${value("year")}-${value("month")}-${value("day")}T10:00:00.000Z`,
+	);
+}
+
+function followUpSubject(subject: string | null, position: number): string {
+	const cleaned = (subject ?? "the earlier note")
+		.replace(/^Re:\s*/i, "")
+		.replace(/[—–]/g, "-")
+		.trim();
+	return position === 1 ? `Re: ${cleaned}` : `Re: ${cleaned}`;
+}
+
+function followUpBody(subject: string | null, position: number, language?: string | null): string {
+	const context = (subject ?? "the earlier note")
+		.replace(/^Re:\s*/i, "")
+		.replace(/[—–]/g, "-")
+		.trim();
+	const normalizedLanguage = language?.trim().toLowerCase() ?? "english";
+	if (normalizedLanguage === "dutch") {
+		return position === 1
+			? `Hallo,\n\nEen praktisch punt bij mijn eerdere bericht over ${context}: de ondersteuning kan heel gericht blijven op de momenten die voor een speler tellen, van matchday-content tot een consistent ritme op social media. Als dit al geregeld is, is er misschien een andere speler of media-prioriteit binnen de selectie die relevanter is om te bespreken.\n\nMet vriendelijke groet,\n\nIhsan | Founder, IBL Media Consultancy\niblmedia.com\nWhatsApp: +31 6 27833383`
+			: `Hallo,\n\nIk laat dit voorlopig bij je. Als ondersteuning rond ${context} of een andere speler later relevant wordt, stuur ik graag een korte toelichting van hoe we dit bij IBL aanpakken.\n\nMet vriendelijke groet,\n\nIhsan | Founder, IBL Media Consultancy\niblmedia.com\nWhatsApp: +31 6 27833383`;
+	}
+	if (normalizedLanguage === "turkish") {
+		return position === 1
+			? `Merhaba,\n\n${context} hakkındaki önceki notuma pratik bir nokta eklemek istedim: destek, oyuncunun önemli anlarına odaklanan maç günü içerikleri ve düzenli sosyal medya akışı kadar hedefli tutulabilir. Bu konu zaten çözülmüşse, kadroda konuşulması daha anlamlı olacak başka bir oyuncu veya medya önceliği var mı?\n\nSaygılarımla,\n\nIhsan | Founder, IBL Media Consultancy\niblmedia.com\nWhatsApp: +31 6 27833383`
+			: `Merhaba,\n\nŞimdilik bunu burada bırakayım. ${context} veya başka bir oyuncu için medya desteği ileride faydalı olursa, IBL'in bunu nasıl yürüttüğüne dair kısa bir özet paylaşmaktan memnuniyet duyarım.\n\nSaygılarımla,\n\nIhsan | Founder, IBL Media Consultancy\niblmedia.com\nWhatsApp: +31 6 27833383`;
+	}
+	return position === 1
+		? `Hi,\n\nOne practical point to add to my note about ${context}: the work can stay close to the moments that matter, from matchday content to a consistent account rhythm. If that is already covered, is there another player or current media priority in the roster that would be more useful to discuss?\n\nKind regards,\n\nIhsan | Founder, IBL Media Consultancy\niblmedia.com\nWhatsApp: +31 6 27833383`
+		: `Hi,\n\nI will leave this with you for now. If support around ${context} or another player becomes useful, I would be happy to send a short outline of how we handle it at IBL.\n\nKind regards,\n\nIhsan | Founder, IBL Media Consultancy\niblmedia.com\nWhatsApp: +31 6 27833383`;
 }

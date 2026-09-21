@@ -196,7 +196,7 @@ export async function sendAtlasEmail(ctx: PurposeContext, input: AtlasInput) {
 		{ userId: ATLAS_OPERATOR_ID, kind: "service" },
 		async (tx) => {
 			const now = new Date();
-			const [settings, lead, mailbox] = await Promise.all([
+			const [settings, lead, mailbox, authorization] = await Promise.all([
 				tx.appSetting.findUnique({
 					where: { id: "app" },
 					select: {
@@ -230,13 +230,27 @@ export async function sendAtlasEmail(ctx: PurposeContext, input: AtlasInput) {
 					},
 				}),
 				tx.mailbox.findFirst({
-					where: { status: "VERIFIED" },
+					where: {
+						status: "VERIFIED",
+						address: "outreach@iblmedia.com",
+					},
 					orderBy: { createdAt: "asc" },
+					select: { id: true },
+				}),
+				tx.outreachAuthorization.findFirst({
+					where: {
+						scope: "STANDARD_COLD_OUTREACH",
+						status: "ACTIVE",
+						OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+					},
+					orderBy: { issuedAt: "desc" },
 					select: { id: true },
 				}),
 			]);
 			if (!settings?.atlasLiveOutreachEnabled)
 				throw new Error("Atlas outreach is disabled in CRM settings.");
+			if (!authorization)
+				throw new Error("ATLAS_OUTREACH_AUTHORIZATION_REQUIRED");
 			if (
 				!isWithinAtlasWorkingHours(
 					now,
@@ -350,6 +364,7 @@ export async function sendAtlasEmail(ctx: PurposeContext, input: AtlasInput) {
 					approvedAt: now,
 					atlasAuthorizedAt: now,
 					atlasPolicyVersion: POLICY_VERSION,
+					authorizationId: authorization.id,
 					idempotencyKey: input.idempotencyKey,
 				},
 				update: {},

@@ -32,6 +32,10 @@ const threadDeliveryId = `queue-thread-delivery-${suffix}`;
 const threadPlanId = `queue-thread-plan-${suffix}`;
 const threadStepId = `queue-thread-step-${suffix}`;
 const threadRecipient = `thread-recipient-${suffix}@example.test`;
+const coldContactId = `queue-cold-contact-${suffix}`;
+const coldRouteId = `queue-cold-route-${suffix}`;
+const coldDraftId = `queue-cold-draft-${suffix}`;
+const coldDeliveryId = `queue-cold-delivery-${suffix}`;
 const previousSender = process.env.RESEND_SYSTEM_FROM_EMAIL;
 const previousOutreachSender = process.env.RESEND_OUTREACH_FROM_EMAIL;
 const adminConnectionString =
@@ -94,6 +98,12 @@ async function clean() {
 	await admin.query('DELETE FROM "contactRoute" WHERE id=$1', [threadRouteId]);
 	await admin.query('DELETE FROM "contact" WHERE id=$1', [threadContactId]);
 	await admin.query('DELETE FROM "mailbox" WHERE id=$1', [threadMailboxId]);
+	await admin.query('DELETE FROM "outboundDelivery" WHERE id=$1', [
+		coldDeliveryId,
+	]);
+	await admin.query('DELETE FROM "draft" WHERE id=$1', [coldDraftId]);
+	await admin.query('DELETE FROM "contactRoute" WHERE id=$1', [coldRouteId]);
+	await admin.query('DELETE FROM "contact" WHERE id=$1', [coldContactId]);
 	await admin.query('DELETE FROM "draft" WHERE id=$1', [senderDraftId]);
 	await admin.query('DELETE FROM "contactRoute" WHERE id=$1', [senderRouteId]);
 	await admin.query('DELETE FROM "contact" WHERE id=$1', [senderContactId]);
@@ -457,5 +467,86 @@ describe("PostgreSQL durable system-email queue", () => {
 			status: "CANCELLED",
 			cancellationReason: "Inbound reply received",
 		});
+	});
+
+	test("cancels a queued cold draft without active Atlas authorization", async () => {
+		const coldMailbox = await db.mailbox.findFirst({
+			where: { address: "outreach@iblmedia.com", status: "VERIFIED" },
+			select: { id: true },
+		});
+		if (!coldMailbox) throw new Error("The verified Atlas mailbox is required.");
+		await db.contact.create({
+			data: {
+				id: coldContactId,
+				firstName: "Cold",
+				lastName: "Policy",
+				email: `cold-policy-${suffix}@example.test`,
+			},
+		});
+		await db.contactRoute.create({
+			data: {
+				id: coldRouteId,
+				contactId: coldContactId,
+				ownerUserId: actorUserId,
+				type: "EMAIL",
+				value: `cold-policy-${suffix}@example.test`,
+				normalizedValue: `cold-policy-${suffix}@example.test`,
+			},
+		});
+		await db.draft.create({
+			data: {
+				id: coldDraftId,
+				ownerUserId: actorUserId,
+				mailboxId: coldMailbox.id,
+				recipientRouteId: coldRouteId,
+				subject: "Cold authorization test",
+				body: "Test only",
+				coldOutreach: true,
+				status: "DRAFT",
+				approvedAt: new Date(),
+				idempotencyKey: `${keyPrefix}cold-draft`,
+			},
+		});
+		await db.outreachApproval.create({
+			data: {
+				draftId: coldDraftId,
+				requestedById: actorUserId,
+				decidedById: approverUserId,
+				status: "APPROVED",
+				decidedAt: new Date(),
+				idempotencyKey: `${keyPrefix}cold-approval`,
+			},
+		});
+		await db.draft.update({
+			where: { id: coldDraftId },
+			data: { status: "QUEUED" },
+		});
+		await db.outboundDelivery.create({
+			data: {
+				id: coldDeliveryId,
+				draftId: coldDraftId,
+				idempotencyKey: `${keyPrefix}cold-delivery`,
+			},
+		});
+
+		const previous = process.env.ATLAS_LIVE_OUTREACH_ENABLED;
+		process.env.ATLAS_LIVE_OUTREACH_ENABLED = "false";
+		try {
+			const worker = new PostgresJobWorkerService(db, credentials, transport);
+			expect(await worker.runDue("cold-policy-worker")).toBe(1);
+			expect(sent.has(`${keyPrefix}cold-delivery`)).toBe(false);
+			expect(
+				await db.outboundDelivery.findUnique({
+					where: { id: coldDeliveryId },
+					select: { status: true, lastErrorCode: true },
+				}),
+			).toEqual({
+				status: "CANCELLED",
+				lastErrorCode: "OUTBOUND_ATLAS_AUTHORIZATION_REQUIRED",
+			});
+		} finally {
+			if (previous === undefined) delete process.env.ATLAS_LIVE_OUTREACH_ENABLED;
+			else process.env.ATLAS_LIVE_OUTREACH_ENABLED = previous;
+		}
 	});
 });

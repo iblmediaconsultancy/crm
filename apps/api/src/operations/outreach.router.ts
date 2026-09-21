@@ -12,6 +12,8 @@ import type { AuthedTrpcContext } from "../trpc/context.types";
 import { AuthMiddleware } from "../trpc/middlewares/auth.middleware";
 import { PermissionMiddleware } from "../trpc/middlewares/permission.middleware";
 import {
+	atlasAuthorizationIssueInput,
+	atlasAuthorizationRevokeInput,
 	followUpCancelInput,
 	followUpPlanCreateInput,
 	localReplyInput,
@@ -22,6 +24,40 @@ import {
 @UseMiddlewares(AuthMiddleware, PermissionMiddleware)
 export class OutreachLifecycleRouter {
 	constructor(private readonly outreach: OutreachLifecycleService) {}
+	@Query({ meta: { permission: "outreach.approve" } }) listAtlasAuthorizations(
+		@Ctx() ctx: AuthedTrpcContext,
+	) {
+		return this.outreach.listAtlasAuthorizations({
+			userId: ctx.user.id,
+			role: ctx.workspaceRole,
+		});
+	}
+	@Mutation({
+		input: atlasAuthorizationIssueInput,
+		meta: { permission: "outreach.approve" },
+	})
+	issueAtlasAuthorization(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof atlasAuthorizationIssueInput>,
+	) {
+		return this.outreach.issueAtlasAuthorization(
+			{ userId: ctx.user.id, role: ctx.workspaceRole },
+			input,
+		);
+	}
+	@Mutation({
+		input: atlasAuthorizationRevokeInput,
+		meta: { permission: "outreach.approve" },
+	})
+	revokeAtlasAuthorization(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof atlasAuthorizationRevokeInput>,
+	) {
+		return this.outreach.revokeAtlasAuthorization(
+			{ userId: ctx.user.id, role: ctx.workspaceRole },
+			input,
+		);
+	}
 	@Query({ meta: { permission: "crm.read" } }) listPlans(
 		@Ctx() ctx: AuthedTrpcContext,
 	) {

@@ -6,7 +6,7 @@ import {
 	validateExternalCopy,
 } from "@crm/db";
 import { withPrincipal } from "@crm/db/security";
-import { Inject, Injectable, Logger } from "@nestjs/common";
+import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import { InjectDatabase } from "../database/database.constants";
 import { snippetOf } from "../mailbox/message-text";
 import { resolveAtlasOutreachSender } from "./atlas-sender";
@@ -21,6 +21,7 @@ import {
 	providerErrorCode,
 } from "./provider-credentials";
 import { HttpResendTransport, type ResendTransport } from "./resend-transport";
+import { MiabSentSyncService } from "./miab-sent-sync.service";
 
 export const WORKER_RESEND_CREDENTIAL_SOURCE = Symbol(
 	"WORKER_RESEND_CREDENTIAL_SOURCE",
@@ -81,6 +82,7 @@ export class PostgresJobWorkerService {
 		private readonly credentials: ResendCredentialSource,
 		@Inject(WORKER_RESEND_TRANSPORT)
 		private readonly transport: ResendTransport,
+		@Optional() private readonly sentSync?: MiabSentSyncService,
 	) {}
 
 	async runDue(workerId: string): Promise<number> {
@@ -88,11 +90,16 @@ export class PostgresJobWorkerService {
 		for (let index = 0; index < 25; index += 1) {
 			const handled =
 				(await this.processSystemEmail(workerId)) ||
-				(await this.processOutbound(workerId));
+				(await this.processOutbound(workerId)) ||
+				(await this.processSentSync(workerId));
 			if (!handled) break;
 			processed += 1;
 		}
 		return processed;
+	}
+
+	private async processSentSync(workerId: string): Promise<boolean> {
+		return this.sentSync ? this.sentSync.runNext(workerId) : false;
 	}
 
 	private async processSystemEmail(workerId: string): Promise<boolean> {
@@ -206,6 +213,7 @@ export class PostgresJobWorkerService {
 							status: true,
 							leadId: true,
 							coldOutreach: true,
+							atlasAuthorizedAt: true,
 							language: true,
 							subject: true,
 							body: true,
@@ -217,6 +225,9 @@ export class PostgresJobWorkerService {
 									displayName: true,
 									ownerUserId: true,
 								},
+							},
+							authorization: {
+								select: { scope: true, status: true, expiresAt: true },
 							},
 							recipientRoute: {
 								select: {
@@ -250,22 +261,50 @@ export class PostgresJobWorkerService {
 								`${draft.recipientRoute.contact.firstName} ${draft.recipientRoute.contact.lastName ?? ""}`,
 							)
 						: false;
+					const settings = draft.coldOutreach
+						? await tx.appSetting.findUnique({
+								where: { id: "app" },
+								select: { atlasLiveOutreachEnabled: true },
+							})
+						: null;
+					const authorizationValid =
+						!draft.coldOutreach ||
+						(Boolean(draft.atlasAuthorizedAt) &&
+							draft.authorization?.scope === "STANDARD_COLD_OUTREACH" &&
+							draft.authorization.status === "ACTIVE" &&
+							(draft.authorization.expiresAt === null ||
+								draft.authorization.expiresAt > new Date()) &&
+							settings?.atlasLiveOutreachEnabled === true &&
+							process.env.ATLAS_LIVE_OUTREACH_ENABLED?.trim().toLowerCase() ===
+								"true");
+					const senderValid =
+						!draft.coldOutreach ||
+							draft.mailbox?.address.toLowerCase() === "outreach@iblmedia.com";
 					if (
 						draft.status !== "QUEUED" ||
 						draft.recipientRoute?.type !== "EMAIL" ||
 						draft.recipientRoute.contact?.lifecycleState !== "ACTIVE" ||
 						protectedPlayer ||
-						consent?.status === "DO_NOT_CONTACT"
+						consent?.status === "DO_NOT_CONTACT" ||
+						!authorizationValid ||
+						!senderValid
 					) {
+						const lastErrorCode = protectedPlayer
+							? "OUTBOUND_PROTECTED_PLAYER"
+							: consent?.status === "DO_NOT_CONTACT"
+								? "OUTBOUND_ROUTE_DO_NOT_CONTACT"
+								: !senderValid
+									? "OUTBOUND_ATLAS_SENDER_REJECTED"
+									: !authorizationValid
+										? "OUTBOUND_ATLAS_AUTHORIZATION_REQUIRED"
+										: "OUTBOUND_CANCELLED_BY_POLICY";
 						await tx.outboundDelivery.update({
 							where: { id: delivery.id },
 							data: {
 								status: "CANCELLED",
 								leaseOwner: null,
 								leasedUntil: null,
-								lastErrorCode: protectedPlayer
-									? "OUTBOUND_PROTECTED_PLAYER"
-									: "OUTBOUND_CANCELLED_BY_POLICY",
+								lastErrorCode,
 							},
 						});
 						await tx.draft.update({
@@ -325,6 +364,11 @@ export class PostgresJobWorkerService {
 							status: "SENT",
 							providerMessageId: sent.providerMessageId,
 							sentAt,
+							sentSyncStatus: "PENDING",
+							sentSyncRetryAt: null,
+							sentSyncErrorCode: null,
+							sentSyncLeaseOwner: null,
+							sentSyncLeasedUntil: null,
 							leaseOwner: null,
 							leasedUntil: null,
 							retryAt: null,

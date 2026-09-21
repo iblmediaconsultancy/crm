@@ -33,6 +33,8 @@ export interface MiabProtocolClient {
 	connect(credentials: MiabCredentials): Promise<void>;
 	capabilities(): Promise<string[]>;
 	folders(): Promise<string[]>;
+	hasMessageId(folder: string, messageId: string): Promise<boolean>;
+	append(folder: string, source: Uint8Array, internalDate: Date): Promise<number | null>;
 	fetchReadOnly(folder: string, afterUid: number | null, limit: number): Promise<MiabFetchedMessage[]>;
 	drainErrors?(): MiabParseError[];
 	close(): Promise<void>;
@@ -61,6 +63,30 @@ export class TlsMiabProtocolClient implements MiabProtocolClient {
 
 	async folders(): Promise<string[]> {
 		return (await this.requireClient().list()).map((folder) => folder.path);
+	}
+
+	async hasMessageId(folder: string, messageId: string): Promise<boolean> {
+		const client = this.requireClient();
+		await client.mailboxOpen(folder, { readOnly: true });
+		const uids = await client.search(
+			{ header: { "message-id": messageId } },
+			{ uid: true },
+		);
+		return uids.length > 0;
+	}
+
+	async append(
+		folder: string,
+		source: Uint8Array,
+		internalDate: Date,
+	): Promise<number | null> {
+		const result = await this.requireClient().append(
+			folder,
+			Buffer.from(source),
+			["\\Seen"],
+			internalDate,
+		);
+		return typeof result.uid === "number" ? result.uid : null;
 	}
 
 	async fetchReadOnly(folder: string, afterUid: number | null, limit: number): Promise<MiabFetchedMessage[]> {
