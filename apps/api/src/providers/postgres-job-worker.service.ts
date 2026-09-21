@@ -1,5 +1,10 @@
 import { sendSystemEmail } from "@crm/auth";
-import { ActivityType, type Db, isProtectedPlayerContact } from "@crm/db";
+import {
+	ActivityType,
+	type Db,
+	isProtectedPlayerContact,
+	validateExternalCopy,
+} from "@crm/db";
 import { withPrincipal } from "@crm/db/security";
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import { InjectDatabase } from "../database/database.constants";
@@ -293,6 +298,8 @@ export class PostgresJobWorkerService {
 						)
 					: null);
 			if (!preparedMailbox) throw new Error("OUTBOUND_MAILBOX_MISSING");
+			const copyValidation = validateExternalCopy(prepared);
+			if (!copyValidation.valid) throw new Error(copyValidation.reason);
 			const secret = await this.credentials.load();
 			const configuredSender = resolveAtlasOutreachSender();
 			const outboundMessageId = `<ibl-${prepared.id}@iblmedia.com>`;

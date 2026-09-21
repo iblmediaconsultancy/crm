@@ -1,4 +1,8 @@
-import { type Db, isProtectedPlayerContact } from "@crm/db";
+import {
+	type Db,
+	isProtectedPlayerContact,
+	validateExternalCopy,
+} from "@crm/db";
 import { ProviderCapabilityError, withPrincipal } from "@crm/db/security";
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { InjectDatabase } from "../database/database.constants";
@@ -25,6 +29,8 @@ export class OutboundDeliveryService {
 				select: {
 					id: true,
 					status: true,
+					subject: true,
+					body: true,
 					ownerUserId: true,
 					mailbox: { select: { ownerUserId: true, status: true } },
 					recipientRoute: {
@@ -53,6 +59,8 @@ export class OutboundDeliveryService {
 				},
 			});
 			if (!draft) throw new NotFoundException("Draft not found.");
+			const copyValidation = validateExternalCopy(draft);
+			if (!copyValidation.valid) throw new Error(copyValidation.reason);
 			if (
 				draft.ownerUserId !== userId ||
 				draft.mailbox?.ownerUserId !== userId

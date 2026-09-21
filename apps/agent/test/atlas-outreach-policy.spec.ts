@@ -33,13 +33,36 @@ describe("Atlas outreach policy", () => {
 		).toBe(false);
 	});
 
-	it("blocks pricing language", () => {
-		expect(hasBlockedPricingLanguage("Would a short call be useful?")).toBe(
-			false,
-		);
-		expect(hasBlockedPricingLanguage("I can send pricing and fees.")).toBe(
-			true,
-		);
+	it("blocks commercial pricing terms and amounts without substring false positives", () => {
+		for (const value of [
+			"feels",
+			"feeling",
+			"coffee",
+			"feedback",
+			"Would a short call be useful?",
+		]) {
+			expect(hasBlockedPricingLanguage(value)).toBe(false);
+		}
+		for (const value of [
+			"fee",
+			"fees",
+			"our fee",
+			"monthly fee",
+			"price",
+			"pricing",
+			"cost",
+			"package price",
+			"€500",
+			"$500",
+			"£500",
+			"500 per month",
+			"500/month",
+			"a discount",
+			"our rates",
+			"the package",
+		]) {
+			expect(hasBlockedPricingLanguage(value)).toBe(true);
+		}
 	});
 
 	it("fails closed while live outreach is disabled", async () => {

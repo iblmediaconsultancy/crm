@@ -117,6 +117,27 @@ describe("Atlas IBL sales playbook", () => {
 		}
 	});
 
+	it("blocks forbidden dash punctuation before queueing an email", async () => {
+		const previous = process.env.ATLAS_LIVE_OUTREACH_ENABLED;
+		process.env.ATLAS_LIVE_OUTREACH_ENABLED = "true";
+		try {
+			await expect(
+				sendAtlasEmail(atlasContext, {
+					leadId: "lead",
+					routeId: "route",
+					subject: "A relevant opportunity",
+					body: "A normal message — with forbidden punctuation.",
+					language: "English",
+					idempotencyKey: "dash-policy-test",
+				}),
+			).rejects.toThrow("forbidden punctuation: em dash");
+		} finally {
+			if (previous === undefined)
+				delete process.env.ATLAS_LIVE_OUTREACH_ENABLED;
+			else process.env.ATLAS_LIVE_OUTREACH_ENABLED = previous;
+		}
+	});
+
 	it("does not treat inbound security requests as permission to continue outreach", () => {
 		expect(
 			atlasHandoffDecision(

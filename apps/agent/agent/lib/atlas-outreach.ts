@@ -1,4 +1,9 @@
-import { db, isProtectedPlayerContact, Prisma } from "@crm/db";
+import {
+	db,
+	isProtectedPlayerContact,
+	Prisma,
+	validateExternalCopy,
+} from "@crm/db";
 import { withPrincipal } from "@crm/db/security";
 import { hasUnsupportedOutcomeClaim } from "./atlas-playbook";
 import type { PurposeContext } from "./session-purpose";
@@ -7,7 +12,11 @@ import { attribute, purposeOf } from "./session-purpose";
 export const ATLAS_OPERATOR_ID = "atlas-operator";
 const POLICY_VERSION = "atlas-v1";
 const LANGUAGES = new Set(["english", "dutch", "turkish"]);
-const BLOCKED_PRICING = /(?:pricing|price|prices|cost|budget|fee|fees|€|\$|£)/i;
+const BLOCKED_PRICING_WORDS =
+	/\b(?:pricing|prices?|costs?|budgets?|fees?|discounts?|rates?|packages?)\b/i;
+const BLOCKED_CURRENCY_AMOUNT = /(?:[€$£]\s*\d+(?:[.,]\d{1,2})?|\b\d+(?:[.,]\d{1,2})?\s*[€$£])/i;
+const BLOCKED_PERIODIC_AMOUNT =
+	/\b\d+(?:[.,]\d+)?\s*(?:per\s+(?:month|mo|week|wk|year|yr)|\/\s*(?:month|mo|week|wk|year|yr))\b/i;
 
 type AtlasInput = {
 	leadId: string;
@@ -68,7 +77,11 @@ export function isWithinAtlasWorkingHours(
 }
 
 export function hasBlockedPricingLanguage(value: string): boolean {
-	return BLOCKED_PRICING.test(value);
+	return (
+		BLOCKED_PRICING_WORDS.test(value) ||
+		BLOCKED_CURRENCY_AMOUNT.test(value) ||
+		BLOCKED_PERIODIC_AMOUNT.test(value)
+	);
 }
 
 export function isAtlasLanguageAllowed(value: string): boolean {
@@ -161,6 +174,8 @@ export async function listAtlasOutreachQueue(ctx: PurposeContext) {
 
 export async function sendAtlasEmail(ctx: PurposeContext, input: AtlasInput) {
 	assertAtlasSession(ctx);
+	const copyValidation = validateExternalCopy(input);
+	if (!copyValidation.valid) throw new Error(copyValidation.reason);
 	if (!atlasEnabled()) throw new Error("ATLAS_LIVE_OUTREACH_ENABLED is false.");
 	if (!input.subject.trim() || !input.body.trim())
 		throw new Error("Subject and body are required.");
