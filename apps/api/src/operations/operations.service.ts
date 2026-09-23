@@ -44,6 +44,10 @@ import type {
 	taskTransitionInput,
 	templateCreateInput,
 } from "./operations.contracts";
+import {
+	coldOutreachReplyWhere,
+	coldOutreachSentWhere,
+} from "./outreach-metrics";
 
 type Input<T extends z.ZodType> = z.infer<T>;
 
@@ -364,9 +368,11 @@ export class OperationsService {
 					},
 				}),
 				tx.lead.groupBy({ by: ["stage"], _count: { _all: true } }),
-				tx.outboundDelivery.count({ where: { sentAt: { gte: startOfDay() } } }),
 				tx.outboundDelivery.count({
-					where: { status: "REPLIED", updatedAt: { gte: startOfDay() } },
+					where: coldOutreachSentWhere(startOfDay()),
+				}),
+				tx.outboundDelivery.count({
+					where: coldOutreachReplyWhere(startOfDay()),
 				}),
 				tx.activity.count({
 					where: { type: "MEETING", createdAt: { gte: startOfDay() } },

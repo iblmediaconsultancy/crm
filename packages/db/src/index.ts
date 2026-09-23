@@ -17,5 +17,6 @@ export type {
 	FactEvidence,
 	WorkspaceProfileSections,
 } from "./json";
+export * from "./outreach-policy";
 export * from "./player-protection";
 export * from "./prospect-backlog";

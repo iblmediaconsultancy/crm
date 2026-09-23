@@ -2,31 +2,16 @@ import type { Db } from "@crm/db";
 import { withPrincipal } from "@crm/db/security";
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import { InjectDatabase } from "../database/database.constants";
+import type { MiabProtocolClient } from "./miab-imap.client";
 import {
 	MIAB_CREDENTIAL_SOURCE,
 	MIAB_PROTOCOL_FACTORY,
 } from "./miab-sync.service";
-import type { MiabProtocolClient } from "./miab-imap.client";
 import type { MiabCredentialSource } from "./provider-credentials";
 
 export const SENT_SYNC_MAX_ATTEMPTS = 5;
 
 type ClaimedSentSync = { id: string };
-type DeliveryForSentSync = {
-	id: string;
-	status: string;
-	sentAt: Date | null;
-	providerMessageId: string | null;
-	sentSyncAttempts: number;
-	sentSyncStatus: SentSyncStatus;
-	draft: {
-		id: string;
-		subject: string | null;
-		body: string;
-		mailbox: { address: string; displayName: string | null } | null;
-		recipientRoute: { normalizedValue: string } | null;
-	};
-};
 
 @Injectable()
 export class MiabSentSyncService {
@@ -117,11 +102,17 @@ export class MiabSentSyncService {
 						},
 					}),
 			);
-			if (!delivery?.sentAt || !delivery.draft.mailbox || !delivery.draft.recipientRoute) {
+			if (
+				!delivery?.sentAt ||
+				!delivery.draft.mailbox ||
+				!delivery.draft.recipientRoute
+			) {
 				throw new Error("SENT_SYNC_MESSAGE_DATA_MISSING");
 			}
 			const messageId = `<ibl-${delivery.draft.id}@iblmedia.com>`;
-			const secret = await this.credentials.load(delivery.draft.mailbox.address);
+			const secret = await this.credentials.load(
+				delivery.draft.mailbox.address,
+			);
 			const client = this.createClient();
 			try {
 				await client.connect(secret);
@@ -145,23 +136,20 @@ export class MiabSentSyncService {
 							}),
 							delivery.sentAt,
 						);
-				await withPrincipal(
-					this.db,
-					{ userId: null, kind: "worker" },
-					(tx) =>
-						tx.outboundDelivery.updateMany({
-							where: { id: deliveryId, sentSyncLeaseOwner: workerId },
-							data: {
-								sentSyncStatus: "SYNCED",
-								sentSyncAt: new Date(),
-								sentSyncFolder: folder,
-								sentSyncUid: uid === null ? undefined : String(uid),
-								sentSyncRetryAt: null,
-								sentSyncErrorCode: null,
-								sentSyncLeaseOwner: null,
-								sentSyncLeasedUntil: null,
-							},
-						}),
+				await withPrincipal(this.db, { userId: null, kind: "worker" }, (tx) =>
+					tx.outboundDelivery.updateMany({
+						where: { id: deliveryId, sentSyncLeaseOwner: workerId },
+						data: {
+							sentSyncStatus: "SYNCED",
+							sentSyncAt: new Date(),
+							sentSyncFolder: folder,
+							sentSyncUid: uid === null ? undefined : String(uid),
+							sentSyncRetryAt: null,
+							sentSyncErrorCode: null,
+							sentSyncLeaseOwner: null,
+							sentSyncLeasedUntil: null,
+						},
+					}),
 				);
 				this.logger.log({
 					message: alreadyPresent
@@ -174,7 +162,10 @@ export class MiabSentSyncService {
 				await client.close().catch(() => undefined);
 			}
 		} catch (error) {
-			const code = error instanceof Error ? error.message.slice(0, 100) : "MIAB_SENT_SYNC_FAILED";
+			const code =
+				error instanceof Error
+					? error.message.slice(0, 100)
+					: "MIAB_SENT_SYNC_FAILED";
 			await withPrincipal(
 				this.db,
 				{ userId: null, kind: "worker" },
@@ -191,9 +182,7 @@ export class MiabSentSyncService {
 						data: {
 							sentSyncStatus: dead ? "FAILED" : "RETRY",
 							sentSyncErrorCode: code,
-							sentSyncRetryAt: dead
-								? null
-								: new Date(Date.now() + 15_000),
+							sentSyncRetryAt: dead ? null : new Date(Date.now() + 15_000),
 							sentSyncLeaseOwner: null,
 							sentSyncLeasedUntil: null,
 						},
@@ -210,10 +199,16 @@ export class MiabSentSyncService {
 }
 
 export function selectSentFolder(folders: string[]): string | null {
-	const normalized = folders.map((folder) => ({ folder, value: folder.trim().toLowerCase() }));
+	const normalized = folders.map((folder) => ({
+		folder,
+		value: folder.trim().toLowerCase(),
+	}));
 	return (
-		normalized.find(({ value }) => ["sent", "sent items", "sent mail"].includes(value))?.folder ??
-		normalized.find(({ value }) => /(^|[/. ])sent([/. ]|$)/i.test(value))?.folder ??
+		normalized.find(({ value }) =>
+			["sent", "sent items", "sent mail"].includes(value),
+		)?.folder ??
+		normalized.find(({ value }) => /(^|[/. ])sent([/. ]|$)/i.test(value))
+			?.folder ??
 		normalized.find(({ value }) => value.includes("sent"))?.folder ??
 		null
 	);

@@ -130,7 +130,7 @@ describe("Atlas IBL sales playbook", () => {
 					language: "English",
 					idempotencyKey: "dash-policy-test",
 				}),
-			).rejects.toThrow("forbidden punctuation: em dash");
+			).rejects.toThrow("External copy contains forbidden dash punctuation.");
 		} finally {
 			if (previous === undefined)
 				delete process.env.ATLAS_LIVE_OUTREACH_ENABLED;

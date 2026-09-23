@@ -14,11 +14,13 @@ import {
 	researchRequestAuth,
 	settleResearchRequest,
 } from "../lib/ibl-research";
+import { isScheduledExecutionEnabled } from "../lib/scheduled-execution";
 import { scheduleTask } from "../lib/tasks";
 
 export default defineSchedule({
 	cron: "* * * * *",
 	async run({ receive, waitUntil, appAuth }) {
+		if (!isScheduledExecutionEnabled()) return;
 		waitUntil(
 			Promise.all([
 				(async () => {

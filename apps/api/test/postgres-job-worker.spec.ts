@@ -36,6 +36,8 @@ const coldContactId = `queue-cold-contact-${suffix}`;
 const coldRouteId = `queue-cold-route-${suffix}`;
 const coldDraftId = `queue-cold-draft-${suffix}`;
 const coldDeliveryId = `queue-cold-delivery-${suffix}`;
+const coldMailboxId = `queue-cold-mailbox-${suffix}`;
+const coldQuotaDay = new Date("2099-01-01T00:00:00.000Z");
 const previousSender = process.env.RESEND_SYSTEM_FROM_EMAIL;
 const previousOutreachSender = process.env.RESEND_OUTREACH_FROM_EMAIL;
 const adminConnectionString =
@@ -44,6 +46,7 @@ if (!adminConnectionString)
 	throw new Error("RLS_ADMIN_DATABASE_URL or DATABASE_URL is required");
 const { Client } = pg;
 let admin: pg.Client;
+let coldMailboxCreated = false;
 
 const credentials: ResendCredentialSource = {
 	load: async () => ({ apiKey: "test-only" }),
@@ -101,9 +104,12 @@ async function clean() {
 	await admin.query('DELETE FROM "outboundDelivery" WHERE id=$1', [
 		coldDeliveryId,
 	]);
+	await admin.query('DELETE FROM "outreachQuota" WHERE day=$1', [coldQuotaDay]);
 	await admin.query('DELETE FROM "draft" WHERE id=$1', [coldDraftId]);
 	await admin.query('DELETE FROM "contactRoute" WHERE id=$1', [coldRouteId]);
 	await admin.query('DELETE FROM "contact" WHERE id=$1', [coldContactId]);
+	if (coldMailboxCreated)
+		await admin.query('DELETE FROM "mailbox" WHERE id=$1', [coldMailboxId]);
 	await admin.query('DELETE FROM "draft" WHERE id=$1', [senderDraftId]);
 	await admin.query('DELETE FROM "contactRoute" WHERE id=$1', [senderRouteId]);
 	await admin.query('DELETE FROM "contact" WHERE id=$1', [senderContactId]);
@@ -129,6 +135,22 @@ beforeAll(async () => {
 		'INSERT INTO "providerCapability" (key,status,"verifiedAt","updatedAt") VALUES (\'RESEND_OUTBOUND\',\'VERIFIED\',NOW(),NOW()) ON CONFLICT (key) DO UPDATE SET status=\'VERIFIED\',"verifiedAt"=NOW()',
 		[],
 	);
+	const existingColdMailbox = await db.mailbox.findFirst({
+		where: { normalizedAddress: "outreach@iblmedia.com" },
+		select: { id: true },
+	});
+	if (!existingColdMailbox) {
+		await db.mailbox.create({
+			data: {
+				id: coldMailboxId,
+				ownerUserId: actorUserId,
+				address: "outreach@iblmedia.com",
+				normalizedAddress: "outreach@iblmedia.com",
+				status: "VERIFIED",
+			},
+		});
+		coldMailboxCreated = true;
+	}
 });
 
 afterAll(async () => {
@@ -271,14 +293,79 @@ describe("PostgreSQL durable system-email queue", () => {
 		process.env.RESEND_OUTREACH_FROM_EMAIL = "info@iblmedia.com";
 		try {
 			const worker = new PostgresJobWorkerService(db, credentials, transport);
-			expect(await worker.runDue("sender-policy-worker")).toBe(5);
+			expect(await worker.runDue("sender-policy-worker")).toBe(1);
 			expect(sent.has(`${keyPrefix}sender-delivery`)).toBe(false);
 			expect(
 				await db.outboundDelivery.findUnique({
 					where: { id: senderDeliveryId },
-					select: { status: true },
+					select: {
+						status: true,
+						retryAt: true,
+						attemptCount: true,
+						lastErrorCode: true,
+					},
 				}),
-			).toEqual({ status: "FAILED" });
+			).toEqual({
+				status: "FAILED",
+				retryAt: null,
+				attemptCount: 1,
+				lastErrorCode: "RESEND_OUTREACH_SENDER_MISMATCH",
+			});
+			expect(await worker.runDue("sender-policy-worker-repeat")).toBe(0);
+			expect(sent.has(`${keyPrefix}sender-delivery`)).toBe(false);
+
+			const retryCalls = { count: 0 };
+			const retryTransport: ResendTransport = {
+				send: async () => {
+					retryCalls.count += 1;
+					throw new Error("TIMEOUT");
+				},
+			};
+			process.env.RESEND_OUTREACH_FROM_EMAIL = "outreach@iblmedia.com";
+			await db.draft.update({
+				where: { id: senderDraftId },
+				data: { status: "QUEUED", failureCode: null },
+			});
+			await db.outboundDelivery.update({
+				where: { id: senderDeliveryId },
+				data: { status: "PENDING", attemptCount: 0, retryAt: null },
+			});
+			const retryWorker = new PostgresJobWorkerService(
+				db,
+				credentials,
+				retryTransport,
+			);
+			expect(await retryWorker.runDue("sender-retry-worker")).toBe(1);
+			let retryState = await db.outboundDelivery.findUniqueOrThrow({
+				where: { id: senderDeliveryId },
+				select: { status: true, retryAt: true, attemptCount: true },
+			});
+			expect(retryState.status).toBe("RETRY");
+			expect(retryState.attemptCount).toBe(1);
+			expect(retryState.retryAt?.getTime()).toBeGreaterThan(Date.now());
+			expect(await retryWorker.runDue("sender-retry-worker-same-pass")).toBe(0);
+			for (let attempt = 2; attempt <= 5; attempt += 1) {
+				await db.outboundDelivery.update({
+					where: { id: senderDeliveryId },
+					data: { retryAt: new Date(Date.now() - 1_000) },
+				});
+				expect(await retryWorker.runDue(`sender-retry-worker-${attempt}`)).toBe(
+					1,
+				);
+			}
+			retryState = await db.outboundDelivery.findUniqueOrThrow({
+				where: { id: senderDeliveryId },
+				select: { status: true, retryAt: true, attemptCount: true },
+			});
+			expect(retryState).toEqual({
+				status: "FAILED",
+				retryAt: null,
+				attemptCount: 5,
+			});
+			expect(retryCalls.count).toBe(5);
+			expect(await retryWorker.runDue("sender-retry-worker-after-dead")).toBe(
+				0,
+			);
 		} finally {
 			if (previous === undefined) delete process.env.RESEND_OUTREACH_FROM_EMAIL;
 			else process.env.RESEND_OUTREACH_FROM_EMAIL = previous;
@@ -471,10 +558,11 @@ describe("PostgreSQL durable system-email queue", () => {
 
 	test("cancels a queued cold draft without active Atlas authorization", async () => {
 		const coldMailbox = await db.mailbox.findFirst({
-			where: { address: "outreach@iblmedia.com", status: "VERIFIED" },
+			where: { normalizedAddress: "outreach@iblmedia.com" },
 			select: { id: true },
 		});
-		if (!coldMailbox) throw new Error("The verified Atlas mailbox is required.");
+		if (!coldMailbox)
+			throw new Error("The verified Atlas mailbox is required.");
 		await db.contact.create({
 			data: {
 				id: coldContactId,
@@ -505,8 +593,13 @@ describe("PostgreSQL durable system-email queue", () => {
 				status: "DRAFT",
 				approvedAt: new Date(),
 				idempotencyKey: `${keyPrefix}cold-draft`,
+				createdAt: coldQuotaDay,
 			},
 		});
+		await admin.query(
+			'INSERT INTO "outreachQuota" (id,day,"coldEmailLimit","coldEmailReserved","coldEmailSent","createdAt","updatedAt") VALUES ($1,$2,90,1,0,NOW(),NOW())',
+			[`quota-${suffix}`, coldQuotaDay],
+		);
 		await db.outreachApproval.create({
 			data: {
 				draftId: coldDraftId,
@@ -544,8 +637,15 @@ describe("PostgreSQL durable system-email queue", () => {
 				status: "CANCELLED",
 				lastErrorCode: "OUTBOUND_ATLAS_AUTHORIZATION_REQUIRED",
 			});
+			expect(
+				await db.outreachQuota.findUnique({
+					where: { day: coldQuotaDay },
+					select: { coldEmailReserved: true },
+				}),
+			).toEqual({ coldEmailReserved: 0 });
 		} finally {
-			if (previous === undefined) delete process.env.ATLAS_LIVE_OUTREACH_ENABLED;
+			if (previous === undefined)
+				delete process.env.ATLAS_LIVE_OUTREACH_ENABLED;
 			else process.env.ATLAS_LIVE_OUTREACH_ENABLED = previous;
 		}
 	});

@@ -15,6 +15,7 @@
 		"lint": "biome check .",
 		"postinstall": "node scripts/chmod-trpc-binary.mjs",
 		"start": "bun src/main.ts",
+		"start:inbound-worker": "bun src/inbound-worker.ts",
 		"start:prod": "bun dist/main.js",
 		"test": "CRM_TELEMETRY_DISABLED=1 bun test --preload ./test/setup.ts",
 		"test:watch": "CRM_TELEMETRY_DISABLED=1 bun test --watch --preload ./test/setup.ts",

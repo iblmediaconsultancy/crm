@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
 	classifyProspectBacklogRoute,
 	validatePreparedOutreach,
+	validateReadyProspect,
 } from "../src/prospect-backlog";
 
 describe("prospect backlog route semantics", () => {
@@ -49,6 +50,25 @@ describe("prospect backlog route semantics", () => {
 		).toBe("ROLE");
 	});
 
+	test("classifies common multilingual agency inboxes by function", () => {
+		expect(
+			classifyProspectBacklogRoute({
+				type: "EMAIL",
+				value: "contato@agency.example",
+				linkedEntityKeys: ["AGY-0001"],
+				entityNames: ["Example Agency"],
+			}),
+		).toMatchObject({ mailboxType: "GENERAL", routeUsage: "REUSABLE" });
+		expect(
+			classifyProspectBacklogRoute({
+				type: "EMAIL",
+				value: "comunicaciones@agency.example",
+				linkedEntityKeys: ["AGY-0001", "AGT-0001"],
+				entityNames: ["Example Agency"],
+			}),
+		).toMatchObject({ mailboxType: "ROLE", routeUsage: "CONTACT_ONCE" });
+	});
+
 	test("does not infer personal ownership from a named agency address", () => {
 		expect(
 			classifyProspectBacklogRoute({
@@ -88,6 +108,10 @@ describe("broadened outreach quality gate", () => {
 		researchSummary:
 			"The agency roster and current club profile were checked against official club material and the agency's public roster; the route and player relationship are sufficiently supported for review.",
 		sourceUrls: ["https://example.com/official-source"],
+		subject: "A specific football opportunity",
+		body: "Hi team, this is a short, specific message about a current media opportunity.",
+		followUpApproach:
+			"Follow up once with a useful question, then close the loop.",
 	};
 
 	test("accepts a specific media-gap hook without requiring a news event", () => {
@@ -116,5 +140,83 @@ describe("broadened outreach quality gate", () => {
 			valid: false,
 			reason: "Why-now reasoning is not specific enough.",
 		});
+	});
+
+	test("rejects em dash and en dash punctuation in outbound copy", () => {
+		expect(
+			validatePreparedOutreach({
+				...evidence,
+				body: "Hi team — this copy is not sendable.",
+				hookType: "MEDIA_GAP",
+			}),
+		).toEqual({
+			valid: false,
+			reason: "External copy contains forbidden punctuation: em dash.",
+		});
+		expect(
+			validatePreparedOutreach({
+				...evidence,
+				followUpApproach: "Follow up – then close the loop.",
+				hookType: "MEDIA_GAP",
+			}),
+		).toEqual({
+			valid: false,
+			reason: "External copy contains forbidden punctuation: en dash.",
+		});
+	});
+
+	test("rejects a generic roster placeholder from READY", () => {
+		expect(
+			validateReadyProspect({
+				...evidence,
+				hookType: "ROSTER_MEDIA_GAP",
+				playerEntryPoint:
+					"A current agency roster player to be nominated by the team",
+				routeConfidence: "HIGH",
+				researchConfidence: "HIGH",
+				mailboxType: "GENERAL",
+				routeUsage: "CONTACT_ONCE",
+			}),
+		).toEqual({
+			valid: false,
+			reasons: ["The player opportunity is a generic placeholder."],
+		});
+	});
+
+	test("requires high-confidence identity and safety checks before READY", () => {
+		const result = validateReadyProspect({
+			...evidence,
+			hookType: "CURRENT_EVENT",
+			playerEntryPoint: "A named player at the verified current club",
+			routeConfidence: "MEDIUM",
+			researchConfidence: "MEDIUM",
+			mailboxType: "UNKNOWN",
+			routeUsage: "CONTACT_ONCE",
+			existingRelationship: true,
+		});
+		expect(result).toEqual({
+			valid: false,
+			reasons: [
+				"Route confidence must be HIGH before READY.",
+				"Research confidence must be HIGH before READY.",
+				"Mailbox type must be identified before READY.",
+				"An existing relationship requires Ihsan review.",
+			],
+		});
+	});
+
+	test("keeps normal copy free of false pricing matches", () => {
+		expect(
+			validateReadyProspect({
+				...evidence,
+				hookType: "MEDIA_GAP",
+				playerEntryPoint: "A named player entering a larger first-team role",
+				routeConfidence: "HIGH",
+				researchConfidence: "HIGH",
+				mailboxType: "PERSONAL",
+				routeUsage: "REUSABLE",
+				body: "Hi team, the next matchday feels like a useful moment to compare notes.",
+			}),
+		).toEqual({ valid: true });
 	});
 });

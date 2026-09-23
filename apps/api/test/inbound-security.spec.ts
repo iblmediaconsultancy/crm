@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
 	assessInboundSecurity,
+	isBenignInlineSignature,
 	SECURITY_REVIEW_REASON,
 } from "../src/mailbox/inbound-security";
 
@@ -73,6 +74,48 @@ describe("inbound email security assessment", () => {
 				threadIdentifiersMatch: true,
 			}),
 		).toEqual({ flagged: false, signals: [] });
+	});
+
+	test("accepts a normal inline signature image without weakening other checks", () => {
+		const attachment = {
+			filename: "logo.png",
+			contentType: "image/png",
+			disposition: "inline" as const,
+			contentId: "<logo@example.test>",
+			size: 8896,
+		};
+		expect(isBenignInlineSignature(attachment)).toBe(true);
+		expect(
+			assessInboundSecurity({
+				subject: "Re: Hello",
+				body: "We are not looking to pursue a collaboration.",
+				fromEmail: "reply@example.test",
+				fromName: "Agency",
+				trustedDomains,
+				attachments: [attachment],
+			}),
+		).toEqual({ flagged: false, signals: [] });
+	});
+
+	test("keeps real or ambiguous attachments in security review", () => {
+		expect(
+			assessInboundSecurity({
+				subject: "Re: Hello",
+				body: "Thanks for the note.",
+				fromEmail: "reply@example.test",
+				fromName: "Agency",
+				trustedDomains,
+				attachments: [
+					{
+						filename: "document.pdf",
+						contentType: "application/pdf",
+						disposition: "attachment",
+						contentId: null,
+						size: 1000,
+					},
+				],
+			}),
+		).toEqual({ flagged: true, signals: ["SUSPICIOUS_ATTACHMENT"] });
 	});
 
 	test("requires suspicious content before adding an impersonation signal", () => {

@@ -10,7 +10,8 @@ import {
 	ThreadWriterService,
 } from "../src/mailbox/thread-writer.service";
 
-const suffix = process.env.TEST_RUN_ID ?? "thread-writer-spec";
+const suffix =
+	process.env.TEST_RUN_ID ?? `thread-writer-${Date.now()}-${Math.random()}`;
 const domain = `threads-${suffix}.test`;
 const userId = `user-${suffix}`;
 const mailbox = `rep-${suffix}@example.test`;
@@ -130,6 +131,19 @@ async function clean() {
 	await db.followUpPlan.deleteMany({ where: { id: followUpPlanId } });
 	await db.contactRoute.deleteMany({ where: { id: routeId } });
 	await db.contactRoute.deleteMany({ where: { id: { in: freeMailRouteIds } } });
+	const testLeads = await db.lead.findMany({
+		where: {
+			OR: [
+				{ id: leadId },
+				{ id: { in: freeMailLeadIds } },
+				{ name: "Unknown Sender", ownerUserId: userId },
+			],
+		},
+		select: { id: true },
+	});
+	await db.leadStageHistory.deleteMany({
+		where: { leadId: { in: testLeads.map((lead) => lead.id) } },
+	});
 	await db.lead.deleteMany({ where: { id: leadId } });
 	await db.lead.deleteMany({ where: { id: { in: freeMailLeadIds } } });
 	await db.lead.deleteMany({
@@ -529,6 +543,45 @@ describe("storing a synced email", () => {
 			status: "CANCELLED",
 			cancellationReason: "Inbound reply received",
 		});
+
+		const automatic = await threads.store(
+			row,
+			{ mailbox, origin: "miab" },
+			{
+				rfcMessageId: `<automatic-reply-${suffix}@mail.test>`,
+				rootId: normalConversationRoot,
+				subject: "Automatic reply: Pricing",
+				from: { email: person, name: "Agency Team" },
+				recipients: [{ email: mailbox, name: "Test Rep", kind: "to" }],
+				body: "Thank you. Please expect a slight delay in our response.",
+				sentAt: new Date("2026-01-05T12:00:00Z"),
+			},
+			await threads.context(),
+		);
+		expect(automatic).toBe(true);
+		expect(
+			await db.emailMessage.findUnique({
+				where: {
+					mailboxId_rfcMessageId: {
+						mailboxId,
+						rfcMessageId: `<automatic-reply-${suffix}@mail.test>`,
+					},
+				},
+				select: { inboundIntent: true },
+			}),
+		).toEqual({ inboundIntent: "AUTO_REPLY" });
+		expect(
+			await db.followUpPlan.findUnique({
+				where: { id: followUpPlanId },
+				select: { status: true, cancellationReason: true },
+			}),
+		).toEqual({ status: "ACTIVE", cancellationReason: null });
+		expect(
+			await db.followUpStep.findUnique({
+				where: { id: followUpStepId },
+				select: { status: true },
+			}),
+		).toEqual({ status: "PENDING" });
 	});
 
 	it("matches known free-mail contacts before company inference", async () => {

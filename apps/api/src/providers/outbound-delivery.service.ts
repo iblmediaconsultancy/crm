@@ -38,12 +38,14 @@ export class OutboundDeliveryService {
 							id: true,
 							type: true,
 							lifecycleState: true,
+							normalizedValue: true,
 							contact: {
 								select: {
 									id: true,
 									firstName: true,
 									lastName: true,
 									lifecycleState: true,
+									outreachState: true,
 								},
 							},
 						},
@@ -101,6 +103,24 @@ export class OutboundDeliveryService {
 			if (consent?.status === "DO_NOT_CONTACT") {
 				throw new Error("OUTBOUND_ROUTE_DO_NOT_CONTACT");
 			}
+			const routeEmail = draft.recipientRoute.normalizedValue;
+			const routeDomain = routeEmail.trim().toLowerCase().split("@").at(-1);
+			const [suppressedContact, suppressedOrganization] = await Promise.all([
+				tx.suppressedContact.findUnique({
+					where: { email: routeEmail },
+					select: { email: true },
+				}),
+				routeDomain
+					? tx.suppressedDomain.findUnique({
+							where: { domain: routeDomain },
+							select: { domain: true },
+						})
+					: null,
+			]);
+			if (draft.recipientRoute.contact?.outreachState !== "ALLOWED")
+				throw new Error("OUTBOUND_CONTACT_SUPPRESSED");
+			if (suppressedContact || suppressedOrganization)
+				throw new Error("OUTBOUND_ORGANIZATION_SUPPRESSED");
 			const idempotencyKey = `ibl-outbound:${draft.id}`;
 			const delivery = await tx.outboundDelivery.upsert({
 				where: { idempotencyKey },

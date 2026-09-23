@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { db } from "@crm/db";
+import { DEFAULT_AGENT_MODEL } from "@crm/db/settings";
 import type { SendFn } from "eve/channels";
 import audit from "../agent/hooks/audit";
 import {
@@ -79,7 +80,7 @@ beforeAll(async () => {
 					{ type: "run.summary" },
 				],
 			},
-			modelId: "test/model",
+			modelId: DEFAULT_AGENT_MODEL.id,
 			sandboxPolicy: {},
 			createdById: userId,
 			approvedAt: new Date(),
@@ -179,7 +180,7 @@ describe("durable custom-agent runtime", () => {
 		expect(trigger.nextRunAt?.getTime()).toBeGreaterThan(now.getTime());
 		expect(scheduledRuns).toHaveLength(1);
 		expect(scheduledRuns[0]?.status).toBe("QUEUED");
-		expect(scheduledRuns[0]?.modelId).toBe("gemini-3.1-flash-lite");
+		expect(scheduledRuns[0]?.modelId).toBe(DEFAULT_AGENT_MODEL.id);
 	});
 
 	it("recovers only sessionless runs with an expired delivery lease", async () => {
@@ -227,7 +228,7 @@ describe("durable custom-agent runtime", () => {
 		expect(persisted).toMatchObject({
 			status: "RUNNING",
 			sessionId,
-			modelId: "test/model",
+			modelId: DEFAULT_AGENT_MODEL.id,
 		});
 	});
 

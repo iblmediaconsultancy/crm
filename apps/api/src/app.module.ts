@@ -19,6 +19,7 @@ import { DealsModule } from "./deals/deals.module";
 import { FieldsModule } from "./fields/fields.module";
 import { FinanceModule } from "./finance/finance.module";
 import { HealthModule } from "./health/health.module";
+import { LinkedInModule } from "./linkedin/linkedin.module";
 import { LoggingModule } from "./logging/logging.module";
 import { logAuthRoute } from "./logging/request-logger.middleware";
 import { MailboxModule } from "./mailbox/mailbox.module";
@@ -69,6 +70,7 @@ import { WorkspaceModule } from "./workspace/workspace.module";
 		MailboxModule,
 		MetricsModule,
 		MeetingsModule,
+		LinkedInModule,
 		OnboardingModule,
 		OperationsModule,
 		SettingsModule,

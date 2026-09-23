@@ -86,14 +86,22 @@ export async function writeAtlasDailyReport(
 				tx.outboundDelivery.count({
 					where: {
 						status: "REPLIED",
+						replyIntent: {
+							in: [
+								"HUMAN_POSITIVE",
+								"HUMAN_NEUTRAL",
+								"HUMAN_NEGATIVE",
+								"REFERRAL_OR_ROUTING",
+							],
+						},
 						updatedAt: { gte: periodStart, lt: periodEnd },
 						draft: { coldOutreach: true },
 					},
 				}),
-					tx.meetingRequest.count({
-						where: {
-							lifecycleState: "ACTIVE",
-							status: "CONFIRMED",
+				tx.meetingRequest.count({
+					where: {
+						lifecycleState: "ACTIVE",
+						status: "CONFIRMED",
 						confirmedAt: { gte: periodStart, lt: periodEnd },
 					},
 				}),

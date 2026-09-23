@@ -282,6 +282,34 @@ function classification(
 	return "uncertain";
 }
 
+function conversationStatus(record: SourceRecord): "NEEDS_IHSAN" | "PARKED" {
+	return classification(record) === "parked" ? "PARKED" : "NEEDS_IHSAN";
+}
+
+function conversationClassification(
+	record: SourceRecord,
+	events: ImportedEvent[],
+):
+	| "WARM_HANDOFF"
+	| "WAITING_ON_PROSPECT"
+	| "PARKED_NO_CURRENT_NEED"
+	| "AMBIGUOUS_OR_NEEDS_IHSAN" {
+	if (classification(record) === "parked") return "PARKED_NO_CURRENT_NEED";
+	if (record.off_linkedin) return "WARM_HANDOFF";
+	if (events.some((event) => event.direction === "INBOUND"))
+		return "WARM_HANDOFF";
+	if (classification(record) === "active") return "WAITING_ON_PROSPECT";
+	return "AMBIGUOUS_OR_NEEDS_IHSAN";
+}
+
+function eventSourceKey(
+	record: SourceRecord,
+	event: ImportedEvent,
+	index: number,
+): string {
+	return `${IMPORT_KEY}:message:${hash(`${identityKey(record)}|${event.sourceKind}|${event.sourceIndex}|${event.provenance}|${event.rawTimestamp ?? ""}|${event.workflowTimestamp ?? ""}|${event.text}|${index}`)}`;
+}
+
 function leadStage(
 	record: SourceRecord,
 	events: ImportedEvent[],
@@ -466,6 +494,20 @@ async function main() {
 				contact,
 			]),
 		);
+		const contactProfileMap = new Map(
+			activeContacts.flatMap((contact) =>
+				contact.linkedinUrl
+					? [[normalizeLinkedIn(contact.linkedinUrl), contact] as const]
+					: [],
+			),
+		);
+		const routeContactProfileMap = new Map(
+			activeRoutes.flatMap((route) =>
+				route.type === "LINKEDIN"
+					? [[route.normalizedValue, route.contactId] as const]
+					: [],
+			),
+		);
 		const routeMap = new Map(
 			activeRoutes.map((route) => [
 				`${route.type}:${route.normalizedValue}`,
@@ -476,6 +518,19 @@ async function main() {
 		const latestCompanyDates = new Map<string, Date>();
 
 		for (const record of source.records) {
+			const nameMatch = contactMap.get(normalizeText(record.person_name));
+			if (!record.linkedin_profile && nameMatch) {
+				report.unsafeToImport.push({
+					person: record.person_name,
+					reason:
+						"No LinkedIn identity key was supplied and a same-name CRM contact exists; held for manual identity review.",
+				});
+				report.incompleteRecords.push({
+					person: record.person_name,
+					reason: "Ambiguous identity match held for review",
+				});
+				continue;
+			}
 			let company = null;
 			if (record.company_or_agency) {
 				const companyName = normalizeText(record.company_or_agency);
@@ -513,11 +568,21 @@ async function main() {
 				},
 			});
 			if (!contact) {
-				const nameMatch = contactMap.get(
-					normalizeText(`${firstName} ${lastName ?? ""}`),
-				);
-				if (nameMatch) {
-					contact = nameMatch;
+				const normalizedProfile = record.linkedin_profile
+					? normalizeLinkedIn(record.linkedin_profile)
+					: null;
+				const profileMatch = normalizedProfile
+					? (contactProfileMap.get(normalizedProfile) ??
+						(routeContactProfileMap.has(normalizedProfile)
+							? (activeContacts.find(
+									(contact) =>
+										contact.id ===
+										routeContactProfileMap.get(normalizedProfile),
+								) ?? null)
+							: null))
+					: null;
+				if (profileMatch) {
+					contact = profileMatch;
 					report.contactsMatched += 1;
 					report.duplicatesAvoided += 1;
 				} else {
@@ -700,19 +765,107 @@ async function main() {
 				}
 			}
 
+			const conversationEvents = eventsFor(record);
+			const firstInboundAt = latestDate(
+				conversationEvents.filter((event) => event.direction === "INBOUND"),
+			);
+			const firstOutboundAt = latestDate(
+				conversationEvents.filter((event) => event.direction === "OUTBOUND"),
+			);
+			const lastMessageAt = latestDate(conversationEvents);
+			const conversation = await tx.linkedinConversation.upsert({
+				where: { identityKey: identityKey(record) },
+				create: {
+					contactId: contact.id,
+					companyId: company?.id ?? null,
+					leadId,
+					identityKey: identityKey(record),
+					profileUrl: record.linkedin_profile,
+					normalizedProfileUrl: record.linkedin_profile
+						? normalizeLinkedIn(record.linkedin_profile)
+						: null,
+					externalConversationKey: `${IMPORT_KEY}:conversation:${hash(identityKey(record))}`,
+					status: conversationStatus(record),
+					classification: conversationClassification(
+						record,
+						conversationEvents,
+					),
+					consent: "UNKNOWN",
+					connectionState: "UNKNOWN",
+					lastInboundAt: firstInboundAt,
+					lastOutboundAt: firstOutboundAt,
+					lastMessageAt,
+					nextActionAt: classification(record) === "active" ? new Date() : null,
+					nextActionTitle:
+						classification(record) === "active"
+							? "Review imported LinkedIn history before any next contact"
+							: null,
+				},
+				update: {
+					leadId: leadId ?? undefined,
+					companyId: company?.id ?? undefined,
+					profileUrl: record.linkedin_profile ?? undefined,
+					normalizedProfileUrl: record.linkedin_profile
+						? normalizeLinkedIn(record.linkedin_profile)
+						: undefined,
+				},
+				select: { id: true },
+			});
+			await tx.channelEngagementState.upsert({
+				where: {
+					contactId_channel: { contactId: contact.id, channel: "LINKEDIN" },
+				},
+				create: {
+					contactId: contact.id,
+					channel: "LINKEDIN",
+					status: conversationStatus(record),
+					lastInboundAt: firstInboundAt,
+					lastOutboundAt: firstOutboundAt,
+					reason:
+						"Historical LinkedIn import; excluded from active Atlas metrics",
+				},
+				update: {
+					lastInboundAt: firstInboundAt ?? undefined,
+					lastOutboundAt: firstOutboundAt ?? undefined,
+					reason:
+						"Historical LinkedIn import; excluded from active Atlas metrics",
+				},
+			});
+
 			for (const [eventIndex, event] of events.entries()) {
 				const activityId = activityIdFor(contact.id, event, eventIndex);
-				const exists = await tx.activity.findUnique({
+				const occurredAt = eventDate(event);
+				const sourceKey = eventSourceKey(record, event, eventIndex);
+				const existingMessage = await tx.linkedinMessage.findUnique({
+					where: { sourceKey },
+					select: { id: true },
+				});
+				const message = await tx.linkedinMessage.upsert({
+					where: { sourceKey },
+					create: {
+						conversationId: conversation.id,
+						direction: event.direction,
+						status: "HISTORICAL",
+						provenance: "HISTORICAL_IMPORT",
+						body: event.text,
+						occurredAt,
+						externalMessageKey: sourceKey,
+						sourceKey,
+						idempotencyKey: sourceKey,
+						sourceTurnId: event.sourceTurnId,
+						countsTowardAtlasMetrics: false,
+						attributedToAtlas: false,
+					},
+					update: {},
+					select: { id: true },
+				});
+				const existingActivity = await tx.activity.findUnique({
 					where: { id: activityId },
 					select: { id: true },
 				});
-				if (exists) {
-					report.duplicatesAvoided += 1;
-					continue;
-				}
-				const occurredAt = eventDate(event);
-				await tx.activity.create({
-					data: {
+				await tx.activity.upsert({
+					where: { id: activityId },
+					create: {
 						id: activityId,
 						type: "NOTE",
 						subject: `LinkedIn ${event.direction === "OUTBOUND" ? "outbound" : "inbound"} message · ${event.provenance === "LINKEDIN_VERIFIED" ? "verified" : "workflow evidence"}`,
@@ -722,6 +875,7 @@ async function main() {
 						companyId: company?.id ?? null,
 						leadId,
 						createdById: user.id,
+						linkedinMessageId: message.id,
 						meta: {
 							importKey: IMPORT_KEY,
 							channel: "LINKEDIN",
@@ -741,12 +895,17 @@ async function main() {
 							attributedToAtlas: false,
 						},
 					},
+					update: { linkedinMessageId: message.id },
 				});
-				report.messageActivitiesImported += 1;
-				if (event.provenance === "LINKEDIN_VERIFIED")
-					report.verifiedMessageActivitiesImported += 1;
-				else report.workflowOnlyMessageActivitiesImported += 1;
-				if (event.direction === "INBOUND") report.replyActivitiesImported += 1;
+				if (existingActivity || existingMessage) report.duplicatesAvoided += 1;
+				else {
+					report.messageActivitiesImported += 1;
+					if (event.provenance === "LINKEDIN_VERIFIED")
+						report.verifiedMessageActivitiesImported += 1;
+					else report.workflowOnlyMessageActivitiesImported += 1;
+					if (event.direction === "INBOUND")
+						report.replyActivitiesImported += 1;
+				}
 				if (occurredAt) {
 					const current = latestContactDates.get(contact.id);
 					if (!current || occurredAt > current)

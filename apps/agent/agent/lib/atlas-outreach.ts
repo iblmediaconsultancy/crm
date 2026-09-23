@@ -14,7 +14,8 @@ const POLICY_VERSION = "atlas-v1";
 const LANGUAGES = new Set(["english", "dutch", "turkish"]);
 const BLOCKED_PRICING_WORDS =
 	/\b(?:pricing|prices?|costs?|budgets?|fees?|discounts?|rates?|packages?)\b/i;
-const BLOCKED_CURRENCY_AMOUNT = /(?:[€$£]\s*\d+(?:[.,]\d{1,2})?|\b\d+(?:[.,]\d{1,2})?\s*[€$£])/i;
+const BLOCKED_CURRENCY_AMOUNT =
+	/(?:[€$£]\s*\d+(?:[.,]\d{1,2})?|\b\d+(?:[.,]\d{1,2})?\s*[€$£])/i;
 const BLOCKED_PERIODIC_AMOUNT =
 	/\b\d+(?:[.,]\d+)?\s*(?:per\s+(?:month|mo|week|wk|year|yr)|\/\s*(?:month|mo|week|wk|year|yr))\b/i;
 
@@ -100,6 +101,19 @@ export function isAtlasContactEligible(
 	);
 }
 
+export function organizationDomain(value: string): string | null {
+	const domain = value.trim().toLowerCase().split("@").at(-1);
+	return domain || null;
+}
+
+export function isOrganizationSuppressed(
+	value: string,
+	suppressedDomains: ReadonlySet<string>,
+): boolean {
+	const domain = organizationDomain(value);
+	return domain ? suppressedDomains.has(domain) : false;
+}
+
 function dayKey(date: Date, timeZone: string): Date {
 	const parts = new Intl.DateTimeFormat("en-CA", {
 		timeZone,
@@ -120,6 +134,13 @@ export async function listAtlasOutreachQueue(ctx: PurposeContext) {
 		db,
 		{ userId: ATLAS_OPERATOR_ID, kind: "service" },
 		async (tx) => {
+			const suppressedDomains = new Set(
+				(
+					await tx.suppressedDomain.findMany({
+						select: { domain: true },
+					})
+				).map((row) => row.domain.toLowerCase()),
+			);
 			const leads = await tx.lead.findMany({
 				where: {
 					stage: { in: ["NEW", "READY"] },
@@ -144,11 +165,25 @@ export async function listAtlasOutreachQueue(ctx: PurposeContext) {
 							playerProfile: { select: { contactId: true } },
 							email: true,
 							title: true,
-							company: { select: { name: true } },
+							company: {
+								select: {
+									name: true,
+									organizationProtections: {
+										where: { status: "ACTIVE" },
+										select: { id: true },
+									},
+								},
+							},
+							channelEngagementStates: {
+								where: {
+									channel: "LINKEDIN",
+									status: { in: ["ACTIVE_HUMAN_CONVERSATION", "NEEDS_IHSAN"] },
+								},
+								select: { id: true },
+							},
 							contactRoutes: {
 								where: { type: "EMAIL" },
 								select: { id: true, value: true, normalizedValue: true },
-								take: 1,
 							},
 						},
 					},
@@ -156,6 +191,14 @@ export async function listAtlasOutreachQueue(ctx: PurposeContext) {
 			});
 			const eligible: typeof leads = [];
 			for (const lead of leads) {
+				if ((lead.contact?.company?.organizationProtections.length ?? 0) > 0)
+					continue;
+				if (
+					lead.contact?.contactRoutes.some((route) =>
+						isOrganizationSuppressed(route.normalizedValue, suppressedDomains),
+					)
+				)
+					continue;
 				if (
 					lead.contact?.playerProfile &&
 					(await isProtectedPlayerContact(
@@ -220,6 +263,7 @@ export async function sendAtlasEmail(ctx: PurposeContext, input: AtlasInput) {
 						contact: {
 							select: {
 								id: true,
+								companyId: true,
 								firstName: true,
 								lastName: true,
 								lifecycleState: true,
@@ -251,6 +295,25 @@ export async function sendAtlasEmail(ctx: PurposeContext, input: AtlasInput) {
 				throw new Error("Atlas outreach is disabled in CRM settings.");
 			if (!authorization)
 				throw new Error("ATLAS_OUTREACH_AUTHORIZATION_REQUIRED");
+			const existingDraft = await tx.draft.findUnique({
+				where: { idempotencyKey: input.idempotencyKey },
+				select: { id: true, language: true },
+			});
+			if (existingDraft) {
+				const existingDelivery = await tx.outboundDelivery.findFirst({
+					where: { draftId: existingDraft.id },
+					orderBy: { createdAt: "asc" },
+					select: { id: true, status: true },
+				});
+				if (!existingDelivery)
+					throw new Error("OUTBOUND_IDEMPOTENCY_DELIVERY_MISSING");
+				return {
+					draftId: existingDraft.id,
+					deliveryId: existingDelivery.id,
+					status: existingDelivery.status,
+					language: existingDraft.language ?? language,
+				};
+			}
 			if (
 				!isWithinAtlasWorkingHours(
 					now,
@@ -278,6 +341,16 @@ export async function sendAtlasEmail(ctx: PurposeContext, input: AtlasInput) {
 				)
 			)
 				throw new Error("Protected players cannot be prospecting targets.");
+			const organizationProtection = lead.contact.companyId
+				? await tx.organizationProtection.findFirst({
+						where: { companyId: lead.contact.companyId, status: "ACTIVE" },
+						select: { id: true },
+					})
+				: null;
+			if (organizationProtection)
+				throw new Error(
+					"Organization is protected by an explicit owner override.",
+				);
 			if (!mailbox)
 				throw new Error(
 					"A verified mailbox is required as the outbound envelope.",
@@ -301,7 +374,18 @@ export async function sendAtlasEmail(ctx: PurposeContext, input: AtlasInput) {
 				throw new Error(
 					"The email route is not attached to this lead contact.",
 				);
-			const [consent, suppressed, activePlan, recent] = await Promise.all([
+			await tx.$executeRaw(
+				Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`atlas-relationship:${lead.contactId}`}))`,
+			);
+			const [
+				consent,
+				suppressed,
+				suppressedOrganization,
+				activePlan,
+				activeLinkedInConversation,
+				sharedSuppressions,
+				recent,
+			] = await Promise.all([
 				tx.contactRouteConsent.findUnique({
 					where: { routeId: route.id },
 					select: { status: true },
@@ -310,9 +394,48 @@ export async function sendAtlasEmail(ctx: PurposeContext, input: AtlasInput) {
 					where: { email: route.normalizedValue },
 					select: { email: true },
 				}),
+				tx.suppressedDomain.findUnique({
+					where: {
+						domain: organizationDomain(route.normalizedValue) ?? "",
+					},
+					select: { domain: true },
+				}),
 				tx.followUpPlan.findFirst({
-					where: { contactId: lead.contactId, status: "ACTIVE" },
+					where: {
+						contactId: lead.contactId,
+						channel: "EMAIL",
+						status: "ACTIVE",
+					},
 					select: { id: true },
+				}),
+				tx.channelEngagementState.findFirst({
+					where: {
+						contactId: lead.contactId,
+						channel: "LINKEDIN",
+						status: { in: ["ACTIVE_HUMAN_CONVERSATION", "NEEDS_IHSAN"] },
+					},
+					select: { status: true },
+				}),
+				tx.outreachSuppression.findMany({
+					where: {
+						OR: [
+							{ scope: "CONTACT", contactId: lead.contactId },
+							{
+								scope: "ROUTE",
+								contactId: lead.contactId,
+								channel: "EMAIL",
+							},
+							...(lead.contact.companyId
+								? [
+										{
+											scope: "ORGANIZATION" as const,
+											companyId: lead.contact.companyId,
+										},
+									]
+								: []),
+						],
+					},
+					select: { id: true, scope: true, reason: true },
 				}),
 				tx.outboundDelivery.findFirst({
 					where: {
@@ -323,12 +446,59 @@ export async function sendAtlasEmail(ctx: PurposeContext, input: AtlasInput) {
 					select: { createdAt: true },
 				}),
 			]);
-			if (consent?.status === "DO_NOT_CONTACT" || suppressed)
+			if (
+				consent?.status === "DO_NOT_CONTACT" ||
+				suppressed ||
+				suppressedOrganization
+			)
 				throw new Error("Global or route suppression blocks outreach.");
+			if (activeLinkedInConversation)
+				throw new Error(
+					"An active LinkedIn relationship requires coordination before cold email.",
+				);
+			if (sharedSuppressions.length > 0)
+				throw new Error(
+					"The contact or organization is suppressed for this outreach.",
+				);
 			if (activePlan)
 				throw new Error(
 					"An active outreach sequence already exists for this contact.",
 				);
+			const coldTouchClaim = await tx.relationshipColdTouchClaim.findUnique({
+				where: { contactId: lead.contactId },
+				select: { id: true, status: true, idempotencyKey: true },
+			});
+			if (
+				coldTouchClaim &&
+				coldTouchClaim.status !== "RELEASED" &&
+				coldTouchClaim.idempotencyKey !== input.idempotencyKey
+			)
+				throw new Error(
+					"A cold first touch has already been claimed across channels.",
+				);
+			if (!coldTouchClaim) {
+				await tx.relationshipColdTouchClaim.create({
+					data: {
+						contactId: lead.contactId,
+						leadId: lead.id,
+						channel: "EMAIL",
+						status: "CLAIMED",
+						idempotencyKey: input.idempotencyKey,
+					},
+				});
+			} else if (coldTouchClaim.status === "RELEASED") {
+				await tx.relationshipColdTouchClaim.update({
+					where: { id: coldTouchClaim.id },
+					data: {
+						leadId: lead.id,
+						channel: "EMAIL",
+						status: "CLAIMED",
+						idempotencyKey: input.idempotencyKey,
+						claimedAt: new Date(),
+						releasedAt: null,
+					},
+				});
+			}
 			if (
 				recent &&
 				now.getTime() - recent.createdAt.getTime() <

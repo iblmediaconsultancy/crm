@@ -2,6 +2,7 @@ import {
 	ActivityType,
 	type Db,
 	EmailDirection,
+	type LeadStage,
 	type MailboxSyncModel as MailboxSync,
 	type Prisma,
 	Prisma as PrismaNamespace,
@@ -10,8 +11,15 @@ import {
 import { Injectable, Logger } from "@nestjs/common";
 import { ActivityStampService } from "../crm/activity-stamp.service";
 import { InjectDatabase } from "../database/database.constants";
+import { businessDaysAfter } from "../providers/working-hours";
+import {
+	classifyInboundIntent,
+	type InboundIntentDecision,
+	isHumanReplyIntent,
+} from "./inbound-intent";
 import {
 	assessInboundSecurity,
+	type InboundAttachmentMetadata,
 	SECURITY_REVIEW_REASON,
 } from "./inbound-security";
 import {
@@ -32,6 +40,7 @@ export type IncomingMessage = {
 	body: string;
 	sentAt: Date;
 	attachmentCount?: number;
+	attachments?: readonly InboundAttachmentMetadata[];
 };
 
 @Injectable()
@@ -78,6 +87,7 @@ export class ThreadWriterService {
 				},
 			},
 			select: {
+				id: true,
 				threadId: true,
 				thread: {
 					select: {
@@ -85,6 +95,7 @@ export class ThreadWriterService {
 						companyId: true,
 						contactId: true,
 						leadId: true,
+						id: true,
 						activity: { select: { id: true } },
 					},
 				},
@@ -165,6 +176,7 @@ export class ThreadWriterService {
 					fromName: parsed.from.name,
 					trustedDomains: context.ourDomains,
 					attachmentCount: parsed.attachmentCount,
+					attachments: parsed.attachments,
 					knownContact,
 					existingConversationReply: false,
 					threadIdentifiersMatch: false,
@@ -200,6 +212,7 @@ export class ThreadWriterService {
 							),
 						),
 					attachmentCount: parsed.attachmentCount,
+					attachments: parsed.attachments,
 					knownContact,
 					existingConversationReply: Boolean(thread),
 					threadIdentifiersMatch: Boolean(
@@ -207,6 +220,14 @@ export class ThreadWriterService {
 					),
 				})
 			: { flagged: false, signals: [] };
+		const inboundIntent = !outbound
+			? classifyInboundIntent({
+					subject: parsed.subject,
+					body: parsed.body,
+					fromName: parsed.from.name,
+					securityReview,
+				})
+			: null;
 
 		let occurredAt: Date;
 
@@ -219,10 +240,11 @@ export class ThreadWriterService {
 								stage: { notIn: ["WON", "LOST"] },
 							},
 							orderBy: { updatedAt: "desc" },
-							select: { id: true },
+							select: { id: true, version: true },
 						})
 					: null;
 				let leadId = thread?.leadId ?? lead?.id ?? null;
+				let autoReplyNextActionAt: Date | null = null;
 				if (securityReview.flagged && !leadId && !contactId) {
 					const existingContact = await tx.contact.findFirst({
 						where: {
@@ -322,13 +344,39 @@ export class ThreadWriterService {
 							snippet: snippetOf(parsed.body),
 							body: parsed.body || null,
 							sentAt: parsed.sentAt,
+							inboundIntent: inboundIntent?.intent,
+							inboundIntentReason: inboundIntent?.reason,
+							inboundSecuritySignals: securityReview.flagged
+								? securityReview.signals
+								: undefined,
+						},
+					});
+				}
+				if (!outbound && existing && inboundIntent) {
+					await tx.emailMessage.update({
+						where: { id: existing.id },
+						data: {
+							inboundIntent: inboundIntent.intent,
+							inboundIntentReason: inboundIntent.reason,
+							inboundSecuritySignals: securityReview.flagged
+								? securityReview.signals
+								: PrismaNamespace.JsonNull,
 						},
 					});
 				}
 
-				if (!outbound && contactId) {
+				if (
+					!outbound &&
+					contactId &&
+					inboundIntent &&
+					inboundIntent.intent !== "AUTO_REPLY"
+				) {
 					const plans = await tx.followUpPlan.findMany({
-						where: { contactId, status: { in: ["ACTIVE", "PAUSED"] } },
+						where: {
+							contactId,
+							channel: "EMAIL",
+							status: { in: ["ACTIVE", "PAUSED"] },
+						},
 						select: { id: true },
 					});
 					const planIds = plans.map((plan) => plan.id);
@@ -380,67 +428,62 @@ export class ThreadWriterService {
 						}
 					}
 				}
-				if (securityReview.flagged && leadId) {
-					await tx.lead.update({
-						where: { id: leadId },
-						data: {
-							attentionState: "NEEDS_IHSAN",
-							blocker: SECURITY_REVIEW_REASON,
-							handoffReason: SECURITY_REVIEW_REASON,
-							handoffSummary:
-								"Inbound email requires manual security review before Atlas continues.",
-							handoffRecommendedAction:
-								"Review the message manually. Do not follow links, open attachments, or provide sensitive information.",
-							handoffAt: new Date(),
-							needsReview: true,
+				if (!outbound && contactId && inboundIntent?.intent === "AUTO_REPLY") {
+					autoReplyNextActionAt = await this.restoreAutoReplyPlansTx(
+						tx,
+						contactId,
+					);
+				}
+				if (!outbound && contactId && inboundIntent) {
+					const engagementStatus =
+						inboundIntent.intent === "AUTO_REPLY"
+							? "WAITING_ON_PROSPECT"
+							: inboundIntent.intent === "SECURITY_REVIEW"
+								? "NEEDS_IHSAN"
+								: "ACTIVE_HUMAN_CONVERSATION";
+					await tx.channelEngagementState.upsert({
+						where: {
+							contactId_channel: { contactId, channel: "EMAIL" },
+						},
+						create: {
+							contactId,
+							channel: "EMAIL",
+							status: engagementStatus,
+							lastInboundAt: parsed.sentAt,
+							reason: inboundIntent.reason,
+						},
+						update: {
+							status: engagementStatus,
+							lastInboundAt: parsed.sentAt,
+							reason: inboundIntent.reason,
 						},
 					});
 				}
-				if (!outbound && leadId) {
-					const current = await tx.lead.findUnique({
-						where: { id: leadId },
-						select: { stage: true },
+				if (!outbound && leadId && inboundIntent) {
+					await this.applyInboundLeadTx(tx, {
+						leadId,
+						contactId,
+						parsed,
+						decision: inboundIntent,
+						autoReplyNextActionAt,
 					});
-					if (current && !["WON", "LOST"].includes(current.stage)) {
-						await tx.lead.update({
-							where: { id: leadId },
-							data: {
-								stage: "REPLIED",
-								stageChangedAt: parsed.sentAt,
-								lastRepliedAt: parsed.sentAt,
-								nextActionAt: securityReview.flagged
-									? new Date()
-									: new Date(parsed.sentAt.getTime() + 24 * 60 * 60 * 1000),
-								nextActionTitle: securityReview.flagged
-									? "Ihsan security review required"
-									: "Review reply and decide the next step",
-							},
-						});
-						if (current.stage !== "REPLIED") {
-							await tx.leadStageHistory.create({
-								data: {
-									leadId,
-									fromStage: current.stage,
-									toStage: "REPLIED",
-									reason: "Inbound reply received",
-									actorUserId: "atlas-operator",
-								},
-							});
-						}
-					}
 				}
 				const repliedDelivery = await tx.outboundDelivery.findFirst({
 					where: {
-						status: { in: ["SENT", "DELIVERED"] },
+						status: { in: ["SENT", "DELIVERED", "REPLIED"] },
 						draft: { recipientRoute: { contactId } },
 					},
 					orderBy: [{ sentAt: "desc" }, { createdAt: "desc" }],
 					select: { id: true },
 				});
-				if (repliedDelivery) {
+				if (!outbound && repliedDelivery && inboundIntent) {
 					await tx.outboundDelivery.update({
 						where: { id: repliedDelivery.id },
-						data: { status: "REPLIED" },
+						data: {
+							status: "REPLIED",
+							replyIntent: inboundIntent?.intent,
+							replyIntentAt: inboundIntent ? parsed.sentAt : undefined,
+						},
 					});
 				}
 				const stats = await tx.emailMessage.aggregate({
@@ -495,6 +538,534 @@ export class ThreadWriterService {
 		await this.touch({ companyId, contactId }, occurredAt, parsed.rfcMessageId);
 
 		return !repair;
+	}
+
+	async reconcileStoredInbound(
+		messageId: string,
+		options: { attachments?: readonly InboundAttachmentMetadata[] } = {},
+	): Promise<boolean> {
+		const message = await this.db.emailMessage.findUnique({
+			where: { id: messageId },
+			select: {
+				id: true,
+				rfcMessageId: true,
+				mailboxId: true,
+				direction: true,
+				fromEmail: true,
+				fromName: true,
+				subject: true,
+				body: true,
+				sentAt: true,
+				thread: {
+					select: {
+						rootMessageId: true,
+						companyId: true,
+						contactId: true,
+						leadId: true,
+					},
+				},
+			},
+		});
+		if (!message || message.direction !== EmailDirection.INBOUND) return false;
+
+		const context = await this.context();
+		const securityReview = assessInboundSecurity({
+			subject: message.subject,
+			body: message.body ?? "",
+			fromEmail: message.fromEmail,
+			fromName: message.fromName,
+			trustedDomains: context.ourDomains,
+			attachmentCount: options.attachments?.length,
+			attachments: options.attachments,
+			knownContact: Boolean(message.thread.contactId),
+			existingConversationReply: true,
+			threadIdentifiersMatch: true,
+		});
+		const decision = classifyInboundIntent({
+			subject: message.subject,
+			body: message.body ?? "",
+			fromName: message.fromName,
+			securityReview,
+		});
+
+		await this.db.$transaction(async (tx) => {
+			await tx.emailMessage.update({
+				where: { id: message.id },
+				data: {
+					inboundIntent: decision.intent,
+					inboundIntentReason: decision.reason,
+					inboundSecuritySignals: securityReview.flagged
+						? securityReview.signals
+						: PrismaNamespace.JsonNull,
+				},
+			});
+			let autoReplyNextActionAt: Date | null = null;
+			if (message.thread.contactId) {
+				if (decision.intent === "AUTO_REPLY") {
+					autoReplyNextActionAt = await this.restoreAutoReplyPlansTx(
+						tx,
+						message.thread.contactId,
+					);
+				} else {
+					await this.cancelForInboundTx(tx, message.thread.contactId);
+				}
+			}
+			if (message.thread.leadId) {
+				await this.applyInboundLeadTx(tx, {
+					leadId: message.thread.leadId,
+					contactId: message.thread.contactId,
+					parsed: {
+						rfcMessageId: message.rfcMessageId,
+						rootId: message.thread.rootMessageId,
+						subject: message.subject,
+						from: { email: message.fromEmail, name: message.fromName },
+						recipients: [],
+						body: message.body ?? "",
+						sentAt: message.sentAt,
+						attachments: options.attachments,
+					},
+					decision,
+					autoReplyNextActionAt,
+				});
+			}
+			const repliedDelivery = await tx.outboundDelivery.findFirst({
+				where: {
+					status: { in: ["SENT", "DELIVERED", "REPLIED"] },
+					draft: {
+						recipientRoute: { contactId: message.thread.contactId },
+					},
+				},
+				orderBy: [{ sentAt: "desc" }, { createdAt: "desc" }],
+				select: { id: true },
+			});
+			if (repliedDelivery) {
+				await tx.outboundDelivery.update({
+					where: { id: repliedDelivery.id },
+					data: {
+						status: "REPLIED",
+						replyIntent: decision.intent,
+						replyIntentAt: message.sentAt,
+					},
+				});
+			}
+		});
+		return true;
+	}
+
+	private async applyInboundLeadTx(
+		tx: Prisma.TransactionClient,
+		input: {
+			leadId: string;
+			contactId: string | null;
+			parsed: IncomingMessage;
+			decision: InboundIntentDecision;
+			autoReplyNextActionAt: Date | null;
+		},
+	): Promise<void> {
+		const current = await tx.lead.findUnique({
+			where: { id: input.leadId },
+			select: {
+				stage: true,
+				status: true,
+				attentionState: true,
+				lastRepliedAt: true,
+				version: true,
+			},
+		});
+		if (!current || ["WON", "LOST"].includes(current.stage)) return;
+
+		const { decision, parsed } = input;
+		if (decision.intent === "SECURITY_REVIEW") {
+			const updatedLead = await tx.lead.updateMany({
+				where: { id: input.leadId, version: current.version },
+				data: {
+					stage: "REPLIED",
+					stageChangedAt: parsed.sentAt,
+					attentionState: "NEEDS_IHSAN",
+					blocker: SECURITY_REVIEW_REASON,
+					handoffReason: SECURITY_REVIEW_REASON,
+					handoffSummary:
+						"Inbound email requires manual security review before Atlas continues.",
+					handoffRecommendedAction:
+						"Review the message manually. Do not follow links, open attachments, or provide sensitive information.",
+					handoffAt: new Date(),
+					needsReview: true,
+					nextActionAt: new Date(),
+					nextActionTitle: "Ihsan security review required",
+				},
+			});
+			if (updatedLead.count === 1)
+				await this.recordStageTransitionTx(
+					tx,
+					input.leadId,
+					current.stage,
+					"REPLIED",
+					"Inbound security review required",
+				);
+		} else if (decision.intent === "HUMAN_NEGATIVE") {
+			await this.suppressNegativeTx(tx, input);
+			const updatedLead = await tx.lead.updateMany({
+				where: { id: input.leadId, version: current.version },
+				data: {
+					status: "DISQUALIFIED",
+					stage: "LOST",
+					stageChangedAt: parsed.sentAt,
+					lastRepliedAt: parsed.sentAt,
+					outcome: "NOT_A_FIT",
+					outcomeNote: decision.organizationWide
+						? "Explicit agency-wide negative response."
+						: "Explicit negative response.",
+					blocker: "NOT_INTERESTED",
+					attentionState: "SUPPRESSED",
+					nextActionAt: null,
+					nextActionTitle: null,
+					parkedUntil: null,
+					disqualifiedAt: parsed.sentAt,
+					handoffReason: null,
+					handoffSummary: null,
+					handoffRecommendedAction: null,
+					handoffAt: null,
+					needsReview: false,
+				},
+			});
+			if (updatedLead.count === 1)
+				await this.recordStageTransitionTx(
+					tx,
+					input.leadId,
+					current.stage,
+					"LOST",
+					"Explicit negative inbound response",
+				);
+		} else if (decision.intent === "AUTO_REPLY") {
+			const nextActionAt =
+				input.autoReplyNextActionAt ?? businessDaysAfter(parsed.sentAt, 3);
+			const nextStage =
+				current.stage === "REPLIED" ? "CONTACTED" : current.stage;
+			const updatedLead = await tx.lead.updateMany({
+				where: { id: input.leadId, version: current.version },
+				data: {
+					stage: nextStage,
+					stageChangedAt:
+						nextStage === current.stage ? undefined : parsed.sentAt,
+					lastRepliedAt:
+						current.lastRepliedAt?.getTime() === parsed.sentAt.getTime()
+							? null
+							: undefined,
+					attentionState: "NONE",
+					blocker: null,
+					handoffReason: null,
+					handoffSummary: null,
+					handoffRecommendedAction: null,
+					handoffAt: null,
+					needsReview: false,
+					nextActionAt,
+					nextActionTitle: "Follow up after automatic reply delay",
+					parkedUntil: null,
+				},
+			});
+			if (updatedLead.count === 1)
+				await this.recordStageTransitionTx(
+					tx,
+					input.leadId,
+					current.stage,
+					nextStage,
+					"Automatic reply received; waiting for a human response",
+				);
+		} else if (decision.intent === "HUMAN_NEUTRAL" && decision.parked) {
+			const parkedUntil = businessDaysAfter(parsed.sentAt, 10);
+			const updatedLead = await tx.lead.updateMany({
+				where: { id: input.leadId, version: current.version },
+				data: {
+					stage: "REPLIED",
+					stageChangedAt: parsed.sentAt,
+					lastRepliedAt: parsed.sentAt,
+					attentionState: "PARKED",
+					nextActionAt: parkedUntil,
+					nextActionTitle: "Revisit deferred reply",
+					parkedUntil,
+					needsReview: false,
+				},
+			});
+			if (updatedLead.count === 1)
+				await this.recordStageTransitionTx(
+					tx,
+					input.leadId,
+					current.stage,
+					"REPLIED",
+					"Inbound reply deferred future contact",
+				);
+		} else if (isHumanReplyIntent(decision.intent)) {
+			const handoff = decision.intent === "REFERRAL_OR_ROUTING";
+			const updatedLead = await tx.lead.updateMany({
+				where: { id: input.leadId, version: current.version },
+				data: {
+					stage: "REPLIED",
+					stageChangedAt: parsed.sentAt,
+					lastRepliedAt: parsed.sentAt,
+					attentionState: handoff ? "NEEDS_IHSAN" : "NONE",
+					nextActionAt: new Date(),
+					nextActionTitle: handoff
+						? "Ihsan review of inbound reply"
+						: "Review reply and decide the next step",
+					blocker: handoff ? decision.intent : null,
+					handoffReason: handoff ? decision.intent : null,
+					handoffSummary: handoff
+						? "Inbound reply requires manual relationship handling."
+						: null,
+					handoffRecommendedAction: handoff
+						? "Review the reply and decide the next relationship step."
+						: null,
+					handoffAt: handoff ? new Date() : null,
+					needsReview: handoff,
+				},
+			});
+			if (updatedLead.count === 1)
+				await this.recordStageTransitionTx(
+					tx,
+					input.leadId,
+					current.stage,
+					"REPLIED",
+					"Human inbound reply received",
+				);
+		}
+		await tx.domainAuditEvent.upsert({
+			where: {
+				action_requestId: {
+					action: "INBOUND_INTENT_CLASSIFIED",
+					requestId: `inbound-intent:${parsed.rfcMessageId}`,
+				},
+			},
+			create: {
+				actorUserId: "atlas-operator",
+				action: "INBOUND_INTENT_CLASSIFIED",
+				entityType: "OUTREACH",
+				entityId: null,
+				outcome: decision.intent,
+				requestId: `inbound-intent:${parsed.rfcMessageId}`,
+				metadata: {
+					organizationWide: decision.organizationWide,
+					reason: decision.reason,
+				},
+			},
+			update: {
+				outcome: decision.intent,
+				metadata: {
+					organizationWide: decision.organizationWide,
+					reason: decision.reason,
+				},
+			},
+		});
+	}
+
+	private async suppressNegativeTx(
+		tx: Prisma.TransactionClient,
+		input: {
+			leadId: string;
+			contactId: string | null;
+			parsed: IncomingMessage;
+			decision: InboundIntentDecision;
+		},
+	): Promise<void> {
+		if (!input.contactId) return;
+		const email = input.parsed.from.email.trim().toLowerCase();
+		const route = await tx.contactRoute.findFirst({
+			where: {
+				contactId: input.contactId,
+				type: "EMAIL",
+				normalizedValue: email,
+			},
+			select: { id: true },
+		});
+		const reason = input.decision.organizationWide
+			? "Explicit agency-wide negative inbound reply"
+			: "Explicit negative inbound reply";
+		await tx.suppressedContact.upsert({
+			where: { email },
+			create: { email, reason },
+			update: { reason },
+		});
+		if (route) {
+			await tx.contactRouteConsent.upsert({
+				where: { routeId: route.id },
+				create: {
+					routeId: route.id,
+					contactId: input.contactId,
+					status: "DO_NOT_CONTACT",
+					reason,
+					source: "INBOUND_EMAIL",
+				},
+				update: {
+					status: "DO_NOT_CONTACT",
+					reason,
+					source: "INBOUND_EMAIL",
+					changedByUserId: null,
+					changedAt: new Date(),
+					version: { increment: 1 },
+				},
+			});
+		}
+		await tx.contact.update({
+			where: { id: input.contactId },
+			data: {
+				outreachState: "SUPPRESSED",
+				outreachStateReason: reason,
+				outreachStateChangedAt: new Date(),
+			},
+		});
+		const domain = email.split("@").at(-1);
+		if (input.decision.organizationWide && domain) {
+			await tx.suppressedDomain.upsert({
+				where: { domain },
+				create: { domain, reason },
+				update: { reason },
+			});
+			await tx.domainAuditEvent.upsert({
+				where: {
+					action_requestId: {
+						action: "OUTREACH_ORGANIZATION_SUPPRESSED",
+						requestId: `organization-suppression:${domain}`,
+					},
+				},
+				create: {
+					actorUserId: "atlas-operator",
+					action: "OUTREACH_ORGANIZATION_SUPPRESSED",
+					entityType: "COMPANY",
+					entityId: null,
+					outcome: "SUPPRESSED",
+					requestId: `organization-suppression:${domain}`,
+					metadata: { domain, reason, leadId: input.leadId },
+				},
+				update: {
+					outcome: "SUPPRESSED",
+					metadata: { domain, reason, leadId: input.leadId },
+				},
+			});
+		}
+		await tx.domainAuditEvent.upsert({
+			where: {
+				action_requestId: {
+					action: "OUTREACH_ROUTE_SUPPRESSED",
+					requestId: `route-suppression:${input.parsed.rfcMessageId}`,
+				},
+			},
+			create: {
+				actorUserId: "atlas-operator",
+				action: "OUTREACH_ROUTE_SUPPRESSED",
+				entityType: "CONTACT",
+				entityId: input.contactId,
+				outcome: "SUPPRESSED",
+				requestId: `route-suppression:${input.parsed.rfcMessageId}`,
+				metadata: { email, reason, routeId: route?.id ?? null },
+			},
+			update: {
+				outcome: "SUPPRESSED",
+				metadata: { email, reason, routeId: route?.id ?? null },
+			},
+		});
+	}
+
+	private async recordStageTransitionTx(
+		tx: Prisma.TransactionClient,
+		leadId: string,
+		fromStage: LeadStage,
+		toStage: LeadStage,
+		reason: string,
+	): Promise<void> {
+		if (fromStage === toStage) return;
+		await tx.leadStageHistory.create({
+			data: {
+				leadId,
+				fromStage,
+				toStage,
+				reason,
+				actorUserId: "atlas-operator",
+			},
+		});
+	}
+
+	private async cancelForInboundTx(
+		tx: Prisma.TransactionClient,
+		contactId: string,
+	): Promise<void> {
+		const plans = await tx.followUpPlan.findMany({
+			where: {
+				contactId,
+				channel: "EMAIL",
+				status: { in: ["ACTIVE", "PAUSED"] },
+			},
+			select: { id: true },
+		});
+		const planIds = plans.map((plan) => plan.id);
+		if (!planIds.length) return;
+		const steps = await tx.followUpStep.findMany({
+			where: { planId: { in: planIds }, draftId: { not: null } },
+			select: { draftId: true },
+		});
+		const draftIds = [
+			...new Set(steps.flatMap((step) => (step.draftId ? [step.draftId] : []))),
+		];
+		await tx.followUpPlan.updateMany({
+			where: { id: { in: planIds } },
+			data: {
+				status: "CANCELLED",
+				cancellationReason: "Inbound reply received",
+			},
+		});
+		await tx.followUpStep.updateMany({
+			where: {
+				planId: { in: planIds },
+				status: { in: ["PENDING", "LEASED", "QUEUED"] },
+			},
+			data: { status: "CANCELLED", leaseOwner: null, leasedUntil: null },
+		});
+		if (!draftIds.length) return;
+		await tx.draft.updateMany({
+			where: { id: { in: draftIds }, status: "QUEUED" },
+			data: { status: "CANCELLED" },
+		});
+		await tx.outboundDelivery.updateMany({
+			where: {
+				draftId: { in: draftIds },
+				status: { in: ["PENDING", "RETRY", "SENDING"] },
+			},
+			data: {
+				status: "CANCELLED",
+				leaseOwner: null,
+				leasedUntil: null,
+				lastErrorCode: "INBOUND_REPLY",
+			},
+		});
+	}
+
+	private async restoreAutoReplyPlansTx(
+		tx: Prisma.TransactionClient,
+		contactId: string,
+	): Promise<Date | null> {
+		const plans = await tx.followUpPlan.findMany({
+			where: {
+				contactId,
+				channel: "EMAIL",
+				status: "CANCELLED",
+				cancellationReason: "Inbound reply received",
+			},
+			select: { id: true },
+		});
+		const planIds = plans.map((plan) => plan.id);
+		if (!planIds.length) return null;
+		await tx.followUpPlan.updateMany({
+			where: { id: { in: planIds } },
+			data: { status: "ACTIVE", cancellationReason: null },
+		});
+		await tx.followUpStep.updateMany({
+			where: { planId: { in: planIds }, status: "CANCELLED" },
+			data: { status: "PENDING", leaseOwner: null, leasedUntil: null },
+		});
+		const next = await tx.followUpStep.findFirst({
+			where: { planId: { in: planIds }, status: "PENDING" },
+			orderBy: { dueAt: "asc" },
+			select: { dueAt: true },
+		});
+		return next?.dueAt ?? null;
 	}
 
 	private async storedElsewhere(
@@ -674,7 +1245,10 @@ function conversationSubject(value: string | null): string | null {
 	const normalized = value
 		?.trim()
 		.toLowerCase()
-		.replace(/^(?:(?:re|fw|fwd):\s*)+/i, "")
+		.replace(
+			/^(?:(?:re|fw|fwd|aw|automatic reply|auto reply|out of office):\s*)+/i,
+			"",
+		)
 		.trim();
 	return normalized || null;
 }

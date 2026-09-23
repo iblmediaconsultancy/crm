@@ -13,31 +13,52 @@ type HookTypeValue =
 
 const roleMailboxes = new Set([
 	"academy",
+	"agent",
+	"agentes",
 	"baseinfo",
 	"brazil",
 	"commercial",
+	"comunicacion",
+	"comunicaciones",
 	"football",
+	"futbol",
+	"futebol",
 	"infofootball",
 	"marketing",
 	"media",
 	"partnerships",
 	"press",
 	"sales",
+	"scout",
+	"soccer",
 ]);
 
 const generalMailboxes = new Set([
 	"admin",
+	"administracion",
+	"administracao",
+	"agence",
 	"contact",
+	"contacto",
+	"contactus",
+	"contato",
+	"email",
 	"enquiries",
 	"general",
+	"geral",
+	"gerencia",
 	"hello",
 	"info",
+	"inquiries",
+	"inquiry",
 	"mail",
 	"management",
 	"office",
+	"post",
 	"support",
 	"team",
 	"inbox",
+	"welcome",
 ]);
 
 const freeMailDomains = new Set([
@@ -209,12 +230,56 @@ const supportedHookTypes = new Set<HookTypeValue>([
 	"OTHER_SPECIFIC_OPPORTUNITY",
 ]);
 
+const forbiddenExternalCopyCharacters = new Map([
+	["\u2014", "em dash"],
+	["\u2013", "en dash"],
+]);
+
+export function findForbiddenExternalCopyCharacters(
+	values: Array<string | null | undefined>,
+): string[] {
+	const found = new Set<string>();
+	for (const value of values) {
+		if (!value) continue;
+		for (const [character, label] of forbiddenExternalCopyCharacters) {
+			if (value.includes(character)) found.add(label);
+		}
+	}
+	return [...found];
+}
+
+export function sanitizeExternalCopy(value: string): string {
+	return value.replace(/\s*\u2014\s*/g, ": ").replace(/\s*\u2013\s*/g, " - ");
+}
+
+function validateProspectCopy(input: {
+	subject?: string | null;
+	body?: string | null;
+	followUpApproach?: string | null;
+}): { valid: true } | { valid: false; reason: string } {
+	const forbidden = findForbiddenExternalCopyCharacters([
+		input.subject,
+		input.body,
+		input.followUpApproach,
+	]);
+	if (forbidden.length > 0) {
+		return {
+			valid: false,
+			reason: `External copy contains forbidden punctuation: ${forbidden.join(", ")}.`,
+		};
+	}
+	return { valid: true };
+}
+
 export function validatePreparedOutreach(input: {
 	language: string;
 	hookType: HookTypeValue;
 	whyNow: string;
 	researchSummary: string;
 	sourceUrls: string[];
+	subject: string;
+	body: string;
+	followUpApproach: string;
 }): { valid: true } | { valid: false; reason: string } {
 	if (!supportedOutreachLanguages.has(input.language)) {
 		return {
@@ -243,5 +308,89 @@ export function validatePreparedOutreach(input: {
 			reason: "At least one research source is required.",
 		};
 	}
-	return { valid: true };
+	return validateProspectCopy(input);
+}
+
+function hasGenericPlayerPlaceholder(value: string): boolean {
+	return (
+		/\b(?:a|some|any)\s+(?:current\s+)?(?:[a-z0-9&/]+\s+)*roster player\b/i.test(
+			value,
+		) || /to be nominated by the team/i.test(value)
+	);
+}
+
+function hasBlockedCommercialLanguage(values: string[]): boolean {
+	return values.some((value) =>
+		/\b(?:fee|fees|price|prices|pricing|cost|costs|budget|budgets|discount|discounts|rate|rates|package|packages|quote|quotes|proposal|proposals)\b|(?:€|\$|£)\s?\d{2,}|\b\d[\d,.]*\s*(?:per\s+month|\/\s*month)\b/i.test(
+			value,
+		),
+	);
+}
+
+export function validateReadyProspect(input: {
+	language: string;
+	hookType: HookTypeValue;
+	whyNow: string;
+	researchSummary: string;
+	sourceUrls: string[];
+	subject: string;
+	body: string;
+	followUpApproach: string;
+	playerEntryPoint?: string | null;
+	routeConfidence?: string | null;
+	researchConfidence?: string | null;
+	mailboxType?: MailboxTypeValue | null;
+	routeUsage?: RouteUsageValue | null;
+	existingContactRoute?: boolean;
+	activeLead?: boolean;
+	existingThread?: boolean;
+	suppressed?: boolean;
+	protectedPlayer?: boolean;
+	existingRelationship?: boolean;
+}): { valid: true } | { valid: false; reasons: string[] } {
+	const reasons: string[] = [];
+	const prepared = validatePreparedOutreach(input);
+	if (!prepared.valid) reasons.push(prepared.reason);
+	if (!input.playerEntryPoint?.trim()) {
+		reasons.push("A concrete player or agency opportunity is required.");
+	} else if (hasGenericPlayerPlaceholder(input.playerEntryPoint)) {
+		reasons.push("The player opportunity is a generic placeholder.");
+	}
+	if (input.routeConfidence !== "HIGH") {
+		reasons.push("Route confidence must be HIGH before READY.");
+	}
+	if (input.researchConfidence !== "HIGH") {
+		reasons.push("Research confidence must be HIGH before READY.");
+	}
+	if (!input.mailboxType || input.mailboxType === "UNKNOWN") {
+		reasons.push("Mailbox type must be identified before READY.");
+	}
+	if (!input.routeUsage) {
+		reasons.push("Route usage must be classified before READY.");
+	}
+	if (input.existingContactRoute) {
+		reasons.push("An existing CRM contact route blocks new READY outreach.");
+	}
+	if (input.activeLead) {
+		reasons.push("An active Lead already exists for this route.");
+	}
+	if (input.existingThread) {
+		reasons.push("An existing email thread blocks new READY outreach.");
+	}
+	if (input.suppressed) reasons.push("The contact or domain is suppressed.");
+	if (input.protectedPlayer)
+		reasons.push("The player is protected from cold outreach.");
+	if (input.existingRelationship) {
+		reasons.push("An existing relationship requires Ihsan review.");
+	}
+	if (
+		hasBlockedCommercialLanguage([
+			input.subject,
+			input.body,
+			input.followUpApproach,
+		])
+	) {
+		reasons.push("External copy contains pricing or commercial language.");
+	}
+	return reasons.length === 0 ? { valid: true } : { valid: false, reasons };
 }

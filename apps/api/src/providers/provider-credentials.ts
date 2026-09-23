@@ -73,6 +73,7 @@ async function loadSecret(
 
 export function providerErrorCode(error: unknown): string {
 	const value = error instanceof Error ? error.message : "UNKNOWN";
+	if (/^RESEND_OUTREACH_SENDER(?:_NAME)?_MISMATCH$/.test(value)) return value;
 	if (/CERT|TLS|SELF_SIGNED|HOSTNAME/i.test(value)) return "TLS_ERROR";
 	if (/AUTH|LOGIN|CREDENTIAL|401|403/i.test(value)) return "AUTH_ERROR";
 	if (/TIMEOUT|RATE|429/i.test(value)) return "RETRYABLE_PROVIDER_ERROR";

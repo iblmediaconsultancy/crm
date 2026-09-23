@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import {
 	hasBlockedPricingLanguage,
+	isOrganizationSuppressed,
 	isWithinAtlasWorkingHours,
 	sendAtlasEmail,
 } from "../agent/lib/atlas-outreach";
@@ -89,5 +90,18 @@ describe("Atlas outreach policy", () => {
 				idempotencyKey: "test-disabled",
 			}),
 		).rejects.toThrow("ATLAS_LIVE_OUTREACH_ENABLED is false");
+	});
+
+	it("blocks alternate routes after an organization suppression", () => {
+		const suppressed = new Set(["emartsoccer.es", "11wins.com"]);
+		expect(
+			isOrganizationSuppressed("new-route@emartsoccer.es", suppressed),
+		).toBe(true);
+		expect(isOrganizationSuppressed("another@11wins.com", suppressed)).toBe(
+			true,
+		);
+		expect(
+			isOrganizationSuppressed("new-route@other-agency.test", suppressed),
+		).toBe(false);
 	});
 });

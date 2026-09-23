@@ -12,6 +12,9 @@ import { InjectDatabase } from "../database/database.constants";
 import { runInPrincipalTransaction } from "../database/database-context";
 import { ThreadWriterService } from "../mailbox/thread-writer.service";
 import { localProviderDoubleEnabled } from "./local-provider-double";
+import { businessDaysAfter } from "./working-hours";
+
+export { businessDaysAfter } from "./working-hours";
 
 const CLAIM = `UPDATE "followUpStep" SET "status"='LEASED', "leaseOwner"=$1, "leasedUntil"=NOW()+INTERVAL '60 seconds', "attemptCount"="attemptCount"+1, "updatedAt"=NOW() WHERE "id"=(SELECT s."id" FROM "followUpStep" s JOIN "followUpPlan" p ON p."id"=s."planId" WHERE s."status" IN ('PENDING','LEASED') AND p."status"='ACTIVE' AND s."dueAt"<=NOW() AND (s."retryAt" IS NULL OR s."retryAt"<=NOW()) AND (s."leasedUntil" IS NULL OR s."leasedUntil"<=NOW()) AND s."attemptCount"<s."maxAttempts" ORDER BY s."dueAt",s."id" FOR UPDATE OF s SKIP LOCKED LIMIT 1) RETURNING "id","planId","draftId","attemptCount"`;
 type Claim = {
@@ -73,7 +76,9 @@ export class OutreachLifecycleService {
 			throw new ConflictException("Manager access is required.");
 		const now = new Date();
 		if (input.expiresAt && input.expiresAt <= now)
-			throw new ConflictException("Authorization expiry must be in the future.");
+			throw new ConflictException(
+				"Authorization expiry must be in the future.",
+			);
 		return withPrincipal(
 			this.db,
 			{ userId: actor.userId, kind: "user" },
@@ -288,7 +293,12 @@ export class OutreachLifecycleService {
 		return this.db.$transaction(async (tx) => {
 			const route = await tx.contactRoute.findUnique({
 				where: { id: input.routeId },
-				select: { contactId: true, ownerUserId: true, lifecycleState: true },
+				select: {
+					contactId: true,
+					ownerUserId: true,
+					lifecycleState: true,
+					normalizedValue: true,
+				},
 			});
 			if (!route?.contactId || route.lifecycleState !== "ACTIVE")
 				throw new NotFoundException("A contact route is required.");
@@ -338,6 +348,36 @@ export class OutreachLifecycleService {
 					route.contactId,
 					`DNC: ${input.reason}`,
 				);
+			if (input.status === "ALLOWED" && input.source === "AUDITED_RECONSENT") {
+				await tx.suppressedContact.deleteMany({
+					where: { email: route.normalizedValue },
+				});
+				await tx.contact.update({
+					where: { id: route.contactId },
+					data: {
+						outreachState: "ALLOWED",
+						outreachStateReason: null,
+						outreachStateChangedAt: new Date(),
+					},
+				});
+				if (actor.role !== "contributor") {
+					const domain = route.normalizedValue.split("@").at(-1)?.toLowerCase();
+					if (domain) {
+						await tx.suppressedDomain.deleteMany({ where: { domain } });
+						await tx.domainAuditEvent.create({
+							data: {
+								actorUserId: actor.userId,
+								action: "OUTREACH_ORGANIZATION_RECONSENTED",
+								entityType: "COMPANY",
+								entityId: null,
+								outcome: "SUCCESS",
+								requestId: `organization-reconsent:${domain}:${consent.version}`,
+								metadata: { domain, routeId: input.routeId },
+							},
+						});
+					}
+				}
+			}
 			await tx.domainAuditEvent.create({
 				data: {
 					actorUserId: actor.userId,
@@ -471,7 +511,12 @@ export class OutreachLifecycleService {
 								language: true,
 								subject: true,
 								body: true,
-								recipientRoute: { select: { contactId: true } },
+								recipientRoute: {
+									select: {
+										contactId: true,
+										contact: { select: { companyId: true } },
+									},
+								},
 							},
 						},
 					},
@@ -479,14 +524,26 @@ export class OutreachLifecycleService {
 				let created = 0;
 				for (const delivery of deliveries) {
 					const source = delivery.draft;
+					const sentAt = delivery.sentAt;
+					const recipientRoute = source.recipientRoute;
 					if (
-						!delivery.sentAt ||
+						!sentAt ||
 						!source.mailboxId ||
 						!source.recipientRouteId ||
-						!source.recipientRoute.contactId ||
+						!recipientRoute?.contactId ||
 						!source.leadId
 					)
 						continue;
+					const organizationProtection = recipientRoute.contact?.companyId
+						? await tx.organizationProtection.findFirst({
+								where: {
+									companyId: recipientRoute.contact.companyId,
+									status: "ACTIVE",
+								},
+								select: { id: true },
+							})
+						: null;
+					if (organizationProtection) continue;
 					const existing = await tx.followUpPlan.findUnique({
 						where: { sourceDraftId: source.id },
 						select: { id: true },
@@ -494,7 +551,8 @@ export class OutreachLifecycleService {
 					if (existing) continue;
 					const activePlan = await tx.followUpPlan.findFirst({
 						where: {
-							contactId: source.recipientRoute.contactId,
+							contactId: recipientRoute.contactId,
+							channel: "EMAIL",
 							status: "ACTIVE",
 						},
 						select: { id: true },
@@ -518,8 +576,8 @@ export class OutreachLifecycleService {
 					)
 						continue;
 					const dueAt = [
-						businessDaysAfter(delivery.sentAt, 3, "Europe/Amsterdam"),
-						businessDaysAfter(delivery.sentAt, 7, "Europe/Amsterdam"),
+						businessDaysAfter(sentAt, 3, "Europe/Amsterdam"),
+						businessDaysAfter(sentAt, 7, "Europe/Amsterdam"),
 					];
 					const draftIds: string[] = [];
 					for (const position of [1, 2]) {
@@ -549,7 +607,8 @@ export class OutreachLifecycleService {
 					}
 					const plan = await tx.followUpPlan.create({
 						data: {
-							contactId: source.recipientRoute.contactId,
+							contactId: recipientRoute.contactId,
+							channel: "EMAIL",
 							routeId: source.recipientRouteId,
 							ownerUserId: source.ownerUserId,
 							leadId: source.leadId,
@@ -561,7 +620,7 @@ export class OutreachLifecycleService {
 						data: draftIds.map((draftId, index) => ({
 							planId: plan.id,
 							position: index,
-							dueAt: dueAt[index]!,
+							dueAt: dueAt[index] ?? sentAt,
 							draftId,
 							idempotencyKey: `followup:${plan.id}:${index}`,
 						})),
@@ -855,7 +914,9 @@ export class OutreachLifecycleService {
 							select: {
 								id: true,
 								contactId: true,
-								contact: { select: { lifecycleState: true } },
+								contact: {
+									select: { lifecycleState: true, companyId: true },
+								},
 							},
 						},
 						outreachApproval: { select: { status: true } },
@@ -866,6 +927,25 @@ export class OutreachLifecycleService {
 							where: { routeId: draft.recipientRoute.id },
 						})
 					: null;
+				const activeLinkedInConversation = draft?.recipientRoute?.contactId
+					? await tx.channelEngagementState.findFirst({
+							where: {
+								contactId: draft.recipientRoute.contactId,
+								channel: "LINKEDIN",
+								status: { in: ["ACTIVE_HUMAN_CONVERSATION", "NEEDS_IHSAN"] },
+							},
+							select: { id: true },
+						})
+					: null;
+				const organizationProtection = draft?.coldOutreach
+					? await tx.organizationProtection.findFirst({
+							where: {
+								companyId: draft.recipientRoute?.contact?.companyId ?? "",
+								status: "ACTIVE",
+							},
+							select: { id: true },
+						})
+					: null;
 				const settings = draft?.coldOutreach
 					? await tx.appSetting.findUnique({
 							where: { id: "app" },
@@ -873,7 +953,9 @@ export class OutreachLifecycleService {
 						})
 					: null;
 				const currentAuthorization =
-					draft?.coldOutreach && draft.status === "DRAFT" && !draft.authorization
+					draft?.coldOutreach &&
+					draft.status === "DRAFT" &&
+					!draft.authorization
 						? await tx.outreachAuthorization.findFirst({
 								where: {
 									scope: "STANDARD_COLD_OUTREACH",
@@ -881,29 +963,38 @@ export class OutreachLifecycleService {
 									OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
 								},
 								orderBy: { issuedAt: "desc" },
-								select: { id: true, scope: true, status: true, expiresAt: true },
+								select: {
+									id: true,
+									scope: true,
+									status: true,
+									expiresAt: true,
+								},
 							})
 						: null;
 				const authorization = draft?.authorization ?? currentAuthorization;
 				const autonomous = Boolean(
 					draft?.coldOutreach &&
-					draft.status === "DRAFT" &&
-					draft.atlasAuthorizedAt &&
-					authorization?.scope === "STANDARD_COLD_OUTREACH" &&
-					authorization.status === "ACTIVE" &&
-					(authorization.expiresAt === null ||
-						authorization.expiresAt > new Date()) &&
-					settings?.atlasLiveOutreachEnabled === true &&
-					process.env.ATLAS_LIVE_OUTREACH_ENABLED?.trim().toLowerCase() ===
-						"true" &&
-					draft.mailbox?.address.toLowerCase() === "outreach@iblmedia.com",
+						draft.status === "DRAFT" &&
+						draft.atlasAuthorizedAt &&
+						authorization?.scope === "STANDARD_COLD_OUTREACH" &&
+						authorization.status === "ACTIVE" &&
+						(authorization.expiresAt === null ||
+							authorization.expiresAt > new Date()) &&
+						settings?.atlasLiveOutreachEnabled === true &&
+						process.env.ATLAS_LIVE_OUTREACH_ENABLED?.trim().toLowerCase() ===
+							"true" &&
+						draft.mailbox?.address.toLowerCase() === "outreach@iblmedia.com",
 				);
 				const manuallyApproved = Boolean(
 					draft?.status === "APPROVED" &&
-					draft.outreachApproval?.status === "APPROVED",
+						draft.outreachApproval?.status === "APPROVED",
 				);
 				if (
+					!draft ||
+					plan?.channel !== "EMAIL" ||
 					plan?.status !== "ACTIVE" ||
+					activeLinkedInConversation ||
+					organizationProtection ||
 					(!manuallyApproved && !autonomous) ||
 					draft.recipientRoute?.contact?.lifecycleState !== "ACTIVE" ||
 					consent?.status === "DO_NOT_CONTACT"
@@ -914,7 +1005,9 @@ export class OutreachLifecycleService {
 							status: "CANCELLED",
 							leaseOwner: null,
 							leasedUntil: null,
-							lastErrorCode: "FOLLOW_UP_CANCELLED_BY_POLICY",
+							lastErrorCode: organizationProtection
+								? "FOLLOW_UP_CANCELLED_BY_ORGANIZATION_OWNER_PROTECTION"
+								: "FOLLOW_UP_CANCELLED_BY_POLICY",
 						},
 					});
 					if (plan)
@@ -944,9 +1037,7 @@ export class OutreachLifecycleService {
 								? currentAuthorization?.id
 								: undefined,
 						atlasAuthorizedAt:
-							autonomous && !draft.atlasAuthorizedAt
-								? new Date()
-								: undefined,
+							autonomous && !draft.atlasAuthorizedAt ? new Date() : undefined,
 						approvedAt: autonomous ? new Date() : undefined,
 					},
 				});
@@ -987,7 +1078,11 @@ export class OutreachLifecycleService {
 		reason: string,
 	) {
 		const plans = await tx.followUpPlan.findMany({
-			where: { contactId, status: { in: ["ACTIVE", "PAUSED"] } },
+			where: {
+				contactId,
+				channel: "EMAIL",
+				status: { in: ["ACTIVE", "PAUSED"] },
+			},
 			select: { id: true },
 		});
 		const ids = plans.map((plan) => plan.id);
@@ -1032,35 +1127,6 @@ export class OutreachLifecycleService {
 	}
 }
 
-export function businessDaysAfter(base: Date, days: number, timeZone: string): Date {
-	let candidate = new Date(base);
-	let remaining = days;
-	while (remaining > 0) {
-		candidate = new Date(candidate.getTime() + 24 * 60 * 60 * 1000);
-		const weekday = new Intl.DateTimeFormat("en-US", {
-			timeZone,
-			weekday: "short",
-		}).format(candidate);
-		if (weekday !== "Sat" && weekday !== "Sun") remaining -= 1;
-	}
-	const parts = new Intl.DateTimeFormat("en-CA", {
-		timeZone,
-		year: "numeric",
-		month: "2-digit",
-		day: "2-digit",
-		hour: "2-digit",
-		minute: "2-digit",
-		hourCycle: "h23",
-	}).formatToParts(candidate);
-	const value = (type: string) =>
-		parts.find((part) => part.type === type)?.value ?? "00";
-	const minutes = Number(value("hour")) * 60 + Number(value("minute"));
-	if (minutes >= 9 * 60 && minutes < 18 * 60) return candidate;
-	return new Date(
-		`${value("year")}-${value("month")}-${value("day")}T10:00:00.000Z`,
-	);
-}
-
 function followUpSubject(subject: string | null, position: number): string {
 	const cleaned = (subject ?? "the earlier note")
 		.replace(/^Re:\s*/i, "")
@@ -1069,7 +1135,11 @@ function followUpSubject(subject: string | null, position: number): string {
 	return position === 1 ? `Re: ${cleaned}` : `Re: ${cleaned}`;
 }
 
-function followUpBody(subject: string | null, position: number, language?: string | null): string {
+function followUpBody(
+	subject: string | null,
+	position: number,
+	language?: string | null,
+): string {
 	const context = (subject ?? "the earlier note")
 		.replace(/^Re:\s*/i, "")
 		.replace(/[—–]/g, "-")

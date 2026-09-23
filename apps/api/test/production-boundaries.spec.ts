@@ -23,7 +23,7 @@ describe("production runtime boundaries", () => {
 			if (file.includes(join("src", "generated"))) continue;
 			const source = await readFile(file, "utf8");
 			if (
-				/from\s+["'][^"']*(?:google|microsoft|redis|ioredis)[^"']*["']/i.test(
+				/from\s+["'](?![./])[^"']*(?:google|microsoft|redis|ioredis)[^"']*["']/i.test(
 					source,
 				)
 			) {
@@ -50,8 +50,9 @@ describe("production runtime boundaries", () => {
 			join(root, "phase7", "docker-compose.yml"),
 			"utf8",
 		);
-		const api = compose.match(/\n  api:[\s\S]*?\n  worker:/)?.[0] ?? "";
-		const worker = compose.match(/\n  worker:[\s\S]*?\n  agent:/)?.[0] ?? "";
+		const api = compose.match(/\n {2}api:[\s\S]*?\n {2}worker:/)?.[0] ?? "";
+		const worker =
+			compose.match(/\n {2}worker:[\s\S]*?\n {2}agent:/)?.[0] ?? "";
 		expect(api).not.toContain("miab_mailbox_credentials_json");
 		expect(api).not.toContain("resend_api_key");
 		expect(api).toContain("resend_webhook_secret");
@@ -91,7 +92,9 @@ describe("production runtime boundaries", () => {
 		);
 		expect(source).toContain("'PENDING', 'FAILED', 'LEASED'");
 		expect(source).toContain("FOR UPDATE SKIP LOCKED");
-		expect(source).toContain('"leasedUntil" IS NULL OR "leasedUntil" <= NOW()');
+		expect(source).toContain(
+			'"leasedUntil" IS NULL OR "leasedUntil" <= (CURRENT_TIMESTAMP AT TIME ZONE \\\'UTC\\\')',
+		);
 		expect(source).not.toMatch(/redis|ioredis/i);
 	});
 });

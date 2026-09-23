@@ -15,6 +15,14 @@ export type InboundSecurityAssessment = {
 	signals: InboundSecuritySignal[];
 };
 
+export type InboundAttachmentMetadata = {
+	filename: string | null;
+	contentType: string;
+	disposition: "attachment" | "inline";
+	contentId: string | null;
+	size: number;
+};
+
 const SIGNALS: Array<{
 	signal: InboundSecuritySignal;
 	pattern: RegExp;
@@ -57,6 +65,7 @@ export function assessInboundSecurity(input: {
 	fromName: string | null;
 	trustedDomains: ReadonlySet<string>;
 	attachmentCount?: number;
+	attachments?: readonly InboundAttachmentMetadata[];
 	knownContact?: boolean;
 	existingConversationReply?: boolean;
 	threadIdentifiersMatch?: boolean;
@@ -66,7 +75,11 @@ export function assessInboundSecurity(input: {
 		({ signal }) => signal,
 	);
 
-	if ((input.attachmentCount ?? 0) > 0) signals.push("SUSPICIOUS_ATTACHMENT");
+	const attachments = input.attachments;
+	const suspiciousAttachment = attachments
+		? attachments.some((attachment) => !isBenignInlineSignature(attachment))
+		: (input.attachmentCount ?? 0) > 0;
+	if (suspiciousAttachment) signals.push("SUSPICIOUS_ATTACHMENT");
 
 	const fromDomain = input.fromEmail.split("@").at(-1)?.toLowerCase();
 	const suspiciousContent = signals.length > 0;
@@ -88,4 +101,14 @@ export function assessInboundSecurity(input: {
 		flagged: signals.length > 0,
 		signals: [...new Set(signals)],
 	};
+}
+
+export function isBenignInlineSignature(
+	attachment: InboundAttachmentMetadata,
+): boolean {
+	return (
+		attachment.disposition === "inline" &&
+		attachment.contentType.toLowerCase().startsWith("image/") &&
+		Boolean(attachment.contentId?.trim())
+	);
 }

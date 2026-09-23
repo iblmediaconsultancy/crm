@@ -47,10 +47,11 @@ rules and skills you read.
 
 ## Median Tasks
 
-Median can use a project-local workspace binding. If this repository has
-`.median/config.json`, run `mdn` commands from inside this repository so the
-correct Median workspace profile is selected. The local config stores only a
-profile name; API keys stay in your user config.
+Median can use a project-local workspace binding when this repository is
+configured for Median. If `.median/config.json` and the `mdn` command are
+present, run `mdn` commands from inside this repository so the correct Median
+workspace profile is selected. The local config stores only a profile name;
+API keys stay in your user config.
 
 To bind this repository to a workspace:
 
@@ -84,7 +85,9 @@ mdn create --title "Description" --status todo --priority medium --agent <your-a
 
 ## Commit Messages & Pull Requests
 
-Always include the Median task ID in commit messages and PR titles so tasks get marked automatically.
+When Median is configured and a task ID is assigned, include that Median task ID
+in commit messages and PR titles so tasks get marked automatically. Otherwise,
+follow the repository's normal Conventional Commit workflow.
 
 ```
 git commit -m "MDN-42 fix: resolve auth token expiry"

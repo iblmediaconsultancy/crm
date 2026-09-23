@@ -157,11 +157,62 @@ export class MiabSyncService {
 					},
 				);
 			}
+			const existingMessageIds = new Set(
+				(
+					await this.db.emailMessage.findMany({
+						where: {
+							mailboxId,
+							rfcMessageId: {
+								in: messages.map((message) =>
+									normalizeMessageId(message.messageId),
+								),
+							},
+						},
+						select: { rfcMessageId: true },
+					})
+				).map((message) => message.rfcMessageId),
+			);
 			const stored = await this.store(
 				context.sync,
 				context.mailbox.address,
 				messages,
 			);
+			let attachmentFailures = 0;
+			for (const message of messages) {
+				if (!message.attachments.length) continue;
+				if (existingMessageIds.has(normalizeMessageId(message.messageId)))
+					continue;
+				const persisted = await this.db.emailMessage.findUnique({
+					where: {
+						mailboxId_rfcMessageId: {
+							mailboxId,
+							rfcMessageId: normalizeMessageId(message.messageId),
+						},
+					},
+					select: { id: true },
+				});
+				if (!persisted) continue;
+				try {
+					await runInPrincipalTransaction(
+						this.db,
+						{ userId: null, mailboxId, kind: "worker" },
+						() =>
+							this.attachments.ingest(
+								mailboxId,
+								persisted.id,
+								message.attachments,
+							),
+					);
+				} catch (error) {
+					attachmentFailures += 1;
+					this.logger.warn({
+						message: "MIAB attachment persistence deferred",
+						mailboxId,
+						uid: message.uid,
+						code: providerErrorCode(error),
+					});
+				}
+			}
 			const failureCursor = mimeErrors.reduce(
 				(maximum, failure) => Math.max(maximum, failure.uid),
 				cursor ?? 0,
@@ -192,12 +243,14 @@ export class MiabSyncService {
 				mailboxId,
 				stored,
 				mimeFailures: mimeErrors.length,
+				attachmentFailures,
 				cursor: nextCursor,
 			});
 			return {
 				status: "synced" as const,
 				stored,
 				mimeFailures: mimeErrors.length,
+				attachmentFailures,
 				cursor: nextCursor,
 			};
 		} catch (error) {
@@ -273,28 +326,13 @@ export class MiabSyncService {
 							body: message.body,
 							sentAt: message.sentAt,
 							attachmentCount: message.attachments.length,
+							attachments: message.attachments.map(
+								({ content: _content, ...metadata }) => metadata,
+							),
 						},
 						context,
 					);
 					if (written) stored += 1;
-					if (message.attachments.length) {
-						const persisted = await this.db.emailMessage.findUnique({
-							where: {
-								mailboxId_rfcMessageId: {
-									mailboxId: sync.mailboxId,
-									rfcMessageId: normalizedMessageId,
-								},
-							},
-							select: { id: true },
-						});
-						if (persisted) {
-							await this.attachments.ingest(
-								sync.mailboxId,
-								persisted.id,
-								message.attachments,
-							);
-						}
-					}
 				}
 				return stored;
 			},
