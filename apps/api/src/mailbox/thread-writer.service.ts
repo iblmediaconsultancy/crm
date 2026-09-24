@@ -828,14 +828,8 @@ export class ThreadWriterService {
 					"Human inbound reply received",
 				);
 		}
-		await tx.domainAuditEvent.upsert({
-			where: {
-				action_requestId: {
-					action: "INBOUND_INTENT_CLASSIFIED",
-					requestId: `inbound-intent:${parsed.rfcMessageId}`,
-				},
-			},
-			create: {
+		await tx.domainAuditEvent.createMany({
+			data: {
 				actorUserId: "atlas-operator",
 				action: "INBOUND_INTENT_CLASSIFIED",
 				entityType: "OUTREACH",
@@ -847,13 +841,7 @@ export class ThreadWriterService {
 					reason: decision.reason,
 				},
 			},
-			update: {
-				outcome: decision.intent,
-				metadata: {
-					organizationWide: decision.organizationWide,
-					reason: decision.reason,
-				},
-			},
+			skipDuplicates: true,
 		});
 	}
 
@@ -919,14 +907,8 @@ export class ThreadWriterService {
 				create: { domain, reason },
 				update: { reason },
 			});
-			await tx.domainAuditEvent.upsert({
-				where: {
-					action_requestId: {
-						action: "OUTREACH_ORGANIZATION_SUPPRESSED",
-						requestId: `organization-suppression:${domain}`,
-					},
-				},
-				create: {
+			await tx.domainAuditEvent.createMany({
+				data: {
 					actorUserId: "atlas-operator",
 					action: "OUTREACH_ORGANIZATION_SUPPRESSED",
 					entityType: "COMPANY",
@@ -935,20 +917,11 @@ export class ThreadWriterService {
 					requestId: `organization-suppression:${domain}`,
 					metadata: { domain, reason, leadId: input.leadId },
 				},
-				update: {
-					outcome: "SUPPRESSED",
-					metadata: { domain, reason, leadId: input.leadId },
-				},
+				skipDuplicates: true,
 			});
 		}
-		await tx.domainAuditEvent.upsert({
-			where: {
-				action_requestId: {
-					action: "OUTREACH_ROUTE_SUPPRESSED",
-					requestId: `route-suppression:${input.parsed.rfcMessageId}`,
-				},
-			},
-			create: {
+		await tx.domainAuditEvent.createMany({
+			data: {
 				actorUserId: "atlas-operator",
 				action: "OUTREACH_ROUTE_SUPPRESSED",
 				entityType: "CONTACT",
@@ -957,10 +930,7 @@ export class ThreadWriterService {
 				requestId: `route-suppression:${input.parsed.rfcMessageId}`,
 				metadata: { email, reason, routeId: route?.id ?? null },
 			},
-			update: {
-				outcome: "SUPPRESSED",
-				metadata: { email, reason, routeId: route?.id ?? null },
-			},
+			skipDuplicates: true,
 		});
 	}
 

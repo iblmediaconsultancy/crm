@@ -23,6 +23,8 @@ const securityRoot = `<security-${suffix}@mail.test>`;
 const unknownSecurityRoot = `<unknown-security-${suffix}@mail.test>`;
 const unknownPerson = `phisher-${suffix}@outside.test`;
 const normalConversationRoot = `<normal-conversation-${suffix}@mail.test>`;
+const auditFirstRoot = `<audit-first-${suffix}@mail.test>`;
+const auditExistingRoot = `<audit-existing-${suffix}@mail.test>`;
 const companyId = `company-${suffix}`;
 const contactId = `contact-${suffix}`;
 const routeId = `route-${suffix}`;
@@ -100,10 +102,14 @@ function unknownSecurityMessage(id: string, sentAt: Date): IncomingMessage {
 	};
 }
 
-function normalReply(id: string, sentAt: Date): IncomingMessage {
+function normalReply(
+	id: string,
+	sentAt: Date,
+	root = normalConversationRoot,
+): IncomingMessage {
 	return {
 		rfcMessageId: id,
-		rootId: normalConversationRoot,
+		rootId: root,
 		subject: "Re: Pricing",
 		from: { email: person, name: "Ihsan Bal" },
 		recipients: [{ email: mailbox, name: "Test Rep", kind: "to" }],
@@ -122,6 +128,8 @@ async function clean() {
 					securityRoot,
 					unknownSecurityRoot,
 					normalConversationRoot,
+					auditFirstRoot,
+					auditExistingRoot,
 					...freeMailRootIds,
 				],
 			},
@@ -229,6 +237,152 @@ beforeAll(async () => {
 			dueAt: new Date("2030-01-02T10:00:00Z"),
 			idempotencyKey: `follow-up-step:${suffix}`,
 		},
+	});
+});
+
+describe("inbound audit event recording", () => {
+	it("is append-only and idempotent across retries", async () => {
+		const firstMessage = normalReply(
+			`<audit-first-${suffix}@mail.test>`,
+			new Date("2026-03-01T10:00:00Z"),
+			auditFirstRoot,
+		);
+		const outboundCountBefore = await db.outboundDelivery.count();
+
+		const firstStored = await threads.store(
+			row,
+			{ mailbox, origin: "miab" },
+			firstMessage,
+			await threads.context(),
+		);
+		expect(firstStored).toBe(true);
+
+		const firstRequestId = `inbound-intent:${firstMessage.rfcMessageId}`;
+		const firstAudit = await db.domainAuditEvent.findUnique({
+			where: {
+				action_requestId: {
+					action: "INBOUND_INTENT_CLASSIFIED",
+					requestId: firstRequestId,
+				},
+			},
+			select: { id: true, outcome: true, metadata: true },
+		});
+		expect(firstAudit).not.toBeNull();
+		expect(
+			await db.domainAuditEvent.count({
+				where: {
+					action: "INBOUND_INTENT_CLASSIFIED",
+					requestId: firstRequestId,
+				},
+			}),
+		).toBe(1);
+
+		const threadBeforeRetry = await db.emailThread.findUnique({
+			where: {
+				mailboxId_rootMessageId: {
+					mailboxId,
+					rootMessageId: auditFirstRoot,
+				},
+			},
+			select: { messageCount: true },
+		});
+		const retryResult = await threads.store(
+			row,
+			{ mailbox, origin: "miab" },
+			firstMessage,
+			await threads.context(),
+		);
+		expect(retryResult).toBe(false);
+		expect(
+			await db.domainAuditEvent.count({
+				where: {
+					action: "INBOUND_INTENT_CLASSIFIED",
+					requestId: firstRequestId,
+				},
+			}),
+		).toBe(1);
+		expect(
+			await db.emailThread.findUnique({
+				where: {
+					mailboxId_rootMessageId: {
+						mailboxId,
+						rootMessageId: auditFirstRoot,
+					},
+				},
+				select: { messageCount: true },
+			}),
+		).toEqual(threadBeforeRetry);
+
+		const existingRfcMessageId = `<audit-existing-${suffix}@mail.test>`;
+		const existingRequestId = `inbound-intent:${existingRfcMessageId}`;
+		const seededAudit = await db.domainAuditEvent.create({
+			data: {
+				actorUserId: null,
+				action: "INBOUND_INTENT_CLASSIFIED",
+				entityType: "OUTREACH",
+				entityId: null,
+				outcome: "PREEXISTING",
+				requestId: existingRequestId,
+				metadata: { source: "fixture", suffix },
+			},
+			select: {
+				id: true,
+				actorUserId: true,
+				outcome: true,
+				requestId: true,
+				metadata: true,
+			},
+		});
+		const existingStored = await threads.store(
+			row,
+			{ mailbox, origin: "miab" },
+			normalReply(
+				existingRfcMessageId,
+				new Date("2026-03-01T11:00:00Z"),
+				auditExistingRoot,
+			),
+			await threads.context(),
+		);
+		expect(existingStored).toBe(true);
+		const existingAudit = await db.domainAuditEvent.findUnique({
+			where: {
+				action_requestId: {
+					action: "INBOUND_INTENT_CLASSIFIED",
+					requestId: existingRequestId,
+				},
+			},
+			select: {
+				id: true,
+				actorUserId: true,
+				outcome: true,
+				requestId: true,
+				metadata: true,
+			},
+		});
+		expect(existingAudit).toEqual(seededAudit);
+		expect(
+			await db.domainAuditEvent.count({
+				where: {
+					action: "INBOUND_INTENT_CLASSIFIED",
+					requestId: existingRequestId,
+				},
+			}),
+		).toBe(1);
+		let updateRejected = false;
+		try {
+			await db.$executeRaw`UPDATE "domainAuditEvent" SET "outcome" = 'MUTATED' WHERE "id" = ${seededAudit.id}`;
+		} catch (error) {
+			updateRejected = String(error).includes("append-only");
+		}
+		expect(updateRejected).toBe(true);
+		let deleteRejected = false;
+		try {
+			await db.$executeRaw`DELETE FROM "domainAuditEvent" WHERE "id" = ${seededAudit.id}`;
+		} catch (error) {
+			deleteRejected = String(error).includes("append-only");
+		}
+		expect(deleteRejected).toBe(true);
+		expect(await db.outboundDelivery.count()).toBe(outboundCountBefore);
 	});
 });
 

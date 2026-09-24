@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { db, type Prisma } from "@crm/db";
-import { withPrincipal } from "@crm/db/security";
 import type { IdentityEnvelope } from "@crm/db/security";
+import { withPrincipal } from "@crm/db/security";
 import { APP_AUTH, type AppAuth } from "./app-auth";
 import { requireIblAgentIdentity } from "./ibl-agent-policy";
 import type { PurposeContext } from "./session-purpose";
@@ -91,9 +91,7 @@ export function normalizeResearchInspection(
 				field: finding.field,
 				summary: finding.summary,
 				value:
-					finding.value === null
-						? null
-						: normalizeJsonValue(finding.value),
+					finding.value === null ? null : normalizeJsonValue(finding.value),
 				confidence,
 				status: finding.status,
 				evidenceSource: {
@@ -110,16 +108,24 @@ export function normalizeResearchInspection(
 }
 
 function normalizeJsonValue(value: unknown): Prisma.JsonValue {
-	if (value === null || typeof value === "string" || typeof value === "boolean") {
+	if (
+		value === null ||
+		typeof value === "string" ||
+		typeof value === "boolean"
+	) {
 		return value;
 	}
 	if (typeof value === "number") {
-		if (!Number.isFinite(value)) throw new Error("Research JSON contains a non-finite number.");
+		if (!Number.isFinite(value))
+			throw new Error("Research JSON contains a non-finite number.");
 		return value;
 	}
 	if (Array.isArray(value)) return value.map(normalizeJsonValue);
 	if (typeof value === "object") {
-		if (value instanceof Date || Object.getPrototypeOf(value) !== Object.prototype) {
+		if (
+			value instanceof Date ||
+			Object.getPrototypeOf(value) !== Object.prototype
+		) {
 			throw new Error("Research JSON contains a non-plain object.");
 		}
 		const result: { [key: string]: Prisma.JsonValue } = {};
@@ -528,14 +534,8 @@ export async function completeLocalResearchRequest(
 					failureCode: null,
 				},
 			});
-			await tx.domainAuditEvent.upsert({
-				where: {
-					action_requestId: {
-						action: "AGENT_RESEARCH_SUBMITTED",
-						requestId: `local-double:${request.id}`,
-					},
-				},
-				create: {
+			await tx.domainAuditEvent.createMany({
+				data: {
 					actorUserId: request.ownerUserId,
 					action: "AGENT_RESEARCH_SUBMITTED",
 					entityType: "RESEARCH_REQUEST",
@@ -544,7 +544,7 @@ export async function completeLocalResearchRequest(
 					requestId: `local-double:${request.id}`,
 					metadata: { localProviderDouble: true },
 				},
-				update: {},
+				skipDuplicates: true,
 			});
 		},
 	);
@@ -681,17 +681,14 @@ async function auditArtifact(
 	entityType: "DRAFT" | "PROPOSAL",
 	entityId: string,
 ) {
-	await tx.domainAuditEvent.upsert({
-		where: {
-			action_requestId: { action, requestId: `${requestId}:${entityId}` },
-		},
-		create: {
+	await tx.domainAuditEvent.createMany({
+		data: {
 			action,
 			entityType,
 			entityId,
 			outcome: "CREATED_FOR_HUMAN_REVIEW",
 			requestId: `${requestId}:${entityId}`,
 		},
-		update: {},
+		skipDuplicates: true,
 	});
 }

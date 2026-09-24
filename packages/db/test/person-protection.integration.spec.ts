@@ -40,7 +40,7 @@ if (!testDatabaseUrl) {
 			const coworkerConversationId = `person-protection-coworker-conversation-${suffix}`;
 			const profileUrl =
 				"https://www.linkedin.com/in/fabrizio-romano-05708262/";
-			const stableLinkedInId = "ACoAAA0uNcMBATjQVuG-D_Du4vuiQtR0A-LursY";
+			const stableLinkedInId = `ACoAAA0uNcMBATjQVuG-D_Du4vuiQtR0A-LursY-${suffix}`;
 			const service = new PersonProtectionService(db);
 			const linkedin = new LinkedInChannelService(db);
 			const lifecycle = new OutreachLifecycleService(db);
