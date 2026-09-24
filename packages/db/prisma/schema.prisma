@@ -560,32 +560,33 @@ model Contact {
 
   lastActivityAt DateTime?
 
-  deals                   DealContact[]
-  activities              Activity[]
-  emailThreads            EmailThread[]
-  linkedinConversations   LinkedInConversation[]
-  channelEngagementStates ChannelEngagementState[]
-  outreachSuppressions    OutreachSuppression[]
-  relationshipTouchClaim  RelationshipColdTouchClaim?
-  calendarEvents          CalendarEvent[]
-  eventAttendance         CalendarAttendee[]
-  meetingRequests         MeetingRequest[]
-  fieldValues             FieldValue[]
-  playerProfile           FootballPlayer?
-  playerProtections       ProspectPlayerProtection[]  @relation("PlayerProtectionContact")
-  footballAgentProfile    FootballAgent?
-  contactRoutes           ContactRoute[]
-  sharedRoutePolicies     SharedRoutePolicy[]
-  playerRepresentations   Representation[]            @relation("RepresentationPlayer")
-  agentRepresentations    Representation[]            @relation("RepresentationAgent")
-  leads                   Lead[]
-  operationalTasks        OperationalTask[]
-  notes                   Note[]
-  proofItems              ProofItem[]
-  financialProfiles       ClientFinancialProfile[]
-  personProtections       PersonProtection[]
-  createdAt               DateTime                    @default(now())
-  updatedAt               DateTime                    @updatedAt
+  deals                         DealContact[]
+  activities                    Activity[]
+  emailThreads                  EmailThread[]
+  linkedinConversations         LinkedInConversation[]
+  channelEngagementStates       ChannelEngagementState[]
+  outreachSuppressions          OutreachSuppression[]
+  relationshipTouchClaim        RelationshipColdTouchClaim?
+  calendarEvents                CalendarEvent[]
+  eventAttendance               CalendarAttendee[]
+  meetingRequests               MeetingRequest[]
+  fieldValues                   FieldValue[]
+  playerProfile                 FootballPlayer?
+  playerProtections             ProspectPlayerProtection[]     @relation("PlayerProtectionContact")
+  footballAgentProfile          FootballAgent?
+  contactRoutes                 ContactRoute[]
+  linkedinConnectionRequestJobs LinkedInConnectionRequestJob[]
+  sharedRoutePolicies           SharedRoutePolicy[]
+  playerRepresentations         Representation[]               @relation("RepresentationPlayer")
+  agentRepresentations          Representation[]               @relation("RepresentationAgent")
+  leads                         Lead[]
+  operationalTasks              OperationalTask[]
+  notes                         Note[]
+  proofItems                    ProofItem[]
+  financialProfiles             ClientFinancialProfile[]
+  personProtections             PersonProtection[]
+  createdAt                     DateTime                       @default(now())
+  updatedAt                     DateTime                       @updatedAt
 
   @@index([companyId])
   @@index([ownerId])
@@ -1319,12 +1320,14 @@ model Activity {
   archiveReason    String?
   version          Int                     @default(1)
 
-  emailThreadId     String?          @unique
-  emailThread       EmailThread?     @relation(fields: [emailThreadId], references: [id], onDelete: Cascade)
-  linkedinMessageId String?          @unique
-  linkedinMessage   LinkedInMessage? @relation(fields: [linkedinMessageId], references: [id], onDelete: Cascade)
-  calendarEventId   String?          @unique
-  calendarEvent     CalendarEvent?   @relation(fields: [calendarEventId], references: [id], onDelete: Cascade)
+  emailThreadId                  String?                       @unique
+  emailThread                    EmailThread?                  @relation(fields: [emailThreadId], references: [id], onDelete: Cascade)
+  linkedinMessageId              String?                       @unique
+  linkedinMessage                LinkedInMessage?              @relation(fields: [linkedinMessageId], references: [id], onDelete: Cascade)
+  linkedinConnectionRequestJobId String?                       @unique
+  linkedinConnectionRequestJob   LinkedInConnectionRequestJob? @relation(fields: [linkedinConnectionRequestJobId], references: [id], onDelete: Cascade)
+  calendarEventId                String?                       @unique
+  calendarEvent                  CalendarEvent?                @relation(fields: [calendarEventId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1450,6 +1453,64 @@ model LinkedInSendAttempt {
   @@unique([jobId, attemptNumber])
   @@index([status, createdAt])
   @@map("linkedinSendAttempt")
+}
+
+model LinkedInConnectionRequestJob {
+  id                String                             @id @default(cuid())
+  contactId         String
+  contact           Contact                            @relation(fields: [contactId], references: [id], onDelete: Restrict)
+  routeId           String
+  route             ContactRoute                       @relation(fields: [routeId], references: [id], onDelete: Restrict)
+  action            LinkedInActionType                 @default(CONNECTION_REQUEST)
+  profileUrl        String
+  profileIdentifier String
+  connectionState   LinkedInConnectionState            @default(NOT_CONNECTED)
+  coldOutreach      Boolean                            @default(true)
+  accountKey        String                             @default("default")
+  quotaDay          DateTime                           @db.Date
+  status            LinkedInJobStatus                  @default(PENDING)
+  idempotencyKey    String                             @unique
+  actionPayload     Json?
+  requestedAt       DateTime                           @default(now())
+  approvedAt        DateTime?
+  attemptCount      Int                                @default(0)
+  maxAttempts       Int                                @default(3)
+  leaseOwner        String?
+  leasedUntil       DateTime?
+  retryAt           DateTime?
+  browserSessionKey String?
+  confirmedAt       DateTime?
+  lastErrorCode     String?
+  attempts          LinkedInConnectionRequestAttempt[]
+  activity          Activity?
+  createdAt         DateTime                           @default(now())
+  updatedAt         DateTime                           @updatedAt
+
+  @@index([status, retryAt, leasedUntil])
+  @@index([contactId, status])
+  @@index([routeId, status])
+  @@index([accountKey, quotaDay, status])
+  @@map("linkedinConnectionRequestJob")
+}
+
+model LinkedInConnectionRequestAttempt {
+  id                 String                       @id @default(cuid())
+  jobId              String
+  job                LinkedInConnectionRequestJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  attemptNumber      Int
+  status             LinkedInSendAttemptStatus    @default(STARTED)
+  browserSessionKey  String?
+  externalRequestKey String?                      @unique
+  browserProof       Json?
+  outcome            Json?
+  errorCode          String?
+  startedAt          DateTime                     @default(now())
+  completedAt        DateTime?
+  createdAt          DateTime                     @default(now())
+
+  @@unique([jobId, attemptNumber])
+  @@index([status, createdAt])
+  @@map("linkedinConnectionRequestAttempt")
 }
 
 model LinkedInQuota {
@@ -2424,26 +2485,27 @@ model Club {
 }
 
 model ContactRoute {
-  id                   String                  @id @default(cuid())
-  lifecycleState       CanonicalLifecycleState @default(ACTIVE)
-  contactId            String?
-  contact              Contact?                @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  companyId            String?
-  company              Company?                @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  ownerUserId          String
-  owner                User                    @relation("ContactRouteOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
-  type                 ContactRouteType
-  value                String
-  normalizedValue      String
-  label                String?
-  visibility           ContactRouteVisibility  @default(PRIVATE)
-  verifiedAt           DateTime?
-  sourceKey            String?                 @unique
-  sharedPolicies       SharedRoutePolicy[]
-  outreachSuppressions OutreachSuppression[]
-  drafts               Draft[]
-  createdAt            DateTime                @default(now())
-  updatedAt            DateTime                @updatedAt
+  id                            String                         @id @default(cuid())
+  lifecycleState                CanonicalLifecycleState        @default(ACTIVE)
+  contactId                     String?
+  contact                       Contact?                       @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  companyId                     String?
+  company                       Company?                       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  ownerUserId                   String
+  owner                         User                           @relation("ContactRouteOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
+  type                          ContactRouteType
+  value                         String
+  normalizedValue               String
+  label                         String?
+  visibility                    ContactRouteVisibility         @default(PRIVATE)
+  verifiedAt                    DateTime?
+  sourceKey                     String?                        @unique
+  sharedPolicies                SharedRoutePolicy[]
+  outreachSuppressions          OutreachSuppression[]
+  linkedinConnectionRequestJobs LinkedInConnectionRequestJob[]
+  drafts                        Draft[]
+  createdAt                     DateTime                       @default(now())
+  updatedAt                     DateTime                       @updatedAt
 
   @@unique([type, normalizedValue])
   @@index([contactId])
