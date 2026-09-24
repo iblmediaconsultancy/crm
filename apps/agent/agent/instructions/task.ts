@@ -32,6 +32,13 @@ export default defineDynamic({
 				});
 			}
 
+			if (purpose === "atlas-commercial-enrichment") {
+				return defineInstructions({
+					markdown:
+						"This is a background Atlas commercial-quality enrichment run. Research only the lead named by the task. Use cited public evidence and never invent a current club, why-now event, language, or rating. Call enrich_atlas_commercial_quality once with the evidence you actually observed. Do not send email, create drafts, contact anyone, or change outreach state.",
+				});
+			}
+
 			if (attribute(ctx, "researchRequestId")) {
 				return defineInstructions({
 					markdown: `${RESEARCH_INSTRUCTIONS}\n\nThis is an authenticated IBL research request. Begin with inspect_ibl_research. Work only inside the returned identity envelope and CRM target. Every finding must cite a record_ibl_evidence result. You may create only DRAFT artifacts and submit findings for human review. You cannot approve, queue, or send outreach. Finish with submit_ibl_research_review.`,

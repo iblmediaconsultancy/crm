@@ -660,6 +660,7 @@ model ContactBrief {
 model AgentTask {
   id             String                  @id @default(cuid())
   lifecycleState CanonicalLifecycleState @default(ACTIVE)
+  leadId         String?
   contactId      String?
   companyId      String?
 
@@ -681,6 +682,7 @@ model AgentTask {
   createdAt DateTime @default(now())
 
   @@index([dueAt, leasedUntil])
+  @@index([leadId])
   @@index([contactId])
   @@map("agentTask")
 }
@@ -2827,6 +2829,23 @@ model Lead {
   lastRepliedAt             DateTime?
   parkedUntil               DateTime?
   lastLanguage              String?
+  commercialQualityStatus   String?
+  commercialQualityReasons  Json?
+  commercialQualityScore    Int?
+  commercialOpportunityCollisionKey String?
+  commercialQualityEvaluatedAt DateTime?
+  commercialLanguage         String?
+  commercialLanguageConfidence String?
+  commercialLanguageEvidence Json?
+  commercialQualityInput     Json?
+  commercialEnrichmentStatus String?
+  commercialEnrichmentReason String?
+  commercialEnrichmentAttempts Int @default(0)
+  commercialEnrichmentEvidence Json?
+  commercialEnrichmentConfidence String?
+  commercialEnrichmentNextAttemptAt DateTime?
+  commercialEnrichmentEvaluatedAt DateTime?
+  commercialEnrichmentResult Json?
   needsReview               Boolean                      @default(false)
   convertedAt               DateTime?
   disqualifiedAt            DateTime?
@@ -2854,6 +2873,10 @@ model Lead {
   @@index([nextActionAt])
   @@index([attentionState, nextActionAt])
   @@index([originChannel])
+  @@index([commercialQualityStatus])
+  @@index([commercialOpportunityCollisionKey])
+  @@index([companyId, commercialOpportunityCollisionKey])
+  @@index([commercialEnrichmentStatus, commercialEnrichmentNextAttemptAt])
   @@map("lead")
 }
 

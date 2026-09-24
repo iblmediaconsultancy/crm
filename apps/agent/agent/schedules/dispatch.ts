@@ -1,6 +1,7 @@
 import { db } from "@crm/db";
 import { defineSchedule } from "eve/schedules";
 import crm from "../channels/crm";
+import { scheduleDueAtlasCommercialEnrichment } from "../lib/atlas-commercial-enrichment";
 import { atlasLocalDateKey, atlasReportWindow } from "../lib/atlas-report";
 import {
 	pendingAgentRunIds,
@@ -23,6 +24,9 @@ export default defineSchedule({
 		if (!isScheduledExecutionEnabled()) return;
 		waitUntil(
 			Promise.all([
+				(async () => {
+					await scheduleDueAtlasCommercialEnrichment();
+				})(),
 				(async () => {
 					const settings = await db.appSetting.findUnique({
 						where: { id: "app" },

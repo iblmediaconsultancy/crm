@@ -1,14 +1,23 @@
+import type { CommercialQualityInput, CommercialQualityResult } from "@crm/db";
 import {
 	db,
+	evaluateCommercialQuality,
 	isPersonProtected,
 	isProtectedPlayerContact,
+	opportunityCollisionKey,
 	Prisma,
+	rankCommercialOpportunities,
 	validateExternalCopy,
 } from "@crm/db";
 import { withPrincipal } from "@crm/db/security";
+import {
+	canRetryCommercialQuality,
+	commercialQualityUpdateData,
+} from "./atlas-commercial-enrichment";
 import { hasUnsupportedOutcomeClaim } from "./atlas-playbook";
 import type { PurposeContext } from "./session-purpose";
 import { attribute, purposeOf } from "./session-purpose";
+import { scheduleTask } from "./tasks";
 
 export const ATLAS_OPERATOR_ID = "atlas-operator";
 const POLICY_VERSION = "atlas-v1";
@@ -20,14 +29,29 @@ const BLOCKED_CURRENCY_AMOUNT =
 const BLOCKED_PERIODIC_AMOUNT =
 	/\b\d+(?:[.,]\d+)?\s*(?:per\s+(?:month|mo|week|wk|year|yr)|\/\s*(?:month|mo|week|wk|year|yr))\b/i;
 
-type AtlasInput = {
+export type AtlasInput = {
 	leadId: string;
 	routeId: string;
 	subject: string;
 	body: string;
 	language: string;
 	idempotencyKey: string;
+	commercial?: Partial<CommercialQualityInput>;
 };
+
+class CommercialQualityBlockedError extends Error {
+	readonly result: CommercialQualityResult;
+
+	constructor(result: CommercialQualityResult) {
+		super(
+			`COMMERCIAL_QUALITY_${result.status}:${result.reasons
+				.map((item) => item.code)
+				.join(",")}`,
+		);
+		this.name = "CommercialQualityBlockedError";
+		this.result = result;
+	}
+}
 
 function assertAtlasSession(ctx: PurposeContext): void {
 	if (
@@ -129,6 +153,17 @@ function dayKey(date: Date, timeZone: string): Date {
 	);
 }
 
+function businessDaysBefore(date: Date, count: number): Date {
+	const cursor = new Date(date);
+	let remaining = count;
+	while (remaining > 0) {
+		cursor.setUTCDate(cursor.getUTCDate() - 1);
+		const day = cursor.getUTCDay();
+		if (day !== 0 && day !== 6) remaining -= 1;
+	}
+	return cursor;
+}
+
 export async function listAtlasOutreachQueue(ctx: PurposeContext) {
 	assertAtlasSession(ctx);
 	return withPrincipal(
@@ -145,6 +180,7 @@ export async function listAtlasOutreachQueue(ctx: PurposeContext) {
 			const leads = await tx.lead.findMany({
 				where: {
 					stage: { in: ["NEW", "READY"] },
+					commercialQualityStatus: "SENDABLE",
 					attentionState: "NONE",
 					nextActionAt: { not: null, lte: new Date() },
 					contact: {
@@ -160,6 +196,9 @@ export async function listAtlasOutreachQueue(ctx: PurposeContext) {
 					name: true,
 					stage: true,
 					priority: true,
+					commercialQualityStatus: true,
+					commercialQualityScore: true,
+					commercialOpportunityCollisionKey: true,
 					nextActionTitle: true,
 					nextActionAt: true,
 					contact: {
@@ -215,7 +254,15 @@ export async function listAtlasOutreachQueue(ctx: PurposeContext) {
 					continue;
 				eligible.push(lead);
 			}
-			return eligible.slice(0, 20);
+			const ranked = rankCommercialOpportunities(
+				eligible.map((lead) => ({
+					...lead,
+					id: lead.id,
+					collisionKey: lead.commercialOpportunityCollisionKey ?? lead.id,
+					score: lead.commercialQualityScore ?? 0,
+				})),
+			);
+			return ranked.slice(0, 20);
 		},
 	);
 }
@@ -239,6 +286,7 @@ export async function sendAtlasEmail(ctx: PurposeContext, input: AtlasInput) {
 	if (!isAtlasLanguageAllowed(language))
 		throw new Error("Atlas may send only in English, Dutch, or Turkish.");
 
+	let evaluatedInput: CommercialQualityInput | null = null;
 	return withPrincipal(
 		db,
 		{ userId: ATLAS_OPERATOR_ID, kind: "service" },
@@ -274,6 +322,9 @@ export async function sendAtlasEmail(ctx: PurposeContext, input: AtlasInput) {
 								lifecycleState: true,
 								outreachState: true,
 								email: true,
+								company: {
+									select: { id: true, name: true, domain: true },
+								},
 							},
 						},
 					},
@@ -384,6 +435,21 @@ export async function sendAtlasEmail(ctx: PurposeContext, input: AtlasInput) {
 			await tx.$executeRaw(
 				Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`atlas-relationship:${lead.contactId}`}))`,
 			);
+			const commercial = input.commercial ?? {};
+			const candidateOrganization = commercial.organization?.trim() ?? "";
+			const candidatePlayer = commercial.playerOrOpportunity?.trim() ?? "";
+			const candidatePurpose = commercial.campaignPurpose?.trim() ?? "";
+			await tx.$executeRaw(
+				Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`atlas-commercial-organization:${lead.contact.companyId ?? candidateOrganization}`}))`,
+			);
+			const candidateCollisionKey =
+				candidateOrganization && candidatePlayer && candidatePurpose
+					? opportunityCollisionKey({
+							organization: candidateOrganization,
+							playerOrOpportunity: candidatePlayer,
+							campaignPurpose: candidatePurpose,
+						})
+					: null;
 			const [
 				consent,
 				suppressed,
@@ -392,6 +458,8 @@ export async function sendAtlasEmail(ctx: PurposeContext, input: AtlasInput) {
 				activeLinkedInConversation,
 				sharedSuppressions,
 				recent,
+				existingOpportunity,
+				organizationOpportunities,
 			] = await Promise.all([
 				tx.contactRouteConsent.findUnique({
 					where: { routeId: route.id },
@@ -452,6 +520,30 @@ export async function sendAtlasEmail(ctx: PurposeContext, input: AtlasInput) {
 					orderBy: { createdAt: "desc" },
 					select: { createdAt: true },
 				}),
+				candidateCollisionKey
+					? tx.lead.findFirst({
+							where: {
+								id: { not: lead.id },
+								commercialOpportunityCollisionKey: candidateCollisionKey,
+								stage: { notIn: ["LOST", "WON"] },
+								status: { not: "DISQUALIFIED" },
+							},
+							select: { id: true },
+						})
+					: Promise.resolve(null),
+				lead.contact.companyId
+					? tx.lead.findMany({
+							where: {
+								id: { not: lead.id },
+								companyId: lead.contact.companyId,
+								commercialOpportunityCollisionKey: { not: null },
+								lastContactedAt: { gte: businessDaysBefore(now, 5) },
+								stage: { notIn: ["LOST", "WON"] },
+								status: { not: "DISQUALIFIED" },
+							},
+							select: { commercialOpportunityCollisionKey: true },
+						})
+					: Promise.resolve([]),
 			]);
 			if (
 				consent?.status === "DO_NOT_CONTACT" ||
@@ -459,22 +551,72 @@ export async function sendAtlasEmail(ctx: PurposeContext, input: AtlasInput) {
 				suppressedOrganization
 			)
 				throw new Error("Global or route suppression blocks outreach.");
-			if (activeLinkedInConversation)
-				throw new Error(
-					"An active LinkedIn relationship requires coordination before cold email.",
-				);
 			if (sharedSuppressions.length > 0)
 				throw new Error(
 					"The contact or organization is suppressed for this outreach.",
-				);
-			if (activePlan)
-				throw new Error(
-					"An active outreach sequence already exists for this contact.",
 				);
 			const coldTouchClaim = await tx.relationshipColdTouchClaim.findUnique({
 				where: { contactId: lead.contactId },
 				select: { id: true, status: true, idempotencyKey: true },
 			});
+			const organizationOpportunityKeys = new Set(
+				organizationOpportunities
+					.map((item) => item.commercialOpportunityCollisionKey)
+					.filter((key): key is string => Boolean(key)),
+			);
+			const qualityInput: CommercialQualityInput = {
+				...commercial,
+				organization: candidateOrganization,
+				playerOrOpportunity: candidatePlayer,
+				campaignPurpose: candidatePurpose,
+				requestedLanguage: language,
+				currentClub: commercial.currentClub ?? null,
+				currentClubVerified: commercial.currentClubVerified ?? false,
+				currentClubRequired: commercial.currentClubRequired,
+				identityResolved:
+					commercial.identityResolved ?? Boolean(candidatePlayer),
+				organizationResolved:
+					commercial.organizationResolved ?? Boolean(candidateOrganization),
+				playerOrganizationAssociationResolved:
+					commercial.playerOrganizationAssociationResolved ?? false,
+				whyNowSupported: commercial.whyNowSupported ?? false,
+				whyNowRequired: commercial.whyNowRequired ?? false,
+				subject: input.subject,
+				body: input.body,
+				activeRelationship: Boolean(activeLinkedInConversation || activePlan),
+				contactOnceClaimed: Boolean(
+					coldTouchClaim &&
+						coldTouchClaim.status !== "RELEASED" &&
+						coldTouchClaim.idempotencyKey !== input.idempotencyKey,
+				),
+				opportunityAlreadyActive: Boolean(existingOpportunity),
+				activeOrganizationOpportunityCount: organizationOpportunityKeys.size,
+				language: {
+					...commercial.language,
+					organizationDomain:
+						commercial.language?.organizationDomain ??
+						lead.contact.company?.domain,
+					organizationName:
+						commercial.language?.organizationName ?? lead.contact.company?.name,
+				},
+			};
+			evaluatedInput = qualityInput;
+			const quality = evaluateCommercialQuality(qualityInput);
+			await tx.lead.update({
+				where: { id: lead.id },
+				data: commercialQualityUpdateData(quality, now, qualityInput),
+			});
+			if (quality.status !== "SENDABLE") {
+				throw new CommercialQualityBlockedError(quality);
+			}
+			if (activeLinkedInConversation)
+				throw new Error(
+					"An active LinkedIn relationship requires coordination before cold email.",
+				);
+			if (activePlan)
+				throw new Error(
+					"An active outreach sequence already exists for this contact.",
+				);
 			if (
 				coldTouchClaim &&
 				coldTouchClaim.status !== "RELEASED" &&
@@ -579,5 +721,58 @@ export async function sendAtlasEmail(ctx: PurposeContext, input: AtlasInput) {
 				language,
 			};
 		},
-	);
+	).catch(async (error) => {
+		if (!(error instanceof CommercialQualityBlockedError)) throw error;
+		await withPrincipal(
+			db,
+			{ userId: ATLAS_OPERATOR_ID, kind: "service" },
+			async (tx) => {
+				await tx.lead.update({
+					where: { id: input.leadId },
+					data: {
+						...commercialQualityUpdateData(
+							error.result,
+							new Date(),
+							evaluatedInput ?? {
+								organization: "",
+								playerOrOpportunity: "",
+								campaignPurpose: "",
+							},
+						),
+						commercialEnrichmentStatus: canRetryCommercialQuality(error.result)
+							? "QUEUED"
+							: "EXHAUSTED",
+						commercialEnrichmentReason: error.result.reasons
+							.map((item) => item.code)
+							.join(",")
+							.slice(0, 500),
+						commercialEnrichmentNextAttemptAt: canRetryCommercialQuality(
+							error.result,
+						)
+							? new Date()
+							: null,
+					},
+				});
+			},
+		);
+		if (canRetryCommercialQuality(error.result)) {
+			const lead = await db.lead.findUnique({
+				where: { id: input.leadId },
+				select: { contactId: true, companyId: true },
+			});
+			await scheduleTask({
+				leadId: input.leadId,
+				contactId: lead?.contactId,
+				companyId: lead?.companyId,
+				kind: "atlas-commercial-enrichment",
+				reason: `Recover missing Atlas commercial evidence: ${error.result.reasons
+					.map((item) => item.code)
+					.join(", ")}`,
+				dueAt: new Date(),
+				priority: 85,
+				budget: 4,
+			});
+		}
+		throw error;
+	});
 }
