@@ -2,6 +2,7 @@ import { sendSystemEmail } from "@crm/auth";
 import {
 	ActivityType,
 	type Db,
+	isPersonProtected,
 	isProtectedPlayerContact,
 	validateExternalCopy,
 } from "@crm/db";
@@ -10,6 +11,7 @@ import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import { InjectDatabase } from "../database/database.constants";
 import { snippetOf } from "../mailbox/message-text";
 import { resolveAtlasOutreachSender } from "./atlas-sender";
+import { standardColdFollowUpDueDates } from "./follow-up-cadence";
 import {
 	localProviderDoubleEnabled,
 	localResendCredentialSource,
@@ -290,6 +292,9 @@ export class PostgresJobWorkerService {
 								`${draft.recipientRoute.contact.firstName} ${draft.recipientRoute.contact.lastName ?? ""}`,
 							)
 						: false;
+					const personProtected = draft.recipientRoute?.contact
+						? await isPersonProtected(tx, draft.recipientRoute.contact.id)
+						: false;
 					const activeLinkedInConversation = draft.recipientRoute?.contact
 						? await tx.channelEngagementState.findFirst({
 								where: {
@@ -364,6 +369,7 @@ export class PostgresJobWorkerService {
 						draft.status !== "QUEUED" ||
 						draft.recipientRoute?.type !== "EMAIL" ||
 						draft.recipientRoute.contact?.lifecycleState !== "ACTIVE" ||
+						personProtected ||
 						(draft.coldOutreach &&
 							draft.recipientRoute.contact?.outreachState !== "ALLOWED") ||
 						protectedPlayer ||
@@ -375,26 +381,28 @@ export class PostgresJobWorkerService {
 						!authorizationValid ||
 						!senderValid
 					) {
-						const lastErrorCode = protectedPlayer
-							? "OUTBOUND_PROTECTED_PLAYER"
-							: draft.coldOutreach &&
-									draft.recipientRoute?.contact?.outreachState !== "ALLOWED"
-								? "OUTBOUND_CONTACT_SUPPRESSED"
-								: activeLinkedInConversation
-									? "OUTBOUND_LINKEDIN_CONVERSATION_ACTIVE"
-									: organizationProtection
-										? "OUTBOUND_ORGANIZATION_OWNER_PROTECTED"
-										: sharedSuppression
-											? "OUTBOUND_SHARED_SUPPRESSION"
-											: consent?.status === "DO_NOT_CONTACT"
-												? "OUTBOUND_ROUTE_DO_NOT_CONTACT"
-												: draft.coldOutreach && suppressedOrganization
-													? "OUTBOUND_ORGANIZATION_SUPPRESSED"
-													: !senderValid
-														? "OUTBOUND_ATLAS_SENDER_REJECTED"
-														: !authorizationValid
-															? "OUTBOUND_ATLAS_AUTHORIZATION_REQUIRED"
-															: "OUTBOUND_CANCELLED_BY_POLICY";
+						const lastErrorCode = personProtected
+							? "PERSON_OWNER_PROTECTED"
+							: protectedPlayer
+								? "OUTBOUND_PROTECTED_PLAYER"
+								: draft.coldOutreach &&
+										draft.recipientRoute?.contact?.outreachState !== "ALLOWED"
+									? "OUTBOUND_CONTACT_SUPPRESSED"
+									: activeLinkedInConversation
+										? "OUTBOUND_LINKEDIN_CONVERSATION_ACTIVE"
+										: organizationProtection
+											? "OUTBOUND_ORGANIZATION_OWNER_PROTECTED"
+											: sharedSuppression
+												? "OUTBOUND_SHARED_SUPPRESSION"
+												: consent?.status === "DO_NOT_CONTACT"
+													? "OUTBOUND_ROUTE_DO_NOT_CONTACT"
+													: draft.coldOutreach && suppressedOrganization
+														? "OUTBOUND_ORGANIZATION_SUPPRESSED"
+														: !senderValid
+															? "OUTBOUND_ATLAS_SENDER_REJECTED"
+															: !authorizationValid
+																? "OUTBOUND_ATLAS_AUTHORIZATION_REQUIRED"
+																: "OUTBOUND_CANCELLED_BY_POLICY";
 						await tx.outboundDelivery.update({
 							where: { id: delivery.id },
 							data: {
@@ -578,11 +586,13 @@ export class PostgresJobWorkerService {
 							occurredAt: sentAt,
 						},
 					});
+					const settings = prepared.coldOutreach
+						? await tx.appSetting.findUnique({
+								where: { id: "app" },
+								select: { atlasWorkingTimeZone: true },
+							})
+						: null;
 					if (prepared.coldOutreach) {
-						const settings = await tx.appSetting.findUnique({
-							where: { id: "app" },
-							select: { atlasWorkingTimeZone: true },
-						});
 						const day = dayKey(
 							sentAt,
 							settings?.atlasWorkingTimeZone ?? "Europe/Amsterdam",
@@ -622,6 +632,10 @@ export class PostgresJobWorkerService {
 						}
 					}
 					if (prepared.lead && ["NEW", "READY"].includes(prepared.lead.stage)) {
+						const [firstFollowUpAt] = standardColdFollowUpDueDates(
+							sentAt,
+							settings?.atlasWorkingTimeZone ?? "Europe/Amsterdam",
+						);
 						const updatedLead = await tx.lead.updateMany({
 							where: {
 								id: prepared.lead.id,
@@ -633,9 +647,7 @@ export class PostgresJobWorkerService {
 								stage: "CONTACTED",
 								stageChangedAt: sentAt,
 								lastContactedAt: sentAt,
-								nextActionAt: new Date(
-									sentAt.getTime() + 3 * 24 * 60 * 60 * 1000,
-								),
+								nextActionAt: firstFollowUpAt,
 								nextActionTitle: "Review for a reply or follow up",
 								lastLanguage: prepared.language,
 							},
@@ -653,7 +665,7 @@ export class PostgresJobWorkerService {
 					}
 					const followUp = await tx.followUpStep.findFirst({
 						where: { draftId: prepared.id, status: "QUEUED" },
-						select: { id: true, planId: true },
+						select: { id: true, planId: true, position: true },
 					});
 					if (followUp) {
 						await tx.followUpStep.update({
@@ -671,6 +683,21 @@ export class PostgresJobWorkerService {
 								where: { id: followUp.planId },
 								data: { status: "COMPLETED" },
 							});
+						if (remaining === 0 && followUp.position === 1 && prepared.lead) {
+							await tx.lead.updateMany({
+								where: {
+									id: prepared.lead.id,
+									attentionState: "NONE",
+									stage: { notIn: ["WON", "LOST"] },
+								},
+								data: {
+									attentionState: "PARKED",
+									nextActionAt: null,
+									nextActionTitle: null,
+									parkedUntil: null,
+								},
+							});
+						}
 					}
 				},
 			);

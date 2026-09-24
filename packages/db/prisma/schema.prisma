@@ -79,6 +79,8 @@ model User {
   weeklyTargets              WeeklyTarget[]                @relation("WeeklyTargetUser")
   createdOrganizationProtections  OrganizationProtection[]  @relation("OrganizationProtectionCreator")
   releasedOrganizationProtections OrganizationProtection[]  @relation("OrganizationProtectionReleaser")
+  createdPersonProtections   PersonProtection[]             @relation("PersonProtectionCreator")
+  releasedPersonProtections  PersonProtection[]             @relation("PersonProtectionReleaser")
   permissionOverrides        WorkspacePermissionOverride[] @relation("PermissionOverrideUser")
   createdPermissionOverrides WorkspacePermissionOverride[] @relation("PermissionOverrideCreator")
   requestedMeetings          MeetingRequest[]              @relation("MeetingRequestRequester")
@@ -581,6 +583,7 @@ model Contact {
   notes                   Note[]
   proofItems              ProofItem[]
   financialProfiles       ClientFinancialProfile[]
+  personProtections       PersonProtection[]
   createdAt               DateTime                    @default(now())
   updatedAt               DateTime                    @updatedAt
 
@@ -2182,6 +2185,11 @@ enum ContactOutreachState {
   SUPPRESSED
 }
 
+enum PersonProtectionStatus {
+  ACTIVE
+  RELEASED
+}
+
 enum PipelineStageKind {
   OPEN
   WON
@@ -3504,6 +3512,29 @@ model DomainAuditEvent {
   @@index([actorUserId, createdAt])
   @@index([entityType, entityId, createdAt])
   @@map("domainAuditEvent")
+}
+
+model PersonProtection {
+  id                String                 @id @default(cuid())
+  contactId         String
+  contact           Contact                @relation(fields: [contactId], references: [id], onDelete: Restrict)
+  status            PersonProtectionStatus @default(ACTIVE)
+  reason            String
+  source            String
+  protectedByUserId String
+  protectedBy       User                   @relation("PersonProtectionCreator", fields: [protectedByUserId], references: [id], onDelete: Restrict)
+  protectedAt       DateTime               @default(now())
+  releasedByUserId  String?
+  releasedBy        User?                  @relation("PersonProtectionReleaser", fields: [releasedByUserId], references: [id], onDelete: SetNull)
+  releasedAt        DateTime?
+  releaseReason     String?
+  idempotencyKey    String                 @unique
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+
+  @@unique([contactId], where: { status: "ACTIVE" })
+  @@index([contactId, status])
+  @@map("personProtection")
 }
 
 enum DurableJobStatus {

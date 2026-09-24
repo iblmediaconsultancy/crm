@@ -1,5 +1,6 @@
 import {
 	db,
+	isPersonProtected,
 	isProtectedPlayerContact,
 	Prisma,
 	validateExternalCopy,
@@ -146,7 +147,11 @@ export async function listAtlasOutreachQueue(ctx: PurposeContext) {
 					stage: { in: ["NEW", "READY"] },
 					attentionState: "NONE",
 					nextActionAt: { not: null, lte: new Date() },
-					contact: { lifecycleState: "ACTIVE", outreachState: "ALLOWED" },
+					contact: {
+						lifecycleState: "ACTIVE",
+						outreachState: "ALLOWED",
+						personProtections: { none: { status: "ACTIVE" } },
+					},
 				},
 				orderBy: [{ priority: "desc" }, { nextActionAt: "asc" }],
 				take: 100,
@@ -333,6 +338,8 @@ export async function sendAtlasEmail(ctx: PurposeContext, input: AtlasInput) {
 				)
 			)
 				throw new Error("Lead contact is not eligible for outreach.");
+			if (await isPersonProtected(tx, lead.contact.id))
+				throw new Error("PERSON_OWNER_PROTECTED");
 			if (
 				await isProtectedPlayerContact(
 					tx,

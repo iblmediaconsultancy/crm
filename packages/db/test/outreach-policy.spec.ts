@@ -5,6 +5,7 @@ import {
 	isHistoricalLinkedInMessage,
 	shouldCancelFollowUp,
 } from "../src/outreach-policy";
+import { manualPersonProtectionActorAllowed } from "../src/person-protection";
 
 const eligible = {
 	contactOutreachState: "ALLOWED" as const,
@@ -78,6 +79,40 @@ describe("shared outreach policy", () => {
 		expect(
 			coldOutreachBlockReason({ ...eligible, organizationProtected: true }),
 		).toBe("ORGANIZATION_OWNER_PROTECTED");
+	});
+
+	it("keeps person protection ahead of every autonomous cold-outreach route", () => {
+		expect(
+			coldOutreachBlockReason({
+				...eligible,
+				personProtected: true,
+				firstTouchStatus: "CLAIMED",
+			}),
+		).toBe("PERSON_OWNER_PROTECTED");
+		expect(
+			coldOutreachBlockReason({ ...eligible, personProtected: false }),
+		).toBeNull();
+	});
+
+	it("allows only human managers to activate or release person protection", () => {
+		expect(
+			manualPersonProtectionActorAllowed({ role: "admin", kind: "HUMAN" }),
+		).toBe(true);
+		expect(
+			manualPersonProtectionActorAllowed({ role: "team", kind: "HUMAN" }),
+		).toBe(true);
+		expect(
+			manualPersonProtectionActorAllowed({
+				role: "admin",
+				kind: "SYSTEM_OPERATOR",
+			}),
+		).toBe(false);
+		expect(
+			manualPersonProtectionActorAllowed({
+				role: "contributor",
+				kind: "HUMAN",
+			}),
+		).toBe(false);
 	});
 
 	it("excludes historical LinkedIn messages from live Atlas metrics", () => {

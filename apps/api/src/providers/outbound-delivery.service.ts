@@ -1,5 +1,6 @@
 import {
 	type Db,
+	isPersonProtected,
 	isProtectedPlayerContact,
 	validateExternalCopy,
 } from "@crm/db";
@@ -29,6 +30,7 @@ export class OutboundDeliveryService {
 				select: {
 					id: true,
 					status: true,
+					coldOutreach: true,
 					subject: true,
 					body: true,
 					ownerUserId: true,
@@ -78,6 +80,12 @@ export class OutboundDeliveryService {
 			) {
 				throw new Error("OUTBOUND_DRAFT_NOT_SENDABLE");
 			}
+			if (
+				draft.coldOutreach &&
+				draft.recipientRoute.contact &&
+				(await isPersonProtected(tx, draft.recipientRoute.contact.id))
+			)
+				throw new Error("PERSON_OWNER_PROTECTED");
 			if (
 				draft.recipientRoute.contact &&
 				(await isProtectedPlayerContact(

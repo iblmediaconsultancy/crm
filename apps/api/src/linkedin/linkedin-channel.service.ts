@@ -1,4 +1,9 @@
-import { coldOutreachBlockReason, type Db, Prisma } from "@crm/db";
+import {
+	coldOutreachBlockReason,
+	type Db,
+	isPersonProtected,
+	Prisma,
+} from "@crm/db";
 import { withPrincipal } from "@crm/db/security";
 import {
 	ConflictException,
@@ -25,6 +30,12 @@ const CLAIM_NEXT_JOB = [
 	'    AND ("retryAt" IS NULL OR "retryAt" <= NOW())',
 	'    AND ("leasedUntil" IS NULL OR "leasedUntil" <= NOW())',
 	'    AND "attemptCount" < "maxAttempts"',
+	"    AND NOT EXISTS (",
+	'      SELECT 1 FROM "linkedinConversation" c',
+	'      JOIN "personProtection" pp ON pp."contactId" = c."contactId"',
+	"        AND pp.\"status\" = 'ACTIVE'",
+	'      WHERE c."id" = "linkedinSendJob"."conversationId"',
+	"    )",
 	'  ORDER BY "requestedAt", "id" FOR UPDATE SKIP LOCKED LIMIT 1',
 	")",
 	'RETURNING "id", "conversationId", "messageId", "action", "status",',
@@ -230,6 +241,10 @@ export class LinkedInChannelService {
 					throw new NotFoundException("LinkedIn conversation not found.");
 				if (conversation.consent === "DO_NOT_CONTACT")
 					throw new ConflictException("LinkedIn conversation is suppressed.");
+				if (await isPersonProtected(tx, conversation.contactId))
+					throw new ConflictException(
+						"LinkedIn action blocked: PERSON_OWNER_PROTECTED.",
+					);
 				await tx.$executeRaw(
 					Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey(conversation.contactId)}))`,
 				);
@@ -450,11 +465,20 @@ export class LinkedInChannelService {
 			async (tx) => {
 				const job = await tx.linkedInSendJob.findUnique({
 					where: { id: jobId },
-					select: { status: true, leaseOwner: true, attemptCount: true },
+					select: {
+						status: true,
+						leaseOwner: true,
+						attemptCount: true,
+						conversation: { select: { contactId: true } },
+					},
 				});
 				if (job?.status !== "LEASED" || job.leaseOwner !== workerId)
 					throw new ConflictException(
 						"LinkedIn job lease is not owned by this worker.",
+					);
+				if (await isPersonProtected(tx, job.conversation.contactId))
+					throw new ConflictException(
+						"LinkedIn action blocked: PERSON_OWNER_PROTECTED.",
 					);
 				return tx.linkedInSendAttempt.create({
 					data: {

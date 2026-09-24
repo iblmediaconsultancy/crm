@@ -1,11 +1,22 @@
 import { describe, expect, test } from "bun:test";
-import { buildRfc822Message, selectSentFolder } from "../src/providers/miab-sent-sync.service";
+import {
+	preserveLaterFollowUpDueAt,
+	standardColdFollowUpDueDates,
+} from "../src/providers/follow-up-cadence";
+import {
+	buildRfc822Message,
+	selectSentFolder,
+} from "../src/providers/miab-sent-sync.service";
 import { businessDaysAfter } from "../src/providers/outreach-lifecycle.service";
 
 describe("Atlas outbound operations", () => {
 	test("selects the canonical Sent folder without depending on folder order", () => {
-		expect(selectSentFolder(["INBOX", "Archive", "Sent", "Trash"])).toBe("Sent");
-		expect(selectSentFolder(["INBOX", "Sent Items", "Spam"])).toBe("Sent Items");
+		expect(selectSentFolder(["INBOX", "Archive", "Sent", "Trash"])).toBe(
+			"Sent",
+		);
+		expect(selectSentFolder(["INBOX", "Sent Items", "Spam"])).toBe(
+			"Sent Items",
+		);
 		expect(selectSentFolder(["INBOX", "Archive"])).toBeNull();
 	});
 
@@ -34,5 +45,25 @@ describe("Atlas outbound operations", () => {
 		const friday = new Date("2026-09-25T13:00:00.000Z");
 		const monday = businessDaysAfter(friday, 1, "Europe/Amsterdam");
 		expect(monday.toISOString()).toBe("2026-09-28T13:00:00.000Z");
+	});
+
+	test("uses five business days for both standard cold follow-ups", () => {
+		const [first, second] = standardColdFollowUpDueDates(
+			new Date("2026-09-22T13:00:00.000Z"),
+		);
+		expect(first.toISOString()).toBe("2026-09-29T13:00:00.000Z");
+		expect(second.toISOString()).toBe("2026-10-06T13:00:00.000Z");
+	});
+
+	test("crosses weekends and never moves an existing step earlier", () => {
+		const [first, second] = standardColdFollowUpDueDates(
+			new Date("2026-09-25T13:00:00.000Z"),
+		);
+		expect(first.toISOString()).toBe("2026-10-02T13:00:00.000Z");
+		expect(second.toISOString()).toBe("2026-10-09T13:00:00.000Z");
+		const current = new Date("2026-10-05T13:00:00.000Z");
+		expect(preserveLaterFollowUpDueAt(current, first)).toEqual(current);
+		expect(preserveLaterFollowUpDueAt(current, second)).toEqual(second);
+		expect(preserveLaterFollowUpDueAt(second, second)).toEqual(second);
 	});
 });

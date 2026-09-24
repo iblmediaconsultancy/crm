@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { type Db, Prisma } from "@crm/db";
+import { type Db, isPersonProtected, Prisma } from "@crm/db";
 import { withPrincipal } from "@crm/db/security";
 import {
 	ConflictException,
@@ -11,8 +11,8 @@ import { Webhook } from "svix";
 import { InjectDatabase } from "../database/database.constants";
 import { runInPrincipalTransaction } from "../database/database-context";
 import { ThreadWriterService } from "../mailbox/thread-writer.service";
+import { standardColdFollowUpDueDates } from "./follow-up-cadence";
 import { localProviderDoubleEnabled } from "./local-provider-double";
-import { businessDaysAfter } from "./working-hours";
 
 export { businessDaysAfter } from "./working-hours";
 
@@ -442,6 +442,8 @@ export class OutreachLifecycleService {
 				throw new ConflictException(
 					"This route cannot receive a follow-up plan.",
 				);
+			if (await isPersonProtected(tx, input.contactId))
+				throw new ConflictException("PERSON_OWNER_PROTECTED");
 			const drafts = await tx.draft.findMany({
 				where: {
 					id: { in: input.steps.map((step) => step.draftId) },
@@ -534,6 +536,7 @@ export class OutreachLifecycleService {
 						!source.leadId
 					)
 						continue;
+					if (await isPersonProtected(tx, recipientRoute.contactId)) continue;
 					const organizationProtection = recipientRoute.contact?.companyId
 						? await tx.organizationProtection.findFirst({
 								where: {
@@ -575,10 +578,10 @@ export class OutreachLifecycleService {
 						lead.attentionState !== "NONE"
 					)
 						continue;
-					const dueAt = [
-						businessDaysAfter(sentAt, 3, "Europe/Amsterdam"),
-						businessDaysAfter(sentAt, 7, "Europe/Amsterdam"),
-					];
+					const dueAt = standardColdFollowUpDueDates(
+						sentAt,
+						"Europe/Amsterdam",
+					);
 					const draftIds: string[] = [];
 					for (const position of [1, 2]) {
 						const followUpDraft = await tx.draft.upsert({
@@ -927,6 +930,9 @@ export class OutreachLifecycleService {
 							where: { routeId: draft.recipientRoute.id },
 						})
 					: null;
+				const personProtected = draft?.recipientRoute?.contactId
+					? await isPersonProtected(tx, draft.recipientRoute.contactId)
+					: false;
 				const activeLinkedInConversation = draft?.recipientRoute?.contactId
 					? await tx.channelEngagementState.findFirst({
 							where: {
@@ -993,6 +999,7 @@ export class OutreachLifecycleService {
 					!draft ||
 					plan?.channel !== "EMAIL" ||
 					plan?.status !== "ACTIVE" ||
+					personProtected ||
 					activeLinkedInConversation ||
 					organizationProtection ||
 					(!manuallyApproved && !autonomous) ||
@@ -1005,9 +1012,11 @@ export class OutreachLifecycleService {
 							status: "CANCELLED",
 							leaseOwner: null,
 							leasedUntil: null,
-							lastErrorCode: organizationProtection
-								? "FOLLOW_UP_CANCELLED_BY_ORGANIZATION_OWNER_PROTECTION"
-								: "FOLLOW_UP_CANCELLED_BY_POLICY",
+							lastErrorCode: personProtected
+								? "PERSON_OWNER_PROTECTED"
+								: organizationProtection
+									? "FOLLOW_UP_CANCELLED_BY_ORGANIZATION_OWNER_PROTECTION"
+									: "FOLLOW_UP_CANCELLED_BY_POLICY",
 						},
 					});
 					if (plan)

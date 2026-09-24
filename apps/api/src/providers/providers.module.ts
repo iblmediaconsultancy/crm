@@ -7,6 +7,7 @@ import { defaultMiabProviders, MiabSyncService } from "./miab-sync.service";
 import { OrganizationProtectionService } from "./organization-protection.service";
 import { OutboundDeliveryService } from "./outbound-delivery.service";
 import { OutreachLifecycleService } from "./outreach-lifecycle.service";
+import { PersonProtectionService } from "./person-protection.service";
 import {
 	defaultPostgresJobProviders,
 	PostgresJobWorkerService,
@@ -23,6 +24,7 @@ import { ResendWebhookController } from "./resend-webhook.controller";
 		OutboundDeliveryService,
 		OutreachLifecycleService,
 		OrganizationProtectionService,
+		PersonProtectionService,
 		PostgresJobWorkerService,
 		...defaultMiabProviders,
 		...defaultPostgresJobProviders,
@@ -34,6 +36,7 @@ import { ResendWebhookController } from "./resend-webhook.controller";
 		OutboundDeliveryService,
 		OutreachLifecycleService,
 		OrganizationProtectionService,
+		PersonProtectionService,
 		PostgresJobWorkerService,
 	],
 })

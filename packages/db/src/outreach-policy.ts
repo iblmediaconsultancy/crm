@@ -3,6 +3,7 @@ import type {
 	OutreachChannel,
 	RelationshipTouchStatus,
 } from "./generated/prisma/enums";
+import { PERSON_OWNER_PROTECTED } from "./person-protection";
 
 const BLOCKED_PRICING_WORDS =
 	/\b(?:pricing|prices?|costs?|budgets?|fees?|discounts?|rates?|packages?)\b/i;
@@ -59,11 +60,13 @@ export type ColdOutreachPolicyInput = {
 	organizationSuppressed: boolean;
 	organizationProtected?: boolean;
 	firstTouchStatus: RelationshipTouchStatus | null;
+	personProtected?: boolean;
 };
 
 export function coldOutreachBlockReason(
 	input: ColdOutreachPolicyInput,
 ): string | null {
+	if (input.personProtected) return PERSON_OWNER_PROTECTED;
 	if (input.contactOutreachState === "PROTECTED") return "PROTECTED_CONTACT";
 	if (input.contactOutreachState === "SUPPRESSED") return "CONTACT_SUPPRESSED";
 	if (input.leadAttentionState !== "NONE")
