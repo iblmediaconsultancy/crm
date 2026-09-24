@@ -3,6 +3,7 @@ export type SessionPurpose =
 	| "team-agent"
 	| "atlas-outreach"
 	| "atlas-daily-report"
+	| "atlas-commercial-enrichment"
 	| "research";
 
 export type PurposeContext = {
@@ -24,7 +25,8 @@ export function purposeOf(ctx: PurposeContext): SessionPurpose {
 		purpose === "builder" ||
 		purpose === "team-agent" ||
 		purpose === "atlas-outreach" ||
-		purpose === "atlas-daily-report"
+		purpose === "atlas-daily-report" ||
+		purpose === "atlas-commercial-enrichment"
 	)
 		return purpose;
 	return "research";

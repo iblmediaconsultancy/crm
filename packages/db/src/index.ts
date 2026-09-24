@@ -5,6 +5,7 @@ export {
 	type PrismaLogSink,
 	setPrismaLogSink,
 } from "./client";
+export * from "./commercial-quality";
 export type {
 	ProviderCapability,
 	UserProfile,
