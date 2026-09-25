@@ -4,6 +4,7 @@ import {
 	type LinkedInBrowserIdentityEvidence,
 	type LinkedInBrowserOutcome,
 	type LinkedInRelationshipState,
+	linkedInConversationIdentityMatches,
 	verifyLinkedInActionState,
 } from "@crm/db/linkedin-browser-adapter";
 import {
@@ -156,6 +157,26 @@ function collectLinkedInRelationshipControls(includeElements = false) {
 			connected: element.isConnected,
 		};
 	});
+	const conversationParticipantIdentifiers = Array.from(
+		new Set(
+			elements
+				.map((element) => element.getAttribute("href"))
+				.filter((value): value is string => Boolean(value))
+				.map((value) => {
+					try {
+						const url = new URL(value, href);
+						if (!/\/messaging\/compose\//i.test(url.pathname)) return null;
+						const recipient = url.searchParams.get("recipient");
+						const profileUrn = url.searchParams.get("profileUrn");
+						const profileMember = profileUrn?.split(":").at(-1) ?? null;
+						return recipient && profileMember === recipient ? recipient : null;
+					} catch {
+						return null;
+					}
+				})
+				.filter((value): value is string => Boolean(value)),
+		),
+	);
 	const challenge =
 		/captcha|security check|verify your identity|identity verification|unusual activity|unusual login|security checkpoint|suspicious activity|account restricted|rate limit|temporarily unavailable/.exec(
 			`${body.toLowerCase()} ${title.toLowerCase()}`,
@@ -180,6 +201,10 @@ function collectLinkedInRelationshipControls(includeElements = false) {
 		profileIdentifier: profileMatch?.[1] || null,
 		displayName,
 		externalConversationKey: conversationMatch?.[1] || null,
+		conversationParticipantIdentifier:
+			conversationParticipantIdentifiers.length === 1
+				? conversationParticipantIdentifiers[0]
+				: null,
 		href,
 		title,
 		challenge,
@@ -601,6 +626,8 @@ function proofFor(
 		relationshipState: observation.relationshipState,
 		pendingInvitationState: observation.pendingInvitationState,
 		externalConversationKey: observation.externalConversationKey,
+		conversationParticipantIdentifier:
+			observation.conversationParticipantIdentifier,
 		pageUrl: observation.href,
 		action: action.action,
 	};
@@ -796,10 +823,7 @@ export class CdpLinkedInBrowserAdapter implements LinkedInBrowserAdapter {
 				};
 			await new Promise((resolve) => setTimeout(resolve, 500));
 			const thread = await page.observe();
-			if (
-				action.target.externalConversationKey &&
-				thread.externalConversationKey !== action.target.externalConversationKey
-			)
+			if (!linkedInConversationIdentityMatches(action.target, thread))
 				return {
 					status: "AMBIGUOUS",
 					errorCode: "WRONG_CONVERSATION",
@@ -838,7 +862,9 @@ export class CdpLinkedInBrowserAdapter implements LinkedInBrowserAdapter {
 				status: "CONFIRMED",
 				externalMessageKey: after.externalMessageKey,
 				externalConversationKey:
-					after.externalConversationKey ?? thread.externalConversationKey,
+					action.target.externalConversationKey ??
+					after.externalConversationKey ??
+					thread.externalConversationKey,
 				browserProof: proofFor(action, after),
 				observedIdentity,
 				observedAt: new Date(),

@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import {
 	canonicalLinkedInProfileIdentity,
 	canonicalLinkedInProfileUrl,
+	linkedInConversationIdentityMatches,
 	linkedInDisplayNamesMatch,
 	verifyFreshLinkedInIdentity,
 } from "../src/linkedin-browser-adapter";
@@ -122,6 +123,55 @@ describe("LinkedIn browser identity canonicalization", () => {
 				{ ...baseObserved, profileUrl: "https://example.com/in/ada-lovelace" },
 			),
 		).toEqual({ allowed: false, reason: "PROFILE_URL_MISMATCH" });
+	});
+
+	it("accepts a full thread URL when the live profile compose target proves the member", () => {
+		const targetValue = {
+			...target(
+				"https://www.linkedin.com/in/ACoAADRv2f4Bp6D9mSlzqWWbwuemI9ftAWJkSDk",
+				"linkedin.com/in/acoaadrv2f4bp6d9mslzqwwbwuemi9ftawjksdk",
+			),
+			externalConversationKey:
+				"https://www.linkedin.com/messaging/thread/2-thread-key/",
+		};
+		expect(
+			verifyFreshLinkedInIdentity(targetValue, {
+				resolution: "RESOLVED",
+				profileUrl:
+					"https://www.linkedin.com/in/ACoAADRv2f4Bp6D9mSlzqWWbwuemI9ftAWJkSDk",
+				profileIdentifier: "ACoAADRv2f4Bp6D9mSlzqWWbwuemI9ftAWJkSDk",
+				displayName: "Ada Lovelace",
+				conversationParticipantIdentifier:
+					"ACoAADRv2f4Bp6D9mSlzqWWbwuemI9ftAWJkSDk",
+			}),
+		).toEqual({ allowed: true });
+		expect(
+			linkedInConversationIdentityMatches(targetValue, {
+				externalConversationKey: "/messaging/thread/2-thread-key/",
+				conversationParticipantIdentifier: null,
+			}),
+		).toBe(true);
+	});
+
+	it("rejects a different conversation member and missing conversation proof", () => {
+		const targetValue = {
+			profileUrl:
+				"https://www.linkedin.com/in/ACoAADRv2f4Bp6D9mSlzqWWbwuemI9ftAWJkSDk",
+			externalConversationKey:
+				"https://www.linkedin.com/messaging/thread/2-thread-key/",
+		};
+		expect(
+			linkedInConversationIdentityMatches(targetValue, {
+				externalConversationKey: null,
+				conversationParticipantIdentifier: "ACoDifferentMember",
+			}),
+		).toBe(false);
+		expect(
+			linkedInConversationIdentityMatches(targetValue, {
+				externalConversationKey: null,
+				conversationParticipantIdentifier: null,
+			}),
+		).toBe(false);
 	});
 
 	it("accepts deterministic benign display-name variations", () => {

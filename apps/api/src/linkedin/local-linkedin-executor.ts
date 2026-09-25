@@ -88,6 +88,17 @@ export type LocalLinkedInExecutorResult =
 	| { status: "BLOCKED"; jobId: string; action: string; reason: string }
 	| { status: "NEEDS_IHSAN"; jobId: string; action: string; reason: string };
 
+function isDeterministicReviewError(errorCode: string): boolean {
+	return new Set([
+		"PROFILE_URL_MISMATCH",
+		"PROFILE_IDENTIFIER_MISMATCH",
+		"DISPLAY_NAME_MISMATCH",
+		"CONVERSATION_ID_MISMATCH",
+		"EXTERNAL_CONVERSATION_MISMATCH",
+		"WRONG_CONVERSATION",
+	]).has(errorCode);
+}
+
 function noteFromPayload(payload: unknown): string | null {
 	if (!payload || typeof payload !== "object" || Array.isArray(payload))
 		return null;
@@ -270,6 +281,21 @@ export class LocalLinkedInExecutor {
 				reason: outcome.errorCode,
 			};
 		}
+		if (isDeterministicReviewError(outcome.errorCode)) {
+			await this.core.recordConnectionRequestAttempt({
+				jobId: action.jobId,
+				workerId: this.workerId,
+				attemptNumber: attempt.attemptNumber,
+				status: "AMBIGUOUS",
+				errorCode: outcome.errorCode,
+			});
+			return {
+				status: "NEEDS_IHSAN",
+				jobId: action.jobId,
+				action: action.action,
+				reason: outcome.errorCode,
+			};
+		}
 		await this.core.recordConnectionRequestAttempt({
 			jobId: action.jobId,
 			workerId: this.workerId,
@@ -336,6 +362,21 @@ export class LocalLinkedInExecutor {
 					observedIdentity: outcome.observedIdentity,
 					observedAt: outcome.observedAt.toISOString(),
 				} as Prisma.InputJsonObject,
+			});
+			return {
+				status: "NEEDS_IHSAN",
+				jobId: action.jobId,
+				action: action.action,
+				reason: outcome.errorCode,
+			};
+		}
+		if (isDeterministicReviewError(outcome.errorCode)) {
+			await this.core.recordAttempt({
+				jobId: action.jobId,
+				workerId: this.workerId,
+				attemptNumber: attempt.attemptNumber,
+				status: "AMBIGUOUS",
+				errorCode: outcome.errorCode,
 			});
 			return {
 				status: "NEEDS_IHSAN",
