@@ -24,6 +24,7 @@ export type LinkedInBrowserIdentityEvidence = {
 	pendingInvitationState?: "NONE" | "SENT" | "RECEIVED" | "UNKNOWN";
 	conversationId?: string | null;
 	externalConversationKey?: string | null;
+	conversationParticipantIdentifier?: string | null;
 	uiElementIndex?: number;
 };
 
@@ -196,6 +197,77 @@ export function canonicalLinkedInProfileUrl(value: string): string {
 	return slug ? `https://linkedin.com/in/${slug}/` : value;
 }
 
+function canonicalLinkedInConversationKey(value: string): string | null {
+	const decodeKey = (key: string): string => {
+		try {
+			return decodeURIComponent(key);
+		} catch {
+			return key;
+		}
+	};
+	const trimmed = value.trim();
+	if (!trimmed) return null;
+	try {
+		const url = new URL(
+			trimmed.startsWith("/") ? `https://linkedin.com${trimmed}` : trimmed,
+		);
+		if (
+			url.hostname.toLocaleLowerCase() !== "linkedin.com" &&
+			url.hostname.toLocaleLowerCase() !== "www.linkedin.com"
+		)
+			return null;
+		const match = url.pathname.match(/^\/messaging\/thread\/([^/?#]+)\/?$/i);
+		if (!match?.[1]) return null;
+		return decodeKey(match[1]);
+	} catch {
+		const match = trimmed.match(/^\/?messaging\/thread\/([^/?#]+)\/?$/i);
+		return match?.[1] ? decodeKey(match[1]) : trimmed;
+	}
+}
+
+function opaqueProfileIdentifierFromUrl(value: string): string | null {
+	try {
+		const url = new URL(value);
+		const part = url.pathname.split("/").filter(Boolean).at(-1);
+		return part && isOpaqueStableIdentifier(part) ? part : null;
+	} catch {
+		return null;
+	}
+}
+
+export function linkedInConversationIdentityMatches(
+	target: Pick<
+		LinkedInBrowserTarget,
+		"profileUrl" | "externalConversationKey"
+	> & {
+		profileIdentifier?: string | null;
+	},
+	observed: Pick<
+		LinkedInBrowserIdentityEvidence,
+		"externalConversationKey" | "conversationParticipantIdentifier"
+	> & { profileUrl?: string | null },
+): boolean {
+	if (!target.externalConversationKey) return true;
+	const targetKey = canonicalLinkedInConversationKey(
+		target.externalConversationKey,
+	);
+	const observedKey = observed.externalConversationKey
+		? canonicalLinkedInConversationKey(observed.externalConversationKey)
+		: null;
+	if (targetKey && observedKey && targetKey === observedKey) return true;
+	const targetMember =
+		opaqueProfileIdentifierFromUrl(target.profileUrl) ??
+		(target.profileIdentifier &&
+		isOpaqueStableIdentifier(target.profileIdentifier.trim())
+			? target.profileIdentifier.trim()
+			: null);
+	return Boolean(
+		targetMember &&
+			observed.conversationParticipantIdentifier &&
+			targetMember === observed.conversationParticipantIdentifier,
+	);
+}
+
 export function linkedInProfileIdentityMatches(
 	target: { profileUrl: string; profileIdentifier: string | null },
 	observed: { profileUrl: string | null; profileIdentifier: string | null },
@@ -248,10 +320,7 @@ export function verifyFreshLinkedInIdentity(
 		observed.conversationId !== target.conversationId
 	)
 		return { allowed: false, reason: "CONVERSATION_ID_MISMATCH" };
-	if (
-		target.externalConversationKey &&
-		observed.externalConversationKey !== target.externalConversationKey
-	)
+	if (!linkedInConversationIdentityMatches(target, observed))
 		return { allowed: false, reason: "EXTERNAL_CONVERSATION_MISMATCH" };
 	return { allowed: true };
 }

@@ -359,6 +359,28 @@ describe("local LinkedIn executor", () => {
 		});
 	});
 
+	it("does not retry a deterministic external conversation mismatch", async () => {
+		const state = fakeCore({ message: messagePrepared("thread-42") });
+		const browser = fakeBrowser({
+			status: "FAILED",
+			errorCode: "EXTERNAL_CONVERSATION_MISMATCH",
+			observedAt: new Date(),
+		});
+		const result = await new LocalLinkedInExecutor(
+			state.core,
+			browser.browser,
+			"worker-1",
+		).runOnce();
+		expect(result).toMatchObject({
+			status: "NEEDS_IHSAN",
+			reason: "EXTERNAL_CONVERSATION_MISMATCH",
+		});
+		expect(state.records[0]).toMatchObject({
+			status: "AMBIGUOUS",
+			errorCode: "EXTERNAL_CONVERSATION_MISMATCH",
+		});
+	});
+
 	it("fails closed for unavailable and unauthenticated browsers", async () => {
 		for (const errorCode of [
 			"BROWSER_UNAVAILABLE",
