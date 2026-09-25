@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import {
 	isManualReviewOutcome,
 	verifyFreshLinkedInIdentity,
+	verifyLinkedInActionState,
 } from "../agent/lib/linkedin-browser-adapter";
 
 describe("LinkedIn browser adapter outcomes", () => {
@@ -70,6 +71,70 @@ describe("LinkedIn browser adapter outcomes", () => {
 				profileIdentifier: "another",
 			}),
 		).toEqual({ allowed: false, reason: "PROFILE_IDENTIFIER_MISMATCH" });
+	});
+
+	it("canonicalizes profile URLs and verifies the visible name", () => {
+		expect(
+			verifyFreshLinkedInIdentity(
+				{
+					...target,
+					profileUrl: "https://www.linkedin.com/in/example-1",
+					displayName: "Example Person",
+				},
+				{
+					resolution: "RESOLVED",
+					profileUrl: target.profileUrl,
+					profileIdentifier: target.profileIdentifier,
+					displayName: "Example Person",
+				},
+			),
+		).toEqual({ allowed: true });
+		expect(
+			verifyFreshLinkedInIdentity(
+				{ ...target, displayName: "Example Person" },
+				{
+					resolution: "RESOLVED",
+					profileUrl: target.profileUrl,
+					profileIdentifier: target.profileIdentifier,
+					displayName: "Another Person",
+				},
+			),
+		).toEqual({ allowed: false, reason: "DISPLAY_NAME_MISMATCH" });
+	});
+
+	it("requires the expected current relationship state for each action", () => {
+		expect(
+			verifyLinkedInActionState(
+				{
+					jobId: "job-1",
+					action: "CONNECTION_REQUEST",
+					target,
+					browserSessionKey: "worker-1",
+				},
+				{
+					resolution: "RESOLVED",
+					profileUrl: target.profileUrl,
+					profileIdentifier: target.profileIdentifier,
+					relationshipState: "PENDING",
+				},
+			),
+		).toEqual({ allowed: false, reason: "CONNECTION_NOT_AVAILABLE" });
+		expect(
+			verifyLinkedInActionState(
+				{
+					jobId: "job-2",
+					action: "MESSAGE",
+					target,
+					browserSessionKey: "worker-1",
+				},
+				{
+					resolution: "RESOLVED",
+					profileUrl: target.profileUrl,
+					profileIdentifier: target.profileIdentifier,
+					relationshipState: "CONNECT",
+				},
+			),
+		).toEqual({ allowed: false, reason: "LINKEDIN_CONNECTION_REQUIRED" });
 	});
 
 	it("blocks a wrong conversation for a message action", () => {

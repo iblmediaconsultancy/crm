@@ -18,6 +18,7 @@ export type {
 	FactEvidence,
 	WorkspaceProfileSections,
 } from "./json";
+export * from "./linkedin-browser-adapter";
 export * from "./outreach-policy";
 export * from "./person-protection";
 export * from "./player-protection";
