@@ -137,7 +137,10 @@ class CdpPage {
 				resolution: profileMatch ? "RESOLVED" : "AMBIGUOUS",
 				profileUrl: profileMatch ? "https://www.linkedin.com/in/" + profileMatch[1] + "/" : null,
 				profileIdentifier: profileMatch?.[1] || null,
-				displayName: document.querySelector("main h1, h1")?.textContent?.trim() || null,
+				displayName: Array.from(document.querySelectorAll("h1, h2"))
+					.filter((element) => !element.closest("[data-testid=toasts-title], dialog"))
+					.map((element) => (element.textContent || "").trim())
+					.find(Boolean) || null,
 				relationshipState,
 				pendingInvitationState,
 				externalConversationKey: conversationMatch?.[1] || null,

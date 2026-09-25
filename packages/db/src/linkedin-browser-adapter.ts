@@ -72,8 +72,59 @@ export interface LinkedInBrowserAdapter {
 	execute(action: LinkedInBrowserAction): Promise<LinkedInBrowserOutcome>;
 }
 
-function normalizeName(value: string): string {
-	return value.trim().replace(/\s+/g, " ").toLocaleLowerCase();
+function displayNameTokens(value: string): string[] {
+	const normalized = value
+		.normalize("NFKC")
+		.normalize("NFKD")
+		.replace(/\p{M}/gu, "")
+		.replace(/[^\p{L}\p{N}]+/gu, " ")
+		.trim()
+		.replace(/\s+/g, " ")
+		.toLocaleLowerCase();
+	const tokens = normalized ? normalized.split(" ") : [];
+	const titles = new Set([
+		"mr",
+		"mrs",
+		"ms",
+		"miss",
+		"dr",
+		"prof",
+		"coach",
+		"sir",
+	]);
+	const suffixes = new Set([
+		"jr",
+		"sr",
+		"ii",
+		"iii",
+		"iv",
+		"v",
+		"phd",
+		"md",
+		"esq",
+	]);
+	while (tokens.length > 0 && titles.has(tokens[0] ?? "")) tokens.shift();
+	while (tokens.length > 0 && suffixes.has(tokens[tokens.length - 1] ?? ""))
+		tokens.pop();
+	return tokens;
+}
+
+export function linkedInDisplayNamesMatch(
+	expected: string,
+	observed: string,
+): boolean {
+	const expectedTokens = displayNameTokens(expected);
+	const observedTokens = displayNameTokens(observed);
+	if (!expectedTokens.length || !observedTokens.length) return false;
+	if (expectedTokens.length === 1 || observedTokens.length === 1)
+		return (
+			expectedTokens.length === observedTokens.length &&
+			expectedTokens[0] === observedTokens[0]
+		);
+	return (
+		expectedTokens[0] === observedTokens[0] &&
+		expectedTokens.at(-1) === observedTokens.at(-1)
+	);
 }
 
 export type CanonicalLinkedInProfileIdentity =
@@ -189,7 +240,7 @@ export function verifyFreshLinkedInIdentity(
 	if (
 		target.displayName &&
 		(!observed.displayName ||
-			normalizeName(observed.displayName) !== normalizeName(target.displayName))
+			!linkedInDisplayNamesMatch(target.displayName, observed.displayName))
 	)
 		return { allowed: false, reason: "DISPLAY_NAME_MISMATCH" };
 	if (
