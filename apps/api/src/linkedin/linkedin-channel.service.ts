@@ -3,6 +3,7 @@ import {
 	coldOutreachBlockReason,
 	type Db,
 	isPersonProtected,
+	linkedInProfileIdentityMatches,
 	Prisma,
 } from "@crm/db";
 import { withPrincipal } from "@crm/db/security";
@@ -1120,9 +1121,19 @@ export class LinkedInChannelService {
 					if (
 						!input.browserProof ||
 						!input.verifiedProfileUrl ||
+						!input.verifiedProfileIdentifier ||
 						canonicalLinkedInProfileUrl(input.verifiedProfileUrl) !==
 							canonicalLinkedInProfileUrl(job.profileUrl) ||
-						input.verifiedProfileIdentifier !== job.profileIdentifier
+						!linkedInProfileIdentityMatches(
+							{
+								profileUrl: job.profileUrl,
+								profileIdentifier: job.profileIdentifier,
+							},
+							{
+								profileUrl: input.verifiedProfileUrl,
+								profileIdentifier: input.verifiedProfileIdentifier,
+							},
+						)
 					)
 						throw new ConflictException(
 							"A confirmed LinkedIn connection request requires matching fresh browser identity proof.",
@@ -1558,15 +1569,30 @@ export class LinkedInChannelService {
 						!input.verifiedProfileUrl ||
 						!input.verifiedProfileIdentifier ||
 						!route ||
-						canonicalLinkedInProfileUrl(input.verifiedProfileUrl) !==
-							canonicalLinkedInProfileUrl(route.value) ||
-						input.verifiedProfileIdentifier !== route.normalizedValue ||
+						!linkedInProfileIdentityMatches(
+							{
+								profileUrl: route.value,
+								profileIdentifier: route.normalizedValue,
+							},
+							{
+								profileUrl: input.verifiedProfileUrl,
+								profileIdentifier: input.verifiedProfileIdentifier,
+							},
+						) ||
 						(job.conversation.profileUrl &&
-							canonicalLinkedInProfileUrl(job.conversation.profileUrl) !==
-								canonicalLinkedInProfileUrl(input.verifiedProfileUrl)) ||
-						(job.conversation.normalizedProfileUrl &&
-							job.conversation.normalizedProfileUrl !==
-								input.verifiedProfileIdentifier) ||
+							(job.conversation.normalizedProfileUrl
+								? !linkedInProfileIdentityMatches(
+										{
+											profileUrl: job.conversation.profileUrl,
+											profileIdentifier: job.conversation.normalizedProfileUrl,
+										},
+										{
+											profileUrl: input.verifiedProfileUrl,
+											profileIdentifier: input.verifiedProfileIdentifier,
+										},
+									)
+								: canonicalLinkedInProfileUrl(job.conversation.profileUrl) !==
+									canonicalLinkedInProfileUrl(input.verifiedProfileUrl))) ||
 						(job.conversation.externalConversationKey &&
 							job.conversation.externalConversationKey !==
 								input.externalConversationKey)

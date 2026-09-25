@@ -76,16 +76,100 @@ function normalizeName(value: string): string {
 	return value.trim().replace(/\s+/g, " ").toLocaleLowerCase();
 }
 
-export function canonicalLinkedInProfileUrl(value: string): string {
+export type CanonicalLinkedInProfileIdentity =
+	| { kind: "PROFILE_SLUG"; value: string }
+	| { kind: "OPAQUE"; value: string };
+
+function canonicalProfileSlug(value: string): string | null {
+	const trimmed = value.trim();
+	if (
+		!trimmed ||
+		trimmed.includes("/") ||
+		trimmed.includes("?") ||
+		trimmed.includes("#")
+	)
+		return null;
+	try {
+		const decoded = decodeURIComponent(trimmed);
+		if (!decoded || decoded.includes("/") || decoded.includes("\\"))
+			return null;
+		return encodeURIComponent(decoded).toLocaleLowerCase();
+	} catch {
+		return null;
+	}
+}
+
+function profileSlugFromUrl(value: string): string | null {
 	try {
 		const url = new URL(value);
-		url.hash = "";
-		url.search = "";
-		url.pathname = url.pathname.replace(/\/+$/, "");
-		return `${url.origin}${url.pathname}/`;
+		const hostname = url.hostname.toLocaleLowerCase();
+		if (hostname !== "linkedin.com" && hostname !== "www.linkedin.com")
+			return null;
+		const parts = url.pathname.split("/").filter(Boolean);
+		if (parts.length !== 2 || parts[0]?.toLocaleLowerCase() !== "in")
+			return null;
+		return canonicalProfileSlug(parts[1] ?? "");
 	} catch {
-		return value;
+		return null;
 	}
+}
+
+function profileSlugFromIdentifier(value: string): string | null {
+	const trimmed = value.trim();
+	if (!trimmed) return null;
+	if (/^https?:\/\//i.test(trimmed)) return profileSlugFromUrl(trimmed);
+	if (trimmed.startsWith("/"))
+		return profileSlugFromUrl(`https://www.linkedin.com${trimmed}`);
+	if (/^(?:www\.)?linkedin\.com\/in\//i.test(trimmed))
+		return profileSlugFromUrl(`https://${trimmed}`);
+	return canonicalProfileSlug(trimmed);
+}
+
+function isOpaqueStableIdentifier(value: string): boolean {
+	return /^ACo[A-Za-z0-9_-]+$/.test(value.trim());
+}
+
+export function canonicalLinkedInProfileIdentity(
+	value: string,
+): CanonicalLinkedInProfileIdentity | null {
+	const trimmed = value.trim();
+	if (!trimmed) return null;
+	if (isOpaqueStableIdentifier(trimmed))
+		return { kind: "OPAQUE", value: trimmed };
+	const slug = profileSlugFromIdentifier(trimmed);
+	return slug ? { kind: "PROFILE_SLUG", value: slug } : null;
+}
+
+export function canonicalLinkedInProfileUrl(value: string): string {
+	const slug = profileSlugFromUrl(value);
+	return slug ? `https://linkedin.com/in/${slug}/` : value;
+}
+
+export function linkedInProfileIdentityMatches(
+	target: { profileUrl: string; profileIdentifier: string | null },
+	observed: { profileUrl: string | null; profileIdentifier: string | null },
+): boolean {
+	if (!observed.profileUrl || !observed.profileIdentifier) return false;
+	const targetProfileIdentifier = target.profileIdentifier;
+	if (!targetProfileIdentifier) return false;
+	const targetUrlSlug = profileSlugFromUrl(target.profileUrl);
+	const observedUrlSlug = profileSlugFromUrl(observed.profileUrl);
+	if (!targetUrlSlug || !observedUrlSlug || targetUrlSlug !== observedUrlSlug)
+		return false;
+	const targetIdentity = canonicalLinkedInProfileIdentity(
+		targetProfileIdentifier,
+	);
+	if (!targetIdentity) return false;
+	if (targetIdentity.kind === "OPAQUE")
+		return (
+			observed.profileIdentifier === targetIdentity.value &&
+			canonicalProfileSlug(observed.profileIdentifier) === observedUrlSlug
+		);
+	const observedIdentity = canonicalProfileSlug(observed.profileIdentifier);
+	return (
+		targetIdentity.value === targetUrlSlug &&
+		observedIdentity === observedUrlSlug
+	);
 }
 
 export function verifyFreshLinkedInIdentity(
@@ -100,10 +184,7 @@ export function verifyFreshLinkedInIdentity(
 			canonicalLinkedInProfileUrl(target.profileUrl)
 	)
 		return { allowed: false, reason: "PROFILE_URL_MISMATCH" };
-	if (
-		!observed.profileIdentifier ||
-		observed.profileIdentifier !== target.profileIdentifier
-	)
+	if (!linkedInProfileIdentityMatches(target, observed))
 		return { allowed: false, reason: "PROFILE_IDENTIFIER_MISMATCH" };
 	if (
 		target.displayName &&
