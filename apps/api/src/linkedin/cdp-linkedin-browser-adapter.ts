@@ -3,6 +3,7 @@ import {
 	type LinkedInBrowserAdapter,
 	type LinkedInBrowserIdentityEvidence,
 	type LinkedInBrowserOutcome,
+	type LinkedInRelationshipState,
 	verifyLinkedInActionState,
 } from "@crm/db/linkedin-browser-adapter";
 
@@ -24,7 +25,140 @@ type PageObservation = LinkedInBrowserIdentityEvidence & {
 	challenge: string | null;
 	authenticated: boolean;
 	externalMessageKey: string | null;
+	controls: LinkedInRelationshipControl[];
 };
+
+export type LinkedInRelationshipControl = {
+	tagName: string;
+	role: string | null;
+	text: string;
+	ariaLabel: string | null;
+	href: string | null;
+	targetProfile: boolean;
+};
+
+export type LinkedInRelationshipDetection = {
+	relationshipState: LinkedInRelationshipState;
+	pendingInvitationState: "NONE" | "SENT" | "RECEIVED" | "UNKNOWN";
+};
+
+function normalizeControlText(value: string): string {
+	return value.trim().replace(/\s+/g, " ").toLocaleLowerCase();
+}
+
+function profileIdentifierMatches(
+	value: string,
+	profileIdentifier: string,
+): boolean {
+	try {
+		return (
+			decodeURIComponent(value).toLocaleLowerCase() ===
+			decodeURIComponent(profileIdentifier).toLocaleLowerCase()
+		);
+	} catch {
+		return value.toLocaleLowerCase() === profileIdentifier.toLocaleLowerCase();
+	}
+}
+
+function invitationHrefTargetsProfile(
+	href: string,
+	profileIdentifier: string | null,
+): boolean {
+	if (!profileIdentifier) return false;
+	try {
+		const url = new URL(href, "https://www.linkedin.com");
+		if (!/\/preload\/custom-invite\//i.test(url.pathname)) return false;
+		const vanityName = url.searchParams.get("vanityName");
+		return vanityName
+			? profileIdentifierMatches(vanityName, profileIdentifier)
+			: false;
+	} catch {
+		return false;
+	}
+}
+
+function labelIncludesDisplayName(
+	label: string | null,
+	displayName: string | null,
+): boolean {
+	if (!label || !displayName) return false;
+	return normalizeControlText(label).includes(
+		normalizeControlText(displayName),
+	);
+}
+
+function isConnectLabel(value: string): boolean {
+	return (
+		value.includes("connect") ||
+		value.includes("connectie maken") ||
+		value.includes("verbinden")
+	);
+}
+
+function isPendingLabel(value: string): boolean {
+	return (
+		value.includes("pending") ||
+		value.includes("withdraw") ||
+		value.includes("intrekken") ||
+		value.includes("in behandeling") ||
+		value.includes("invitation sent") ||
+		value.includes("uitnodiging verzonden")
+	);
+}
+
+function isMessageLabel(value: string): boolean {
+	return value.includes("message") || value.includes("bericht");
+}
+
+export function detectLinkedInRelationshipState(input: {
+	profileIdentifier: string | null;
+	displayName: string | null;
+	controls: LinkedInRelationshipControl[];
+}): LinkedInRelationshipDetection {
+	const targetControls = input.controls.filter(
+		(control) => control.targetProfile,
+	);
+	const connectAvailable = targetControls.some((control) => {
+		const label = normalizeControlText(
+			`${control.text} ${control.ariaLabel ?? ""}`,
+		);
+		if (!isConnectLabel(label)) return false;
+		if (control.href) {
+			if (/\/preload\/custom-invite\//i.test(control.href))
+				return invitationHrefTargetsProfile(
+					control.href,
+					input.profileIdentifier,
+				);
+			return labelIncludesDisplayName(control.ariaLabel, input.displayName);
+		}
+		return (
+			control.tagName === "BUTTON" ||
+			control.role?.toLocaleLowerCase() === "button" ||
+			labelIncludesDisplayName(control.ariaLabel, input.displayName)
+		);
+	});
+	if (connectAvailable)
+		return { relationshipState: "CONNECT", pendingInvitationState: "UNKNOWN" };
+	const pending = targetControls.some((control) =>
+		isPendingLabel(
+			normalizeControlText(`${control.text} ${control.ariaLabel ?? ""}`),
+		),
+	);
+	if (pending)
+		return { relationshipState: "PENDING", pendingInvitationState: "SENT" };
+	const messageAvailable = targetControls.some((control) => {
+		const label = normalizeControlText(
+			`${control.text} ${control.ariaLabel ?? ""}`,
+		);
+		return (
+			isMessageLabel(label) &&
+			(control.href ? /\/messaging\/compose\//i.test(control.href) : true)
+		);
+	});
+	if (messageAvailable)
+		return { relationshipState: "CONNECTED", pendingInvitationState: "NONE" };
+	return { relationshipState: "AMBIGUOUS", pendingInvitationState: "UNKNOWN" };
+}
 
 export type LinkedInBrowserHealth = {
 	status: "READY" | "UNAVAILABLE" | "UNAUTHENTICATED" | "CHALLENGE";
@@ -111,24 +245,27 @@ class CdpPage {
 	}
 
 	async observe(): Promise<PageObservation> {
-		return this.evaluate<PageObservation>(`(() => {
+		const observation = await this.evaluate<PageObservation>(`(() => {
 			const body = (document.body?.innerText || "").toLowerCase();
 			const href = location.href;
 			const title = document.title || "";
 			const profileMatch = href.match(/https?:\\/\\/(?:www\\.)?linkedin\\.com\\/in\\/([^/?#]+)/i);
-			const buttons = Array.from(document.querySelectorAll("button, a[role=button]"))
-				.map((element) => (element.textContent || "").trim().replace(/\\s+/g, " ").toLowerCase())
-				.filter(Boolean);
-			let relationshipState = "AMBIGUOUS";
-			let pendingInvitationState = "UNKNOWN";
-			if (buttons.some((value) => value === "connect")) relationshipState = "CONNECT";
-			else if (buttons.some((value) => value === "pending" || value.includes("withdraw"))) {
-				relationshipState = "PENDING";
-				pendingInvitationState = "SENT";
-			} else if (buttons.some((value) => value === "message")) {
-				relationshipState = "CONNECTED";
-				pendingInvitationState = "NONE";
-			}
+			const displayName = Array.from(document.querySelectorAll("h1, h2"))
+				.filter((element) => !element.closest("[data-testid=toasts-title], dialog"))
+				.map((element) => (element.textContent || "").trim())
+				.find(Boolean) || null;
+			const profileSection = Array.from(document.querySelectorAll("section"))
+				.find((element) => displayName && (element.innerText || "").includes(displayName));
+			const controls = profileSection
+				? Array.from(profileSection.querySelectorAll("button, a[role=button], a")).map((element) => ({
+					 tagName: element.tagName,
+					 role: element.getAttribute("role"),
+					 text: (element.textContent || "").trim().replace(/\\s+/g, " "),
+					 ariaLabel: element.getAttribute("aria-label"),
+					 href: element.getAttribute("href"),
+					 targetProfile: true,
+				 }))
+				: [];
 			const challenge = /captcha|security check|verify your identity|identity verification|unusual activity|unusual login|security checkpoint|suspicious activity|account restricted|rate limit|temporarily unavailable/.exec(body + " " + title)?.[0] || null;
 			const authenticated = !/\\/(?:login|checkpoint)\\b/i.test(href) && !/sign in to linkedin/.test(body);
 			const conversationMatch = href.match(/\\/messaging\\/thread\\/([^/?#]+)/i);
@@ -137,19 +274,65 @@ class CdpPage {
 				resolution: profileMatch ? "RESOLVED" : "AMBIGUOUS",
 				profileUrl: profileMatch ? "https://www.linkedin.com/in/" + profileMatch[1] + "/" : null,
 				profileIdentifier: profileMatch?.[1] || null,
-				displayName: Array.from(document.querySelectorAll("h1, h2"))
-					.filter((element) => !element.closest("[data-testid=toasts-title], dialog"))
-					.map((element) => (element.textContent || "").trim())
-					.find(Boolean) || null,
-				relationshipState,
-				pendingInvitationState,
+				displayName,
 				externalConversationKey: conversationMatch?.[1] || null,
 				href,
 				title,
 				challenge,
 				authenticated,
 				externalMessageKey: messageKey,
+				controls,
 			};
+		})()`);
+		return {
+			...observation,
+			...detectLinkedInRelationshipState({
+				profileIdentifier: observation.profileIdentifier,
+				displayName: observation.displayName ?? null,
+				controls: observation.controls,
+			}),
+		};
+	}
+
+	async clickRelationshipControl(
+		action: "CONNECT" | "MESSAGE",
+		observation: PageObservation,
+	): Promise<boolean> {
+		return this.evaluate<boolean>(`(() => {
+			const action = ${JSON.stringify(action)};
+			const profileIdentifier = ${JSON.stringify(observation.profileIdentifier)};
+			const displayName = ${JSON.stringify(observation.displayName)};
+			const normalize = (value) => (value || "").trim().replace(/\\s+/g, " ").toLowerCase();
+			const labelIncludesName = (value) => Boolean(value && displayName && normalize(value).includes(normalize(displayName)));
+			const profileSection = Array.from(document.querySelectorAll("section"))
+				.find((element) => displayName && (element.innerText || "").includes(displayName));
+			if (!profileSection) return false;
+			const target = Array.from(profileSection.querySelectorAll("button, a[role=button], a"))
+				.find((element) => {
+					const text = normalize(element.textContent);
+					const ariaLabel = element.getAttribute("aria-label");
+					const label = normalize(text + " " + (ariaLabel || ""));
+					if (action === "MESSAGE") {
+						if (!label.includes("message") && !label.includes("bericht")) return false;
+						const href = element.getAttribute("href");
+						return !href || /\\/messaging\\/compose\\//i.test(href);
+					}
+					if (!label.includes("connect") && !label.includes("verbinden")) return false;
+					const href = element.getAttribute("href");
+					if (href && /\\/preload\\/custom-invite\\//i.test(href)) {
+						try {
+							const vanityName = new URL(href, location.href).searchParams.get("vanityName");
+							return Boolean(vanityName && profileIdentifier && decodeURIComponent(vanityName).toLowerCase() === decodeURIComponent(profileIdentifier).toLowerCase());
+						} catch {
+							return false;
+						}
+					}
+					if (href) return labelIncludesName(ariaLabel);
+				return element.tagName === "BUTTON" || element.getAttribute("role")?.toLowerCase() === "button" || labelIncludesName(ariaLabel);
+				});
+			if (!target) return false;
+			(target as HTMLElement).click();
+			return true;
 		})()`);
 	}
 
@@ -307,7 +490,7 @@ export class CdpLinkedInBrowserAdapter implements LinkedInBrowserAdapter {
 				};
 			if (action.action === "CONNECTION_REQUEST") {
 				writeStarted = true;
-				if (!(await page.clickButton("connect")))
+				if (!(await page.clickRelationshipControl("CONNECT", before)))
 					return {
 						status: "FAILED",
 						errorCode: "CONNECT_BUTTON_UNAVAILABLE",
@@ -352,7 +535,7 @@ export class CdpLinkedInBrowserAdapter implements LinkedInBrowserAdapter {
 					observedAt: new Date(),
 				};
 			}
-			if (!(await page.clickButton("message")))
+			if (!(await page.clickRelationshipControl("MESSAGE", before)))
 				return {
 					status: "FAILED",
 					errorCode: "MESSAGE_BUTTON_UNAVAILABLE",
