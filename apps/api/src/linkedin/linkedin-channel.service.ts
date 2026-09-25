@@ -171,7 +171,7 @@ function utcDay(value: Date): Date {
 	);
 }
 
-function channelStatusForClassification(
+export function channelStatusForClassification(
 	classification: InboundInput["classification"],
 ):
 	| "ACTIVE_HUMAN_CONVERSATION"
@@ -179,12 +179,12 @@ function channelStatusForClassification(
 	| "PARKED"
 	| "CLOSED"
 	| "NEEDS_IHSAN" {
+	if (classification === "WARM_HANDOFF") return "NEEDS_IHSAN";
 	if (
-		classification === "REFERRAL_OR_PLAYER_OPPORTUNITY" ||
-		classification === "WARM_HANDOFF"
+		classification === "ACTION_REQUIRED" ||
+		classification === "REFERRAL_OR_PLAYER_OPPORTUNITY"
 	)
-		return "NEEDS_IHSAN";
-	if (classification === "ACTION_REQUIRED") return "ACTIVE_HUMAN_CONVERSATION";
+		return "ACTIVE_HUMAN_CONVERSATION";
 	if (
 		classification === "WAITING_ON_PROSPECT" ||
 		classification === "POSITIVE_LIGHT"

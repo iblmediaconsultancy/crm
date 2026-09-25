@@ -252,6 +252,45 @@ describe("LinkedIn relationship control detection", () => {
 		}
 	});
 
+	it("uses the target profile compose link when Message text is split", () => {
+		expect(
+			resolveLinkedInRelationshipControl({
+				action: "MESSAGE",
+				...base,
+				controls: [
+					control("Me age", {
+						href: "/messaging/compose/?profileUrn=urn%3Ali%3Afsd_profile%3Atarget&recipient=target",
+					}),
+				],
+			}),
+		).toMatchObject({ status: "FOUND" });
+	});
+
+	it("rejects message links outside the verified profile section", () => {
+		expect(
+			resolveLinkedInRelationshipControl({
+				action: "MESSAGE",
+				...base,
+				controls: [
+					control("Me age", {
+						targetProfile: false,
+						href: "/messaging/compose/?recipient=target",
+					}),
+				],
+			}),
+		).toEqual({ status: "NONE" });
+	});
+
+	it("rejects message controls labelled for another profile", () => {
+		expect(
+			resolveLinkedInRelationshipControl({
+				action: "MESSAGE",
+				...base,
+				controls: [control("Message", { ariaLabel: "Message Another Person" })],
+			}),
+		).toEqual({ status: "NONE" });
+	});
+
 	it("does not treat Follow as Connect and lets Connect win", () => {
 		expect(
 			detectLinkedInRelationshipState({

@@ -110,6 +110,21 @@ export function resolveLinkedInRelationshipControl(
 		return value.includes("message") || value.includes("bericht");
 	}
 
+	function isMessageHref(value: string | null): boolean {
+		return Boolean(value && /\/messaging\/compose\//i.test(value));
+	}
+
+	function ariaLabelTargetsAnotherMessageProfile(
+		ariaLabel: string | null,
+		displayName: string | null,
+	): boolean {
+		if (!ariaLabel || !displayName) return false;
+		const normalized = normalizeControlText(ariaLabel);
+		if (!isMessageLabel(normalized)) return false;
+		if (labelIncludesDisplayName(ariaLabel, displayName)) return false;
+		return normalized.replace(/\b(?:message|bericht)\b/g, "").trim().length > 0;
+	}
+
 	function isConnectControl(control: LinkedInRelationshipControl): boolean {
 		const label = normalizeControlText(
 			`${control.text} ${control.ariaLabel ?? ""}`,
@@ -142,10 +157,16 @@ export function resolveLinkedInRelationshipControl(
 		const label = normalizeControlText(
 			`${control.text} ${control.ariaLabel ?? ""}`,
 		);
-		return (
-			isMessageLabel(label) &&
-			(control.href ? /\/messaging\/compose\//i.test(control.href) : true)
-		);
+		if (
+			ariaLabelTargetsAnotherMessageProfile(
+				control.ariaLabel,
+				input.displayName,
+			)
+		)
+			return false;
+		if (control.href && !isMessageHref(control.href)) return false;
+		if (isMessageLabel(label)) return true;
+		return isMessageHref(control.href) && control.targetProfile;
 	}
 
 	const targetControls = input.controls.filter(
