@@ -116,9 +116,7 @@ function confirmedOutcomeValid(
 	if (!identity.allowed) return identity;
 	if (
 		action.action === "CONNECTION_REQUEST" &&
-		!(["PENDING", "CONNECTED"] as const).includes(
-			outcome.observedIdentity.relationshipState as "PENDING" | "CONNECTED",
-		)
+		outcome.observedIdentity.relationshipState !== "PENDING"
 	)
 		return { allowed: false, reason: "CONNECTION_RESULT_UNCLEAR" };
 	if (

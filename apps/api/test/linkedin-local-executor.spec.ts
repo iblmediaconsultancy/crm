@@ -187,6 +187,23 @@ describe("local LinkedIn executor", () => {
 		expect(records[0]?.status).toBe("SUCCEEDED");
 	});
 
+	it("requires a Pending relationship state as proof that a request was sent", async () => {
+		const { core, records } = fakeCore({ connection: connectionPrepared() });
+		const { browser } = fakeBrowser(
+			connectionAction("connection-job", "CONNECTED"),
+		);
+		const result = await new LocalLinkedInExecutor(
+			core,
+			browser,
+			"worker-1",
+		).runOnce();
+		expect(result).toMatchObject({
+			status: "NEEDS_IHSAN",
+			reason: "CONNECTION_RESULT_UNCLEAR",
+		});
+		expect(records[0]).toMatchObject({ status: "AMBIGUOUS" });
+	});
+
 	it("does not send when the connection is already pending", async () => {
 		const { core, records } = fakeCore({ connection: connectionPrepared() });
 		const { browser, actions } = fakeBrowser({
