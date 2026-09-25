@@ -1,4 +1,5 @@
 import {
+	canonicalLinkedInProfileUrl,
 	coldOutreachBlockReason,
 	type Db,
 	isPersonProtected,
@@ -136,6 +137,10 @@ type AttemptOutcome = {
 	attemptNumber: number;
 	status: "SUCCEEDED" | "FAILED" | "AMBIGUOUS" | "BLOCKED";
 	externalMessageKey?: string | null;
+	externalConversationKey?: string | null;
+	verifiedProfileUrl?: string | null;
+	verifiedProfileIdentifier?: string | null;
+	browserProof?: JsonValue;
 	errorCode?: string | null;
 	details?: JsonValue;
 	completedAt?: Date;
@@ -237,6 +242,49 @@ async function releaseConnectionRequestReservation(
 			leasedUntil: null,
 			retryAt: status === "FAILED" ? new Date(Date.now() + 60_000) : null,
 			lastErrorCode: errorCode ?? null,
+		},
+	});
+}
+
+async function releaseMessageReservation(
+	tx: Prisma.TransactionClient,
+	job: {
+		id: string;
+		messageId: string | null;
+		conversationId: string;
+		contactId: string;
+		coldOutreach: boolean;
+		quotaDay: Date;
+		accountKey: string;
+		idempotencyKey: string;
+	},
+	errorCode: string,
+) {
+	if (job.coldOutreach)
+		await tx.relationshipColdTouchClaim.updateMany({
+			where: {
+				contactId: job.contactId,
+				status: "CLAIMED",
+				idempotencyKey: job.idempotencyKey,
+			},
+			data: { status: "RELEASED", releasedAt: new Date() },
+		});
+	await tx.$executeRaw(
+		Prisma.sql`UPDATE "linkedinQuota" SET "messageReserved" = GREATEST("messageReserved" - 1, 0), "updatedAt" = NOW() WHERE "day" = ${job.quotaDay} AND "accountKey" = ${job.accountKey}`,
+	);
+	if (job.messageId)
+		await tx.linkedInMessage.update({
+			where: { id: job.messageId },
+			data: { status: "CANCELLED" },
+		});
+	await tx.linkedInSendJob.update({
+		where: { id: job.id },
+		data: {
+			status: "CANCELLED",
+			leaseOwner: null,
+			leasedUntil: null,
+			retryAt: null,
+			lastErrorCode: errorCode,
 		},
 	});
 }
@@ -871,6 +919,7 @@ export class LinkedInChannelService {
 						routeId: true,
 						profileUrl: true,
 						profileIdentifier: true,
+						actionPayload: true,
 						coldOutreach: true,
 						accountKey: true,
 						quotaDay: true,
@@ -891,7 +940,13 @@ export class LinkedInChannelService {
 					await Promise.all([
 						tx.contact.findUnique({
 							where: { id: job.contactId },
-							select: { id: true, companyId: true, outreachState: true },
+							select: {
+								id: true,
+								companyId: true,
+								outreachState: true,
+								firstName: true,
+								lastName: true,
+							},
 						}),
 						tx.contactRoute.findFirst({
 							where: {
@@ -1028,6 +1083,10 @@ export class LinkedInChannelService {
 						routeId: job.routeId,
 						profileUrl: job.profileUrl,
 						profileIdentifier: job.profileIdentifier,
+						displayName: [contact?.firstName, contact?.lastName]
+							.filter(Boolean)
+							.join(" "),
+						actionPayload: job.actionPayload,
 					},
 				};
 			},
@@ -1059,9 +1118,10 @@ export class LinkedInChannelService {
 				const completedAt = input.completedAt ?? new Date();
 				if (input.status === "SUCCEEDED") {
 					if (
-						!input.externalRequestKey ||
 						!input.browserProof ||
-						input.verifiedProfileUrl !== job.profileUrl ||
+						!input.verifiedProfileUrl ||
+						canonicalLinkedInProfileUrl(input.verifiedProfileUrl) !==
+							canonicalLinkedInProfileUrl(job.profileUrl) ||
 						input.verifiedProfileIdentifier !== job.profileIdentifier
 					)
 						throw new ConflictException(
@@ -1208,7 +1268,7 @@ export class LinkedInChannelService {
 		);
 	}
 
-	async beginAttempt(jobId: string, workerId: string) {
+	async prepareMessageExecution(jobId: string, workerId: string) {
 		return withPrincipal(
 			this.db,
 			{ userId: null, kind: "worker" },
@@ -1216,11 +1276,52 @@ export class LinkedInChannelService {
 				const job = await tx.linkedInSendJob.findUnique({
 					where: { id: jobId },
 					select: {
+						id: true,
 						action: true,
 						status: true,
 						leaseOwner: true,
 						attemptCount: true,
-						conversation: { select: { contactId: true } },
+						messageId: true,
+						coldOutreach: true,
+						accountKey: true,
+						quotaDay: true,
+						idempotencyKey: true,
+						conversationId: true,
+						conversation: {
+							select: {
+								id: true,
+								profileUrl: true,
+								normalizedProfileUrl: true,
+								externalConversationKey: true,
+								connectionState: true,
+								consent: true,
+								contactId: true,
+								companyId: true,
+								leadId: true,
+								contact: {
+									select: {
+										id: true,
+										firstName: true,
+										lastName: true,
+										companyId: true,
+										lifecycleState: true,
+										outreachState: true,
+										contactRoutes: {
+											where: {
+												type: "LINKEDIN",
+												lifecycleState: "ACTIVE",
+											},
+											select: {
+												id: true,
+												value: true,
+												normalizedValue: true,
+											},
+										},
+									},
+								},
+							},
+						},
+						message: { select: { body: true } },
 					},
 				});
 				if (job?.action !== "MESSAGE")
@@ -1231,19 +1332,186 @@ export class LinkedInChannelService {
 					throw new ConflictException(
 						"LinkedIn job lease is not owned by this worker.",
 					);
-				if (await isPersonProtected(tx, job.conversation.contactId))
-					throw new ConflictException(
-						"LinkedIn action blocked: PERSON_OWNER_PROTECTED.",
+				const conversation = job.conversation;
+				const contact = conversation?.contact;
+				const route = contact?.contactRoutes[0] ?? null;
+				const personProtected = contact
+					? await isPersonProtected(tx, contact.id)
+					: false;
+				const [
+					channelState,
+					otherState,
+					suppressions,
+					organizationProtection,
+					claim,
+					lead,
+				] = await Promise.all([
+					tx.channelEngagementState.findUnique({
+						where: {
+							contactId_channel: {
+								contactId: contact?.id ?? "",
+								channel: LINKEDIN_CHANNEL,
+							},
+						},
+						select: { status: true },
+					}),
+					tx.channelEngagementState.findFirst({
+						where: {
+							contactId: contact?.id ?? "",
+							channel: { not: LINKEDIN_CHANNEL },
+							status: { in: ["ACTIVE_HUMAN_CONVERSATION", "NEEDS_IHSAN"] },
+						},
+						select: { status: true },
+					}),
+					tx.outreachSuppression.findMany({
+						where: {
+							OR: [
+								{ scope: "CONTACT", contactId: contact?.id ?? "" },
+								{
+									scope: "ROUTE",
+									contactId: contact?.id ?? "",
+									channel: LINKEDIN_CHANNEL,
+								},
+								...(contact?.companyId
+									? [
+											{
+												scope: "ORGANIZATION" as const,
+												companyId: contact.companyId,
+											},
+										]
+									: []),
+							],
+						},
+						select: { scope: true, channel: true },
+					}),
+					tx.organizationProtection.findFirst({
+						where: {
+							companyId: contact?.companyId ?? "",
+							status: "ACTIVE",
+						},
+						select: { id: true },
+					}),
+					contact
+						? tx.relationshipColdTouchClaim.findUnique({
+								where: { contactId: contact.id },
+								select: { status: true, idempotencyKey: true },
+							})
+						: Promise.resolve(null),
+					conversation?.leadId
+						? tx.lead.findUnique({
+								where: { id: conversation.leadId },
+								select: { attentionState: true },
+							})
+						: Promise.resolve(null),
+				]);
+				let blockedReason: string | null = null;
+				if (!conversation || !contact) blockedReason = "CONTACT_NOT_FOUND";
+				else if (!route) blockedReason = "LINKEDIN_ROUTE_NOT_ACTIVE";
+				else if (
+					route.value !== conversation.profileUrl ||
+					route.normalizedValue !== conversation.normalizedProfileUrl
+				)
+					blockedReason = "LINKEDIN_ROUTE_IDENTITY_CHANGED";
+				else if (conversation.consent === "DO_NOT_CONTACT")
+					blockedReason = "LINKEDIN_CONVERSATION_SUPPRESSED";
+				else if (conversation.connectionState !== "CONNECTED")
+					blockedReason = "LINKEDIN_CONNECTION_REQUIRED";
+				else if (contact.lifecycleState !== "ACTIVE")
+					blockedReason = "CONTACT_NOT_ACTIVE";
+				else if (personProtected) blockedReason = "PERSON_OWNER_PROTECTED";
+				else if (organizationProtection)
+					blockedReason = "ORGANIZATION_OWNER_PROTECTED";
+				else if (channelState?.status === "NEEDS_IHSAN")
+					blockedReason = "CHANNEL_NEEDS_IHSAN";
+				else if (suppressions.length > 0)
+					blockedReason = "LINKEDIN_SUPPRESSION";
+				else if (job.coldOutreach && contact.outreachState !== "ALLOWED")
+					blockedReason = "CONTACT_OUTREACH_BLOCKED";
+				if (!blockedReason && job.coldOutreach) {
+					const reason = coldOutreachBlockReason({
+						contactOutreachState: contact.outreachState,
+						leadAttentionState: lead?.attentionState ?? "NONE",
+						channelStatus: channelState?.status ?? null,
+						otherChannelStatus: otherState?.status ?? null,
+						routeSuppressed: suppressions.some(
+							(row) =>
+								row.scope === "ROUTE" && row.channel === LINKEDIN_CHANNEL,
+						),
+						contactSuppressed: suppressions.some(
+							(row) => row.scope === "CONTACT",
+						),
+						organizationSuppressed: suppressions.some(
+							(row) => row.scope === "ORGANIZATION",
+						),
+						organizationProtected: Boolean(organizationProtection),
+						firstTouchStatus: claim?.status ?? null,
+						personProtected: false,
+					});
+					if (reason && reason !== "FIRST_TOUCH_CLAIMED")
+						blockedReason = reason;
+					else if (
+						claim &&
+						(claim.status !== "CLAIMED" ||
+							claim.idempotencyKey !== job.idempotencyKey)
+					)
+						blockedReason = "FIRST_TOUCH_CLAIMED_BY_OTHER_JOB";
+				}
+				if (blockedReason) {
+					await releaseMessageReservation(
+						tx,
+						{
+							id: job.id,
+							messageId: job.messageId,
+							conversationId: job.conversationId,
+							contactId: conversation?.contactId ?? "",
+							coldOutreach: job.coldOutreach,
+							quotaDay: job.quotaDay,
+							accountKey: job.accountKey,
+							idempotencyKey: job.idempotencyKey,
+						},
+						blockedReason,
 					);
-				return tx.linkedInSendAttempt.create({
+					return { blockedReason };
+				}
+				if (!route)
+					throw new ConflictException("LinkedIn route is unavailable.");
+				const attempt = await tx.linkedInSendAttempt.create({
 					data: {
 						jobId,
 						attemptNumber: job.attemptCount,
 						browserSessionKey: workerId,
 					},
 				});
+				return {
+					attempt,
+					action: {
+						jobId: job.id,
+						action: "MESSAGE" as const,
+						browserSessionKey: workerId,
+						body: job.message?.body ?? "",
+						target: {
+							contactId: contact.id,
+							routeId: route.id,
+							profileUrl: route.value,
+							profileIdentifier: route.normalizedValue,
+							displayName: [contact.firstName, contact.lastName]
+								.filter(Boolean)
+								.join(" "),
+							externalConversationKey: conversation.externalConversationKey,
+						},
+					},
+				};
 			},
 		);
+	}
+
+	async beginAttempt(jobId: string, workerId: string) {
+		const result = await this.prepareMessageExecution(jobId, workerId);
+		if ("blockedReason" in result)
+			throw new ConflictException(
+				`LinkedIn message blocked: ${result.blockedReason}.`,
+			);
+		return result.attempt;
 	}
 
 	async recordAttempt(input: AttemptOutcome) {
@@ -1255,7 +1523,15 @@ export class LinkedInChannelService {
 					where: { id: input.jobId },
 					include: {
 						conversation: {
-							select: { id: true, contactId: true, leadId: true },
+							select: {
+								id: true,
+								contactId: true,
+								leadId: true,
+								profileUrl: true,
+								normalizedProfileUrl: true,
+								externalConversationKey: true,
+								connectionState: true,
+							},
 						},
 						message: true,
 					},
@@ -1268,6 +1544,37 @@ export class LinkedInChannelService {
 					throw new ConflictException(
 						"LinkedIn connection requests use the connection-request job path.",
 					);
+				if (input.status === "SUCCEEDED") {
+					const route = await tx.contactRoute.findFirst({
+						where: {
+							contactId: job.conversation.contactId,
+							type: "LINKEDIN",
+							lifecycleState: "ACTIVE",
+						},
+						select: { value: true, normalizedValue: true },
+					});
+					if (
+						!input.browserProof ||
+						!input.verifiedProfileUrl ||
+						!input.verifiedProfileIdentifier ||
+						!route ||
+						canonicalLinkedInProfileUrl(input.verifiedProfileUrl) !==
+							canonicalLinkedInProfileUrl(route.value) ||
+						input.verifiedProfileIdentifier !== route.normalizedValue ||
+						(job.conversation.profileUrl &&
+							canonicalLinkedInProfileUrl(job.conversation.profileUrl) !==
+								canonicalLinkedInProfileUrl(input.verifiedProfileUrl)) ||
+						(job.conversation.normalizedProfileUrl &&
+							job.conversation.normalizedProfileUrl !==
+								input.verifiedProfileIdentifier) ||
+						(job.conversation.externalConversationKey &&
+							job.conversation.externalConversationKey !==
+								input.externalConversationKey)
+					)
+						throw new ConflictException(
+							"A confirmed LinkedIn message requires matching fresh browser identity proof.",
+						);
+				}
 				const completedAt = input.completedAt ?? new Date();
 				await tx.linkedInSendAttempt.update({
 					where: {
@@ -1298,6 +1605,8 @@ export class LinkedInChannelService {
 					await tx.linkedInConversation.update({
 						where: { id: job.conversationId },
 						data: {
+							externalConversationKey:
+								input.externalConversationKey ?? undefined,
 							lastOutboundAt: completedAt,
 							lastMessageAt: completedAt,
 							status: "WAITING_ON_PROSPECT",
