@@ -186,6 +186,10 @@ export class EnvironmentVariables {
 
 	@IsOptional()
 	@IsString()
+	ATLAS_LINKEDIN_LOCAL_EXECUTOR_ENABLED?: string;
+
+	@IsOptional()
+	@IsString()
 	IBL_LOCAL_PROVIDER_DOUBLE?: string;
 }
 
