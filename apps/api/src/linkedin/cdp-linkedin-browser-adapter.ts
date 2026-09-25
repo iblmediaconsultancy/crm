@@ -6,6 +6,36 @@ import {
 	type LinkedInRelationshipState,
 	verifyLinkedInActionState,
 } from "@crm/db/linkedin-browser-adapter";
+import {
+	type LinkedInRelationshipControl,
+	resolveLinkedInRelationshipControl,
+} from "./relationship-control-resolver";
+
+type PageElement = {
+	closest(selector: string): PageElement | null;
+	tagName: string;
+	textContent: string | null;
+	innerText: string;
+	querySelectorAll(selector: string): PageElement[];
+	getAttribute(name: string): string | null;
+	getBoundingClientRect(): { width: number; height: number };
+	isConnected: boolean;
+};
+
+type PageDocument = {
+	body?: { innerText?: string };
+	title: string;
+	querySelectorAll(selector: string): PageElement[];
+	querySelector(selector: string): PageElement | null;
+};
+
+declare const document: PageDocument;
+declare const location: { href: string };
+declare function getComputedStyle(element: PageElement): {
+	display: string;
+	visibility: string;
+	opacity: string;
+};
 
 type CdpTarget = {
 	type?: string;
@@ -28,136 +58,126 @@ type PageObservation = LinkedInBrowserIdentityEvidence & {
 	controls: LinkedInRelationshipControl[];
 };
 
-export type LinkedInRelationshipControl = {
-	tagName: string;
-	role: string | null;
-	text: string;
-	ariaLabel: string | null;
-	href: string | null;
-	targetProfile: boolean;
-};
-
 export type LinkedInRelationshipDetection = {
 	relationshipState: LinkedInRelationshipState;
 	pendingInvitationState: "NONE" | "SENT" | "RECEIVED" | "UNKNOWN";
 };
-
-function normalizeControlText(value: string): string {
-	return value.trim().replace(/\s+/g, " ").toLocaleLowerCase();
-}
-
-function profileIdentifierMatches(
-	value: string,
-	profileIdentifier: string,
-): boolean {
-	try {
-		return (
-			decodeURIComponent(value).toLocaleLowerCase() ===
-			decodeURIComponent(profileIdentifier).toLocaleLowerCase()
-		);
-	} catch {
-		return value.toLocaleLowerCase() === profileIdentifier.toLocaleLowerCase();
-	}
-}
-
-function invitationHrefTargetsProfile(
-	href: string,
-	profileIdentifier: string | null,
-): boolean {
-	if (!profileIdentifier) return false;
-	try {
-		const url = new URL(href, "https://www.linkedin.com");
-		if (!/\/preload\/custom-invite\//i.test(url.pathname)) return false;
-		const vanityName = url.searchParams.get("vanityName");
-		return vanityName
-			? profileIdentifierMatches(vanityName, profileIdentifier)
-			: false;
-	} catch {
-		return false;
-	}
-}
-
-function labelIncludesDisplayName(
-	label: string | null,
-	displayName: string | null,
-): boolean {
-	if (!label || !displayName) return false;
-	return normalizeControlText(label).includes(
-		normalizeControlText(displayName),
-	);
-}
-
-function isConnectLabel(value: string): boolean {
-	return (
-		value.includes("connect") ||
-		value.includes("connectie maken") ||
-		value.includes("verbinden")
-	);
-}
-
-function isPendingLabel(value: string): boolean {
-	return (
-		value.includes("pending") ||
-		value.includes("withdraw") ||
-		value.includes("intrekken") ||
-		value.includes("in behandeling") ||
-		value.includes("invitation sent") ||
-		value.includes("uitnodiging verzonden")
-	);
-}
-
-function isMessageLabel(value: string): boolean {
-	return value.includes("message") || value.includes("bericht");
-}
 
 export function detectLinkedInRelationshipState(input: {
 	profileIdentifier: string | null;
 	displayName: string | null;
 	controls: LinkedInRelationshipControl[];
 }): LinkedInRelationshipDetection {
-	const targetControls = input.controls.filter(
-		(control) => control.targetProfile,
-	);
-	const connectAvailable = targetControls.some((control) => {
-		const label = normalizeControlText(
-			`${control.text} ${control.ariaLabel ?? ""}`,
-		);
-		if (!isConnectLabel(label)) return false;
-		if (control.href) {
-			if (/\/preload\/custom-invite\//i.test(control.href))
-				return invitationHrefTargetsProfile(
-					control.href,
-					input.profileIdentifier,
-				);
-			return labelIncludesDisplayName(control.ariaLabel, input.displayName);
-		}
-		return (
-			control.tagName === "BUTTON" ||
-			control.role?.toLocaleLowerCase() === "button" ||
-			labelIncludesDisplayName(control.ariaLabel, input.displayName)
-		);
+	const connect = resolveLinkedInRelationshipControl({
+		...input,
+		action: "CONNECT",
 	});
-	if (connectAvailable)
+	if (connect.status === "AMBIGUOUS")
+		return {
+			relationshipState: "AMBIGUOUS",
+			pendingInvitationState: "UNKNOWN",
+		};
+	if (connect.status === "FOUND")
 		return { relationshipState: "CONNECT", pendingInvitationState: "UNKNOWN" };
-	const pending = targetControls.some((control) =>
-		isPendingLabel(
-			normalizeControlText(`${control.text} ${control.ariaLabel ?? ""}`),
-		),
-	);
-	if (pending)
-		return { relationshipState: "PENDING", pendingInvitationState: "SENT" };
-	const messageAvailable = targetControls.some((control) => {
-		const label = normalizeControlText(
-			`${control.text} ${control.ariaLabel ?? ""}`,
-		);
-		return (
-			isMessageLabel(label) &&
-			(control.href ? /\/messaging\/compose\//i.test(control.href) : true)
-		);
+	const pending = resolveLinkedInRelationshipControl({
+		...input,
+		action: "PENDING",
 	});
-	if (messageAvailable)
+	if (pending.status === "AMBIGUOUS")
+		return {
+			relationshipState: "AMBIGUOUS",
+			pendingInvitationState: "UNKNOWN",
+		};
+	if (pending.status === "FOUND")
+		return { relationshipState: "PENDING", pendingInvitationState: "SENT" };
+	const message = resolveLinkedInRelationshipControl({
+		...input,
+		action: "MESSAGE",
+	});
+	if (message.status === "AMBIGUOUS")
+		return {
+			relationshipState: "AMBIGUOUS",
+			pendingInvitationState: "UNKNOWN",
+		};
+	if (message.status === "FOUND")
 		return { relationshipState: "CONNECTED", pendingInvitationState: "NONE" };
 	return { relationshipState: "AMBIGUOUS", pendingInvitationState: "UNKNOWN" };
+}
+
+function collectLinkedInRelationshipControls(includeElements = false) {
+	const body = document.body?.innerText || "";
+	const href = location.href;
+	const title = document.title || "";
+	const profileMatch = href.match(
+		/https?:\/\/(?:www\.)?linkedin\.com\/in\/([^/?#]+)/i,
+	);
+	const displayName =
+		Array.from(document.querySelectorAll("h1, h2"))
+			.filter(
+				(element) => !element.closest("[data-testid=toasts-title], dialog"),
+			)
+			.map((element) => (element.textContent || "").trim())
+			.find(Boolean) || null;
+	const profileSection = Array.from(document.querySelectorAll("section")).find(
+		(element) => displayName && (element.innerText || "").includes(displayName),
+	);
+	const elements = profileSection
+		? Array.from(profileSection.querySelectorAll("button, a[role=button], a"))
+		: [];
+	const controls = elements.map((element, elementIndex) => {
+		const rect = element.getBoundingClientRect();
+		const style = getComputedStyle(element);
+		return {
+			elementIndex,
+			tagName: element.tagName,
+			role: element.getAttribute("role"),
+			text: (element.textContent || "").trim().replace(/\s+/g, " "),
+			ariaLabel: element.getAttribute("aria-label"),
+			href: element.getAttribute("href"),
+			targetProfile: true,
+			visible: Boolean(
+				element.isConnected &&
+					rect.width > 0 &&
+					rect.height > 0 &&
+					style.display !== "none" &&
+					style.visibility !== "hidden" &&
+					style.opacity !== "0",
+			),
+			connected: element.isConnected,
+		};
+	});
+	const challenge =
+		/captcha|security check|verify your identity|identity verification|unusual activity|unusual login|security checkpoint|suspicious activity|account restricted|rate limit|temporarily unavailable/.exec(
+			`${body.toLowerCase()} ${title.toLowerCase()}`,
+		)?.[0] || null;
+	const authenticated =
+		!/(?:\/login|\/checkpoint)\b/i.test(href) &&
+		!/sign in to linkedin/.test(body.toLowerCase());
+	const conversationMatch = href.match(/\/messaging\/thread\/([^/?#]+)/i);
+	const messageKey =
+		document
+			.querySelector("[data-message-urn], [data-message-id]")
+			?.getAttribute("data-message-urn") ||
+		document
+			.querySelector("[data-message-id]")
+			?.getAttribute("data-message-id") ||
+		null;
+	return {
+		resolution: profileMatch ? "RESOLVED" : "AMBIGUOUS",
+		profileUrl: profileMatch
+			? `https://www.linkedin.com/in/${profileMatch[1]}/`
+			: null,
+		profileIdentifier: profileMatch?.[1] || null,
+		displayName,
+		externalConversationKey: conversationMatch?.[1] || null,
+		href,
+		title,
+		challenge,
+		authenticated,
+		externalMessageKey: messageKey,
+		controls,
+		elements: includeElements ? elements : undefined,
+	};
 }
 
 export type LinkedInBrowserHealth = {
@@ -245,45 +265,10 @@ class CdpPage {
 	}
 
 	async observe(): Promise<PageObservation> {
-		const observation = await this.evaluate<PageObservation>(`(() => {
-			const body = (document.body?.innerText || "").toLowerCase();
-			const href = location.href;
-			const title = document.title || "";
-			const profileMatch = href.match(/https?:\\/\\/(?:www\\.)?linkedin\\.com\\/in\\/([^/?#]+)/i);
-			const displayName = Array.from(document.querySelectorAll("h1, h2"))
-				.filter((element) => !element.closest("[data-testid=toasts-title], dialog"))
-				.map((element) => (element.textContent || "").trim())
-				.find(Boolean) || null;
-			const profileSection = Array.from(document.querySelectorAll("section"))
-				.find((element) => displayName && (element.innerText || "").includes(displayName));
-			const controls = profileSection
-				? Array.from(profileSection.querySelectorAll("button, a[role=button], a")).map((element) => ({
-					 tagName: element.tagName,
-					 role: element.getAttribute("role"),
-					 text: (element.textContent || "").trim().replace(/\\s+/g, " "),
-					 ariaLabel: element.getAttribute("aria-label"),
-					 href: element.getAttribute("href"),
-					 targetProfile: true,
-				 }))
-				: [];
-			const challenge = /captcha|security check|verify your identity|identity verification|unusual activity|unusual login|security checkpoint|suspicious activity|account restricted|rate limit|temporarily unavailable/.exec(body + " " + title)?.[0] || null;
-			const authenticated = !/\\/(?:login|checkpoint)\\b/i.test(href) && !/sign in to linkedin/.test(body);
-			const conversationMatch = href.match(/\\/messaging\\/thread\\/([^/?#]+)/i);
-			const messageKey = document.querySelector("[data-message-urn], [data-message-id]")?.getAttribute("data-message-urn") || document.querySelector("[data-message-id]")?.getAttribute("data-message-id") || null;
-			return {
-				resolution: profileMatch ? "RESOLVED" : "AMBIGUOUS",
-				profileUrl: profileMatch ? "https://www.linkedin.com/in/" + profileMatch[1] + "/" : null,
-				profileIdentifier: profileMatch?.[1] || null,
-				displayName,
-				externalConversationKey: conversationMatch?.[1] || null,
-				href,
-				title,
-				challenge,
-				authenticated,
-				externalMessageKey: messageKey,
-				controls,
-			};
-		})()`);
+		const collect = collectLinkedInRelationshipControls.toString();
+		const observation = await this.evaluate<PageObservation>(
+			`(() => { const collectControls = ${collect}; return collectControls(); })()`,
+		);
 		return {
 			...observation,
 			...detectLinkedInRelationshipState({
@@ -298,40 +283,24 @@ class CdpPage {
 		action: "CONNECT" | "MESSAGE",
 		observation: PageObservation,
 	): Promise<boolean> {
+		const collect = collectLinkedInRelationshipControls.toString();
+		const resolve = resolveLinkedInRelationshipControl.toString();
 		return this.evaluate<boolean>(`(() => {
-			const action = ${JSON.stringify(action)};
-			const profileIdentifier = ${JSON.stringify(observation.profileIdentifier)};
-			const displayName = ${JSON.stringify(observation.displayName)};
-			const normalize = (value) => (value || "").trim().replace(/\\s+/g, " ").toLowerCase();
-			const labelIncludesName = (value) => Boolean(value && displayName && normalize(value).includes(normalize(displayName)));
-			const profileSection = Array.from(document.querySelectorAll("section"))
-				.find((element) => displayName && (element.innerText || "").includes(displayName));
-			if (!profileSection) return false;
-			const target = Array.from(profileSection.querySelectorAll("button, a[role=button], a"))
-				.find((element) => {
-					const text = normalize(element.textContent);
-					const ariaLabel = element.getAttribute("aria-label");
-					const label = normalize(text + " " + (ariaLabel || ""));
-					if (action === "MESSAGE") {
-						if (!label.includes("message") && !label.includes("bericht")) return false;
-						const href = element.getAttribute("href");
-						return !href || /\\/messaging\\/compose\\//i.test(href);
-					}
-					if (!label.includes("connect") && !label.includes("verbinden")) return false;
-					const href = element.getAttribute("href");
-					if (href && /\\/preload\\/custom-invite\\//i.test(href)) {
-						try {
-							const vanityName = new URL(href, location.href).searchParams.get("vanityName");
-							return Boolean(vanityName && profileIdentifier && decodeURIComponent(vanityName).toLowerCase() === decodeURIComponent(profileIdentifier).toLowerCase());
-						} catch {
-							return false;
-						}
-					}
-					if (href) return labelIncludesName(ariaLabel);
-				return element.tagName === "BUTTON" || element.getAttribute("role")?.toLowerCase() === "button" || labelIncludesName(ariaLabel);
-				});
-			if (!target) return false;
-			(target as HTMLElement).click();
+			const collectControls = ${collect};
+			const resolveControl = ${resolve};
+			const snapshot = collectControls(true);
+			const resolution = resolveControl({
+				action: ${JSON.stringify(action)},
+				profileIdentifier: ${JSON.stringify(observation.profileIdentifier)},
+				displayName: ${JSON.stringify(observation.displayName)},
+				controls: snapshot.controls,
+			});
+			if (resolution.status !== "FOUND") return false;
+			const index = resolution.control.elementIndex;
+			const element = snapshot.elements?.[index];
+			const control = snapshot.controls[index];
+			if (!element || !control || !element.isConnected || !control.connected || !control.visible) return false;
+			element.click();
 			return true;
 		})()`);
 	}
