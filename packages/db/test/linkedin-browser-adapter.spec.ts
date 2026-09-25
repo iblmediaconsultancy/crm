@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import {
 	canonicalLinkedInProfileIdentity,
 	canonicalLinkedInProfileUrl,
+	linkedInDisplayNamesMatch,
 	verifyFreshLinkedInIdentity,
 } from "../src/linkedin-browser-adapter";
 
@@ -121,5 +122,83 @@ describe("LinkedIn browser identity canonicalization", () => {
 				{ ...baseObserved, profileUrl: "https://example.com/in/ada-lovelace" },
 			),
 		).toEqual({ allowed: false, reason: "PROFILE_URL_MISMATCH" });
+	});
+
+	it("accepts deterministic benign display-name variations", () => {
+		expect(
+			verifyFreshLinkedInIdentity(
+				target(
+					"https://www.linkedin.com/in/jop-knoester-365688104/",
+					"linkedin.com/in/jop-knoester-365688104",
+					"Jop Knoester",
+				),
+				{
+					...baseObserved,
+					profileUrl: "https://www.linkedin.com/in/jop-knoester-365688104/",
+					profileIdentifier: "jop-knoester-365688104",
+					displayName: "Jop Knoester",
+				},
+			),
+		).toEqual({ allowed: true });
+		expect(linkedInDisplayNamesMatch("Jop Knoester", "Jop Knoester")).toBe(
+			true,
+		);
+		expect(linkedInDisplayNamesMatch("Jop Knoester", "jop knoester")).toBe(
+			true,
+		);
+		expect(linkedInDisplayNamesMatch("Rene Vonk", "René Vonk")).toBe(true);
+		expect(
+			linkedInDisplayNamesMatch("Jop Alexander Knoester", "Jop A. Knoester"),
+		).toBe(true);
+		expect(linkedInDisplayNamesMatch("Jop Knoester", "  Jop,  Knoester ")).toBe(
+			true,
+		);
+		expect(
+			linkedInDisplayNamesMatch("Dr. Jop Knoester Jr", "Jop Knoester"),
+		).toBe(true);
+	});
+
+	it("rejects materially different display names", () => {
+		expect(linkedInDisplayNamesMatch("Jop Knoester", "Jop Koster")).toBe(false);
+		expect(linkedInDisplayNamesMatch("Jop Knoester", "Job Knoester")).toBe(
+			false,
+		);
+		expect(
+			linkedInDisplayNamesMatch(
+				"Jop Knoester",
+				"Jop Knoester Different Agency",
+			),
+		).toBe(false);
+		expect(
+			verifyFreshLinkedInIdentity(
+				target("https://linkedin.com/in/ada-lovelace", "ada-lovelace"),
+				{ ...baseObserved, displayName: null },
+			),
+		).toEqual({ allowed: false, reason: "DISPLAY_NAME_MISMATCH" });
+		expect(
+			verifyFreshLinkedInIdentity(
+				target(
+					"https://linkedin.com/in/ada-lovelace",
+					"ada-lovelace",
+					"Ada Lovelace",
+				),
+				{
+					...baseObserved,
+					profileUrl: "https://linkedin.com/in/grace-hopper",
+					profileIdentifier: "grace-hopper",
+					displayName: "Ada Lovelace",
+				},
+			),
+		).toEqual({ allowed: false, reason: "PROFILE_URL_MISMATCH" });
+		expect(
+			verifyFreshLinkedInIdentity(
+				target(
+					"https://linkedin.com/in/ada-lovelace",
+					"ada-lovelace",
+					"Ada Lovelace",
+				),
+				{ ...baseObserved, displayName: "Ada Lovelace Different Agency" },
+			),
+		).toEqual({ allowed: false, reason: "DISPLAY_NAME_MISMATCH" });
 	});
 });
