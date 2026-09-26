@@ -203,6 +203,8 @@ export function resolveLinkedInComposeConversationEvidence(
 	eventUrns: readonly string[],
 	recipientPillCount: number,
 ): LinkedInComposeConversationEvidence {
+	const isOpaqueIdentifier = (value: string): boolean =>
+		/^ACo[A-Za-z0-9_-]+$/.test(value.trim());
 	let url: URL;
 	try {
 		url = new URL(composeUrl);
@@ -223,8 +225,8 @@ export function resolveLinkedInComposeConversationEvidence(
 	const profileUrn = url.searchParams.get("profileUrn")?.trim() ?? "";
 	const profileMember = profileUrn.split(":").at(-1)?.trim() ?? "";
 	if (
-		!isOpaqueStableIdentifier(recipient) ||
-		!isOpaqueStableIdentifier(profileMember) ||
+		!isOpaqueIdentifier(recipient) ||
+		!isOpaqueIdentifier(profileMember) ||
 		profileMember !== recipient ||
 		recipientPillCount !== 1
 	)
