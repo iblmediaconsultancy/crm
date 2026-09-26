@@ -119,4 +119,35 @@ describe("local LinkedIn persistent worker", () => {
 		expect(runs).toBe(1);
 		expect(result.status).toBe("STOPPED");
 	});
+
+	it("continues unrelated work after a deterministic review result", async () => {
+		let runs = 0;
+		let stopChecks = 0;
+		const worker = new LocalLinkedInWorker(
+			{
+				runOnce: async () => {
+					runs += 1;
+					if (runs === 1)
+						return {
+							status: "NEEDS_IHSAN",
+							jobId: "review-job",
+							action: "MESSAGE",
+							reason: "WRONG_CONVERSATION",
+						} as const;
+					return { status: "IDLE" } as const;
+				},
+			},
+			async () => ready,
+			"worker-review",
+			1,
+			() => undefined,
+			() => {
+				stopChecks += 1;
+				return stopChecks > 2;
+			},
+		);
+		const result = await worker.run();
+		expect(runs).toBe(2);
+		expect(result.status).toBe("STOPPED");
+	});
 });
