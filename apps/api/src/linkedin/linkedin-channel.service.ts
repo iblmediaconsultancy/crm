@@ -1898,6 +1898,7 @@ export class LinkedInChannelService {
 	async recoverUnsentMessage(
 		jobId: string,
 		errorCode = "MESSAGE_EDITOR_UNAVAILABLE",
+		options: { restoreRoutineState?: boolean } = {},
 	) {
 		return withPrincipal(
 			this.db,
@@ -1941,6 +1942,7 @@ export class LinkedInChannelService {
 						})
 					: null;
 				if (
+					!options.restoreRoutineState &&
 					job.status === "FAILED" &&
 					job.retryAt === null &&
 					claim?.status !== "CLAIMED"
@@ -1965,6 +1967,59 @@ export class LinkedInChannelService {
 						retryAt: null,
 					},
 				);
+				if (options.restoreRoutineState) {
+					if (errorCode !== "WRONG_CONVERSATION")
+						throw new ConflictException(
+							"Routine-state restoration requires a confirmed technical conversation resolver failure.",
+						);
+					const conversation = await tx.linkedInConversation.findUnique({
+						where: { id: job.conversationId },
+						select: { status: true, classification: true },
+					});
+					const channelState = await tx.channelEngagementState.findUnique({
+						where: {
+							contactId_channel: {
+								contactId: job.conversation.contactId,
+								channel: LINKEDIN_CHANNEL,
+							},
+						},
+						select: { status: true, reason: true },
+					});
+					if (
+						conversation?.status !== "NEEDS_IHSAN" ||
+						conversation.classification !== "AMBIGUOUS_OR_NEEDS_IHSAN" ||
+						channelState?.status !== "NEEDS_IHSAN" ||
+						channelState.reason !== errorCode
+					)
+						throw new ConflictException(
+							"Routine-state restoration requires an unchanged technical review state.",
+						);
+					await tx.linkedInConversation.update({
+						where: { id: job.conversationId },
+						data: {
+							status: "ACTIVE",
+							classification: "ACTION_REQUIRED",
+							version: { increment: 1 },
+						},
+					});
+					await tx.channelEngagementState.update({
+						where: {
+							contactId_channel: {
+								contactId: job.conversation.contactId,
+								channel: LINKEDIN_CHANNEL,
+							},
+						},
+						data: {
+							status: "ACTIVE_HUMAN_CONVERSATION",
+							reason: `TECHNICAL_REVIEW_CLEARED:${errorCode}`,
+							version: { increment: 1 },
+						},
+					});
+					return {
+						status: "RECOVERED" as const,
+						routineState: "RESTORED" as const,
+					};
+				}
 				return { status: "RECOVERED" as const };
 			},
 		);
