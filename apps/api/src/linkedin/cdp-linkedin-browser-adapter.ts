@@ -5,6 +5,7 @@ import {
 	type LinkedInBrowserOutcome,
 	type LinkedInRelationshipState,
 	linkedInConversationIdentityMatches,
+	resolveLinkedInComposeConversationEvidence,
 	verifyLinkedInActionState,
 } from "@crm/db/linkedin-browser-adapter";
 import {
@@ -135,6 +136,19 @@ function collectLinkedInRelationshipControls(includeElements = false) {
 	const elements = profileSection
 		? Array.from(profileSection.querySelectorAll("button, a[role=button], a"))
 		: [];
+	const isVisible = (element: PageElement): boolean => {
+		const rect = element.getBoundingClientRect();
+		const style = getComputedStyle(element);
+		return Boolean(
+			element.isConnected &&
+				rect.width > 0 &&
+				rect.height > 0 &&
+				style.display !== "none" &&
+				style.visibility !== "hidden" &&
+				style.opacity !== "0" &&
+				element.getAttribute("aria-hidden") !== "true",
+		);
+	};
 	const controls = elements.map((element, elementIndex) => {
 		const rect = element.getBoundingClientRect();
 		const style = getComputedStyle(element);
@@ -157,7 +171,7 @@ function collectLinkedInRelationshipControls(includeElements = false) {
 			connected: element.isConnected,
 		};
 	});
-	const conversationParticipantIdentifiers = Array.from(
+	const profileConversationParticipantIdentifiers = Array.from(
 		new Set(
 			elements
 				.map((element) => element.getAttribute("href"))
@@ -177,6 +191,38 @@ function collectLinkedInRelationshipControls(includeElements = false) {
 				.filter((value): value is string => Boolean(value)),
 		),
 	);
+	const composeSurfaces = Array.from(
+		document.querySelectorAll(".msg-compose-container"),
+	).filter(isVisible);
+	const composeSurface =
+		/^https?:\/\/[^/]+\/messaging\/compose\//i.test(href) &&
+		composeSurfaces.length === 1
+			? composeSurfaces[0]
+			: null;
+	const composeEvidence = resolveLinkedInComposeConversationEvidence(
+		href,
+		composeSurface
+			? Array.from(composeSurface.querySelectorAll("[data-event-urn]"))
+					.map((element) => element.getAttribute("data-event-urn"))
+					.filter((value): value is string => Boolean(value))
+			: [],
+		composeSurface
+			? Array.from(
+					composeSurface.querySelectorAll(
+						".msg-connections-typeahead__added-recipients .artdeco-pill__text",
+					),
+				).filter(isVisible).length
+			: 0,
+	);
+	const conversationParticipantIdentifiers =
+		composeEvidence.status === "AMBIGUOUS"
+			? []
+			: [
+					...profileConversationParticipantIdentifiers,
+					...(composeEvidence.status === "RESOLVED"
+						? [composeEvidence.participantIdentifier]
+						: []),
+				].filter((value, index, values) => values.indexOf(value) === index);
 	const challenge =
 		/captcha|security check|verify your identity|identity verification|unusual activity|unusual login|security checkpoint|suspicious activity|account restricted|rate limit|temporarily unavailable/.exec(
 			`${body.toLowerCase()} ${title.toLowerCase()}`,
@@ -200,7 +246,11 @@ function collectLinkedInRelationshipControls(includeElements = false) {
 			: null,
 		profileIdentifier: profileMatch?.[1] || null,
 		displayName,
-		externalConversationKey: conversationMatch?.[1] || null,
+		externalConversationKey:
+			conversationMatch?.[1] ||
+			(composeEvidence.status === "RESOLVED"
+				? composeEvidence.externalConversationKey
+				: null),
 		conversationParticipantIdentifier:
 			conversationParticipantIdentifiers.length === 1
 				? conversationParticipantIdentifiers[0]
@@ -423,8 +473,10 @@ class CdpPage {
 
 	async observe(): Promise<PageObservation> {
 		const collect = collectLinkedInRelationshipControls.toString();
+		const resolveCompose =
+			resolveLinkedInComposeConversationEvidence.toString();
 		const observation = await this.evaluate<PageObservation>(
-			`(() => { const collectControls = ${collect}; return collectControls(); })()`,
+			`(() => { const resolveLinkedInComposeConversationEvidence = ${resolveCompose}; const collectControls = ${collect}; return collectControls(); })()`,
 		);
 		return {
 			...observation,
@@ -441,8 +493,11 @@ class CdpPage {
 		observation: PageObservation,
 	): Promise<boolean> {
 		const collect = collectLinkedInRelationshipControls.toString();
+		const resolveCompose =
+			resolveLinkedInComposeConversationEvidence.toString();
 		const resolve = resolveLinkedInRelationshipControl.toString();
 		return this.evaluate<boolean>(`(() => {
+			const resolveLinkedInComposeConversationEvidence = ${resolveCompose};
 			const collectControls = ${collect};
 			const resolveControl = ${resolve};
 			const snapshot = collectControls(true);
@@ -466,11 +521,14 @@ class CdpPage {
 		observation: PageObservation,
 	): Promise<{ clicked: boolean; inviteHref: string | null }> {
 		const collect = collectLinkedInRelationshipControls.toString();
+		const resolveCompose =
+			resolveLinkedInComposeConversationEvidence.toString();
 		const resolve = resolveLinkedInRelationshipControl.toString();
 		return this.evaluate<{
 			clicked: boolean;
 			inviteHref: string | null;
 		}>(`(() => {
+			const resolveLinkedInComposeConversationEvidence = ${resolveCompose};
 			const collectControls = ${collect};
 			const resolveControl = ${resolve};
 			const snapshot = collectControls(true);

@@ -4,6 +4,7 @@ import {
 	canonicalLinkedInProfileUrl,
 	linkedInConversationIdentityMatches,
 	linkedInDisplayNamesMatch,
+	resolveLinkedInComposeConversationEvidence,
 	verifyFreshLinkedInIdentity,
 } from "../src/linkedin-browser-adapter";
 
@@ -171,6 +172,76 @@ describe("LinkedIn browser identity canonicalization", () => {
 				externalConversationKey: null,
 				conversationParticipantIdentifier: null,
 			}),
+		).toBe(false);
+	});
+
+	it("resolves an exact compose overlay recipient and embedded conversation key", () => {
+		const evidence = resolveLinkedInComposeConversationEvidence(
+			"https://www.linkedin.com/messaging/compose/?profileUrn=urn%3Ali%3Afsd_profile%3AACoAADRv2f4Bp6D9mSlzqWWbwuemI9ftAWJkSDk&recipient=ACoAADRv2f4Bp6D9mSlzqWWbwuemI9ftAWJkSDk&interop=msgOverlay",
+			[
+				"urn:li:msg_message:(urn:li:fsd_profile:ACoAAGzrC2MBqydOpj5W5VAtOi9Dtxk8FVwfmLU,2-MTc4OTcyMDY1NzAzN2I1MTUzMy0xMDAmMWE0YzMzYTgtZjNhNC00MmUwLWI0MDUtZWU1ZWRiYjIxOGRlXzEwMA==)",
+			],
+			1,
+		);
+		expect(evidence).toEqual({
+			status: "RESOLVED",
+			participantIdentifier: "ACoAADRv2f4Bp6D9mSlzqWWbwuemI9ftAWJkSDk",
+			externalConversationKey:
+				"2-MWE0YzMzYTgtZjNhNC00MmUwLWI0MDUtZWU1ZWRiYjIxOGRlXzEwMA==",
+		});
+	});
+
+	it("resolves a compose overlay with exact member proof when no thread key is exposed", () => {
+		expect(
+			resolveLinkedInComposeConversationEvidence(
+				"https://www.linkedin.com/messaging/compose/?profileUrn=urn%3Ali%3Afsd_profile%3AACoAADRv2f4Bp6D9mSlzqWWbwuemI9ftAWJkSDk&recipient=ACoAADRv2f4Bp6D9mSlzqWWbwuemI9ftAWJkSDk",
+				[],
+				1,
+			),
+		).toEqual({
+			status: "RESOLVED",
+			participantIdentifier: "ACoAADRv2f4Bp6D9mSlzqWWbwuemI9ftAWJkSDk",
+			externalConversationKey: null,
+		});
+	});
+
+	it("fails closed for wrong, missing, or conflicting compose identity evidence", () => {
+		const url =
+			"https://www.linkedin.com/messaging/compose/?profileUrn=urn%3Ali%3Afsd_profile%3AACoAADRv2f4Bp6D9mSlzqWWbwuemI9ftAWJkSDk&recipient=ACoAADRv2f4Bp6D9mSlzqWWbwuemI9ftAWJkSDk";
+		const event =
+			"urn:li:msg_message:(urn:li:fsd_profile:sender,2-MTIzLTEmdGhyZWFkLWtleQ==)";
+		expect(resolveLinkedInComposeConversationEvidence(url, [], 0).status).toBe(
+			"AMBIGUOUS",
+		);
+		expect(
+			resolveLinkedInComposeConversationEvidence(
+				url.replace(/recipient=[^&]+/, "recipient=ACoDifferentMember"),
+				[],
+				1,
+			).status,
+		).toBe("AMBIGUOUS");
+		expect(
+			resolveLinkedInComposeConversationEvidence(
+				url,
+				[event, event.replace("dGhyZWFkLWtleQ", "b3RoZXItdGhyZWFk")],
+				1,
+			).status,
+		).toBe("AMBIGUOUS");
+	});
+
+	it("rejects a mismatched observed thread even when the member matches", () => {
+		expect(
+			linkedInConversationIdentityMatches(
+				{
+					profileUrl: "https://www.linkedin.com/in/ACoMember",
+					externalConversationKey:
+						"https://www.linkedin.com/messaging/thread/2-stored-thread/",
+				},
+				{
+					externalConversationKey: "2-other-thread",
+					conversationParticipantIdentifier: "ACoMember",
+				},
+			),
 		).toBe(false);
 	});
 
