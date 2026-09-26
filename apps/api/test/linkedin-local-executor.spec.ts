@@ -376,7 +376,7 @@ describe("local LinkedIn executor", () => {
 			reason: "EXTERNAL_CONVERSATION_MISMATCH",
 		});
 		expect(state.records[0]).toMatchObject({
-			status: "AMBIGUOUS",
+			status: "FAILED",
 			errorCode: "EXTERNAL_CONVERSATION_MISMATCH",
 		});
 	});
@@ -385,7 +385,6 @@ describe("local LinkedIn executor", () => {
 		for (const errorCode of [
 			"BROWSER_UNAVAILABLE",
 			"LINKEDIN_UNAUTHENTICATED",
-			"MESSAGE_EDITOR_UNAVAILABLE",
 		]) {
 			const state = fakeCore({ message: messagePrepared() });
 			const browser = fakeBrowser({
@@ -401,6 +400,22 @@ describe("local LinkedIn executor", () => {
 			expect(result).toMatchObject({ status: "FAILED", reason: errorCode });
 			expect(state.records[0]?.status).toBe("FAILED");
 		}
+		const deterministic = fakeCore({ message: messagePrepared() });
+		const deterministicBrowser = fakeBrowser({
+			status: "FAILED",
+			errorCode: "MESSAGE_EDITOR_UNAVAILABLE",
+			observedAt: new Date(),
+		});
+		const deterministicResult = await new LocalLinkedInExecutor(
+			deterministic.core,
+			deterministicBrowser.browser,
+			"worker-1",
+		).runOnce();
+		expect(deterministicResult).toMatchObject({
+			status: "NEEDS_IHSAN",
+			reason: "MESSAGE_EDITOR_UNAVAILABLE",
+		});
+		expect(deterministic.records[0]?.status).toBe("FAILED");
 	});
 
 	it("stops on CAPTCHA, security challenges, and ambiguous post-click results", async () => {

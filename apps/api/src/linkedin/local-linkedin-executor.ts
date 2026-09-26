@@ -96,6 +96,8 @@ function isDeterministicReviewError(errorCode: string): boolean {
 		"CONVERSATION_ID_MISMATCH",
 		"EXTERNAL_CONVERSATION_MISMATCH",
 		"WRONG_CONVERSATION",
+		"MESSAGE_EDITOR_UNAVAILABLE",
+		"MESSAGE_BUTTON_UNAVAILABLE",
 	]).has(errorCode);
 }
 
@@ -375,7 +377,7 @@ export class LocalLinkedInExecutor {
 				jobId: action.jobId,
 				workerId: this.workerId,
 				attemptNumber: attempt.attemptNumber,
-				status: "AMBIGUOUS",
+				status: "FAILED",
 				errorCode: outcome.errorCode,
 			});
 			return {

@@ -4,7 +4,6 @@ import {
 	type LinkedInBrowserIdentityEvidence,
 	type LinkedInBrowserOutcome,
 	type LinkedInRelationshipState,
-	linkedInConversationIdentityMatches,
 	resolveLinkedInComposeConversationEvidence,
 	verifyLinkedInActionState,
 } from "@crm/db/linkedin-browser-adapter";
@@ -13,6 +12,12 @@ import {
 	type LinkedInConnectionRequestModalAction,
 	resolveLinkedInConnectionRequestModalControl,
 } from "./connection-request-modal-resolver";
+import {
+	type LinkedInMessageComposerResolution,
+	type LinkedInMessageComposerSnapshot,
+	type LinkedInMessageComposerSurface,
+	resolveLinkedInMessageComposer,
+} from "./message-composer-resolver";
 import {
 	type LinkedInRelationshipControl,
 	resolveLinkedInRelationshipControl,
@@ -69,6 +74,140 @@ type PageObservation = LinkedInBrowserIdentityEvidence & {
 	externalMessageKey: string | null;
 	controls: LinkedInRelationshipControl[];
 };
+
+type MessageComposerInspection = LinkedInMessageComposerResolution;
+
+function collectLinkedInMessageComposerSnapshot(): LinkedInMessageComposerSnapshot {
+	const isVisible = (element: PageElement): boolean => {
+		const rect = element.getBoundingClientRect();
+		const style = getComputedStyle(element);
+		return Boolean(
+			element.isConnected &&
+				rect.width > 0 &&
+				rect.height > 0 &&
+				style.display !== "none" &&
+				style.visibility !== "hidden" &&
+				style.opacity !== "0" &&
+				element.getAttribute("aria-hidden") !== "true",
+		);
+	};
+	const normalize = (value: string | null): string =>
+		(value || "").trim().replace(/\s+/g, " ");
+	const currentUrl = location.href;
+	const url = new URL(currentUrl);
+	const composeRecipient = (() => {
+		if (!/^\/messaging\/compose\/?$/i.test(url.pathname)) return null;
+		const recipient = url.searchParams.get("recipient")?.trim() ?? "";
+		const profileUrn = url.searchParams.get("profileUrn")?.trim() ?? "";
+		const profileMember = profileUrn.split(":").at(-1)?.trim() ?? "";
+		return /^ACo[A-Za-z0-9_-]+$/.test(recipient) && profileMember === recipient
+			? recipient
+			: null;
+	})();
+	const threadMatch = url.pathname.match(/^\/messaging\/thread\/([^/?#]+)/i);
+	const threadKey = threadMatch?.[1] ?? null;
+	const surfaceElements = Array.from(
+		document.querySelectorAll(
+			".msg-compose-container, .msg-thread, [role=dialog], .msg-overlay-conversation-bubble, .msg-s-message-list-container",
+		),
+	).filter((element) => {
+		if (!isVisible(element)) return false;
+		const classes = element.getAttribute("class") || "";
+		if (classes.includes("msg-compose-container")) return true;
+		return !element.closest(".msg-compose-container");
+	});
+	const surfaces = surfaceElements.map((surface, index) => {
+		const classes = surface.getAttribute("class") || "";
+		const kind: LinkedInMessageComposerSurface["kind"] = classes.includes(
+			"msg-compose-container",
+		)
+			? /^\/in\//i.test(url.pathname)
+				? "PROFILE_COMPOSE"
+				: "COMPOSE_OVERLAY"
+			: classes.includes("msg-thread") ||
+					classes.includes("msg-s-message-list-container")
+				? "THREAD"
+				: "DIALOG";
+		const attributes = Array.from(
+			surface.querySelectorAll(
+				"[data-member-urn], [data-profile-urn], [data-recipient], [data-urn]",
+			),
+		)
+			.map((element) =>
+				["data-member-urn", "data-profile-urn", "data-recipient", "data-urn"]
+					.map((name) => element.getAttribute(name))
+					.find((value): value is string => Boolean(value)),
+			)
+			.filter((value): value is string => Boolean(value));
+		const participantIdentifier =
+			composeRecipient ||
+			attributes.find((value) => /^ACo[A-Za-z0-9_-]+$/.test(value)) ||
+			null;
+		const recipientCount =
+			kind === "THREAD"
+				? 1
+				: composeRecipient
+					? 1
+					: Array.from(
+							surface.querySelectorAll(
+								".msg-connections-typeahead__added-recipients .artdeco-pill__text",
+							),
+						).filter(isVisible).length;
+		const editors = Array.from(
+			surface.querySelectorAll(
+				"textarea, [contenteditable=true], [role=textbox]",
+			),
+		).map((element, elementIndex) => ({
+			index: elementIndex,
+			tagName: element.tagName,
+			role: element.getAttribute("role"),
+			ariaLabel: element.getAttribute("aria-label"),
+			name: element.getAttribute("name"),
+			placeholder: element.getAttribute("placeholder"),
+			text: normalize(element.textContent),
+			contentEditable: element.getAttribute("contenteditable") === "true",
+			visible: isVisible(element),
+			connected: element.isConnected,
+			disabled:
+				element.getAttribute("disabled") !== null ||
+				element.getAttribute("aria-disabled") === "true",
+		}));
+		const sendControls = Array.from(
+			surface.querySelectorAll("button, [role=button]"),
+		).map((element, elementIndex) => ({
+			index: elementIndex,
+			tagName: element.tagName,
+			role: element.getAttribute("role"),
+			ariaLabel: element.getAttribute("aria-label"),
+			name: element.getAttribute("name"),
+			placeholder: element.getAttribute("placeholder"),
+			text: normalize(element.textContent),
+			contentEditable: false,
+			visible: isVisible(element),
+			connected: element.isConnected,
+			disabled:
+				element.getAttribute("disabled") !== null ||
+				element.getAttribute("aria-disabled") === "true",
+		}));
+		const sendControlsOnly = sendControls.filter((control) => {
+			const label = normalize(control.ariaLabel).toLocaleLowerCase();
+			const text = control.text.toLocaleLowerCase();
+			return (text === "send" || label === "send") && !label.includes("option");
+		});
+		return {
+			index,
+			kind,
+			recipientIdentifier: participantIdentifier,
+			externalConversationKey: threadKey,
+			recipientCount,
+			visible: isVisible(surface),
+			connected: surface.isConnected,
+			editors,
+			sendControls: sendControlsOnly,
+		};
+	});
+	return { url: currentUrl, surfaces };
+}
 
 export type LinkedInRelationshipDetection = {
 	relationshipState: LinkedInRelationshipState;
@@ -491,15 +630,41 @@ class CdpPage {
 	async clickRelationshipControl(
 		action: "CONNECT" | "MESSAGE",
 		observation: PageObservation,
-	): Promise<boolean> {
+	): Promise<{
+		clicked: boolean;
+		recipientIdentifier: string | null;
+		externalConversationKey: string | null;
+	}> {
 		const collect = collectLinkedInRelationshipControls.toString();
 		const resolveCompose =
 			resolveLinkedInComposeConversationEvidence.toString();
 		const resolve = resolveLinkedInRelationshipControl.toString();
-		return this.evaluate<boolean>(`(() => {
+		return this.evaluate<{
+			clicked: boolean;
+			recipientIdentifier: string | null;
+			externalConversationKey: string | null;
+		}>(`(() => {
 			const resolveLinkedInComposeConversationEvidence = ${resolveCompose};
 			const collectControls = ${collect};
 			const resolveControl = ${resolve};
+			const recipientFromHref = (href) => {
+				if (!href) return null;
+				try {
+					const url = new URL(href, "https://www.linkedin.com");
+					if (!/^\\/messaging\\/compose\\/?$/i.test(url.pathname)) return null;
+					const recipient = url.searchParams.get("recipient")?.trim() || "";
+					const profileUrn = url.searchParams.get("profileUrn")?.trim() || "";
+					const profileMember = profileUrn.split(":").at(-1)?.trim() || "";
+					return /^ACo[A-Za-z0-9_-]+$/.test(recipient) && profileMember === recipient ? recipient : null;
+				} catch { return null; }
+			};
+			const conversationFromHref = (href) => {
+				if (!href) return null;
+				try {
+					const url = new URL(href, "https://www.linkedin.com");
+					return url.pathname.match(/^\\/messaging\\/thread\\/([^/?#]+)\\/?$/i)?.[1] || null;
+				} catch { return null; }
+			};
 			const snapshot = collectControls(true);
 			const resolution = resolveControl({
 				action: ${JSON.stringify(action)},
@@ -507,13 +672,15 @@ class CdpPage {
 				displayName: ${JSON.stringify(observation.displayName)},
 				controls: snapshot.controls,
 			});
-			if (resolution.status !== "FOUND") return false;
+			if (resolution.status !== "FOUND") return { clicked: false, recipientIdentifier: null, externalConversationKey: null };
 			const index = resolution.control.elementIndex;
 			const element = snapshot.elements?.[index];
 			const control = snapshot.controls[index];
-			if (!element || !control || !element.isConnected || !control.connected || !control.visible) return false;
+			if (!element || !control || !element.isConnected || !control.connected || !control.visible) return { clicked: false, recipientIdentifier: null, externalConversationKey: null };
+			const recipientIdentifier = recipientFromHref(control.href);
+			const externalConversationKey = conversationFromHref(control.href);
 			element.click();
-			return true;
+			return { clicked: true, recipientIdentifier, externalConversationKey };
 		})()`);
 	}
 
@@ -617,7 +784,85 @@ class CdpPage {
 		);
 	}
 
-	async fillAndSend(body: string): Promise<boolean> {
+	async inspectMessageComposer(
+		expectedRecipientIdentifier: string | null,
+		expectedExternalConversationKey: string | null,
+	): Promise<MessageComposerInspection> {
+		const collect = collectLinkedInMessageComposerSnapshot.toString();
+		const resolve = resolveLinkedInMessageComposer.toString();
+		return this.evaluate<MessageComposerInspection>(`(() => {
+			const collectSnapshot = ${collect};
+			const resolveComposer = ${resolve};
+			return resolveComposer(collectSnapshot(), {
+				expectedRecipientIdentifier: ${JSON.stringify(expectedRecipientIdentifier)},
+				expectedExternalConversationKey: ${JSON.stringify(expectedExternalConversationKey)},
+			});
+		})()`);
+	}
+
+	async fillAndSend(
+		body: string,
+		expectedRecipientIdentifier: string | null = null,
+		expectedExternalConversationKey: string | null = null,
+	): Promise<boolean | "AMBIGUOUS"> {
+		if (expectedRecipientIdentifier || expectedExternalConversationKey) {
+			const collect = collectLinkedInMessageComposerSnapshot.toString();
+			const resolve = resolveLinkedInMessageComposer.toString();
+			return this.evaluate<boolean | "AMBIGUOUS">(`(() => {
+				const value = ${JSON.stringify(body)};
+				const collectSnapshot = ${collect};
+				const resolveComposer = ${resolve};
+				const isVisible = (element) => {
+					const rect = element.getBoundingClientRect();
+					const style = getComputedStyle(element);
+					return Boolean(element.isConnected && rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0" && element.getAttribute("aria-hidden") !== "true");
+				};
+				const surfaceElements = Array.from(document.querySelectorAll(".msg-compose-container, .msg-thread, [role=dialog], .msg-overlay-conversation-bubble, .msg-s-message-list-container")).filter((element) => {
+					if (!isVisible(element)) return false;
+					const classes = element.getAttribute("class") || "";
+					if (classes.includes("msg-compose-container")) return true;
+					return !element.closest(".msg-compose-container");
+				});
+				const resolveSnapshot = () => resolveComposer(collectSnapshot(), {
+					expectedRecipientIdentifier: ${JSON.stringify(expectedRecipientIdentifier)},
+					expectedExternalConversationKey: ${JSON.stringify(expectedExternalConversationKey)},
+				});
+				const initial = resolveSnapshot();
+				if (initial.status === "AMBIGUOUS") return "AMBIGUOUS";
+				if (initial.status !== "FOUND") return false;
+				const surface = surfaceElements[initial.surfaceIndex];
+				const editorElements = surface ? Array.from(surface.querySelectorAll("textarea, [contenteditable=true], [role=textbox]")) : [];
+				const sendElements = surface ? Array.from(surface.querySelectorAll("button, [role=button]")) : [];
+				const editor = editorElements[initial.editorIndex];
+				const send = sendElements[initial.sendControlIndex];
+				const normalized = (element) => (element.textContent || "").trim().replace(/\\s+/g, " ");
+				const sendLabel = (element) => normalized(element).toLocaleLowerCase() === "send" || (element.getAttribute("aria-label") || "").trim().toLocaleLowerCase() === "send";
+				if (!surface || !editor || !send || !editor.isConnected || !send.isConnected || !isVisible(editor) || !isVisible(send) || !sendLabel(send)) return false;
+				editor.focus();
+				if (editor instanceof HTMLTextAreaElement) {
+					const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+					setter?.call(editor, value);
+				} else {
+					editor.textContent = value;
+				}
+				editor.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: value }));
+				const editorText = editor instanceof HTMLTextAreaElement ? editor.value : editor.textContent || "";
+				if (editorText !== value) return false;
+				const fresh = resolveSnapshot();
+				if (fresh.status === "AMBIGUOUS") return "AMBIGUOUS";
+				if (fresh.status !== "FOUND" || fresh.surfaceIndex !== initial.surfaceIndex || fresh.editorIndex !== initial.editorIndex || fresh.sendControlIndex !== initial.sendControlIndex) return false;
+				const freshSurface = surfaceElements[fresh.surfaceIndex];
+				const freshEditors = freshSurface ? Array.from(freshSurface.querySelectorAll("textarea, [contenteditable=true], [role=textbox]")) : [];
+				const freshSends = freshSurface ? Array.from(freshSurface.querySelectorAll("button, [role=button]")) : [];
+				const freshEditor = freshEditors[fresh.editorIndex];
+				const freshSend = freshSends[fresh.sendControlIndex];
+				if (!freshEditor || !freshSend || !freshEditor.isConnected || !freshSend.isConnected || !isVisible(freshEditor) || !isVisible(freshSend) || !sendLabel(freshSend)) return false;
+				const freshText = freshEditor instanceof HTMLTextAreaElement ? freshEditor.value : freshEditor.textContent || "";
+				if (freshText !== value) return false;
+				freshSend.click();
+				return true;
+			})()`);
+		}
 		return this.evaluate<boolean>(`(() => {
 			const value = ${JSON.stringify(body)};
 			const editor = document.querySelector("textarea, [contenteditable=true]");
@@ -670,6 +915,23 @@ async function waitForConnectionRequestModal(
 		await new Promise((resolve) => setTimeout(resolve, 150));
 	}
 	return { status: "NONE", challenge: null };
+}
+
+async function waitForMessageComposer(
+	page: CdpPage,
+	expectedRecipientIdentifier: string | null,
+	expectedExternalConversationKey: string | null,
+): Promise<MessageComposerInspection> {
+	let last: MessageComposerInspection = { status: "NONE" };
+	for (let attempt = 0; attempt < 20; attempt += 1) {
+		last = await page.inspectMessageComposer(
+			expectedRecipientIdentifier,
+			expectedExternalConversationKey,
+		);
+		if (last.status !== "NONE") return last;
+		await new Promise((resolve) => setTimeout(resolve, 150));
+	}
+	return last;
 }
 
 function proofFor(
@@ -873,22 +1135,52 @@ export class CdpLinkedInBrowserAdapter implements LinkedInBrowserAdapter {
 					observedAt: new Date(),
 				};
 			}
-			if (!(await page.clickRelationshipControl("MESSAGE", before)))
+			const messageControl = await page.clickRelationshipControl(
+				"MESSAGE",
+				before,
+			);
+			if (!messageControl.clicked)
 				return {
 					status: "FAILED",
 					errorCode: "MESSAGE_BUTTON_UNAVAILABLE",
 					observedAt: new Date(),
 				};
-			await new Promise((resolve) => setTimeout(resolve, 500));
-			const thread = await page.observe();
-			if (!linkedInConversationIdentityMatches(action.target, thread))
+			const composer = await waitForMessageComposer(
+				page,
+				messageControl.recipientIdentifier,
+				messageControl.externalConversationKey ??
+					action.target.externalConversationKey ??
+					null,
+			);
+			if (composer.status === "AMBIGUOUS")
 				return {
 					status: "AMBIGUOUS",
 					errorCode: "WRONG_CONVERSATION",
 					observedAt: new Date(),
 				};
+			if (composer.status !== "FOUND")
+				return {
+					status: "FAILED",
+					errorCode: "MESSAGE_EDITOR_UNAVAILABLE",
+					observedAt: new Date(),
+				};
 			writeStarted = true;
-			if (!action.body || !(await page.fillAndSend(action.body)))
+			const filled = action.body
+				? await page.fillAndSend(
+						action.body,
+						composer.recipientIdentifier,
+						composer.externalConversationKey ??
+							action.target.externalConversationKey ??
+							null,
+					)
+				: false;
+			if (filled === "AMBIGUOUS")
+				return {
+					status: "AMBIGUOUS",
+					errorCode: "WRONG_CONVERSATION",
+					observedAt: new Date(),
+				};
+			if (!filled)
 				return {
 					status: "FAILED",
 					errorCode: "MESSAGE_EDITOR_UNAVAILABLE",
@@ -902,7 +1194,7 @@ export class CdpLinkedInBrowserAdapter implements LinkedInBrowserAdapter {
 					errorCode: "LINKEDIN_WARNING",
 					observedAt: new Date(),
 				};
-			if (!(await page.messageAppeared(action.body)))
+			if (!(await page.messageAppeared(action.body ?? "")))
 				return {
 					status: "AMBIGUOUS",
 					errorCode: "SEND_STATE_UNCLEAR",
@@ -911,10 +1203,16 @@ export class CdpLinkedInBrowserAdapter implements LinkedInBrowserAdapter {
 			const observedIdentity = {
 				...before,
 				...after,
-				profileUrl: after.profileUrl ?? before.profileUrl,
-				profileIdentifier: after.profileIdentifier ?? before.profileIdentifier,
-				displayName: after.displayName ?? before.displayName,
+				resolution: "RESOLVED" as const,
+				profileUrl: before.profileUrl,
+				profileIdentifier: before.profileIdentifier,
+				displayName: before.displayName,
 				relationshipState: "CONNECTED" as const,
+				externalConversationKey:
+					after.externalConversationKey ?? composer.externalConversationKey,
+				conversationParticipantIdentifier:
+					after.conversationParticipantIdentifier ??
+					composer.recipientIdentifier,
 			};
 			return {
 				status: "CONFIRMED",
@@ -922,8 +1220,8 @@ export class CdpLinkedInBrowserAdapter implements LinkedInBrowserAdapter {
 				externalConversationKey:
 					action.target.externalConversationKey ??
 					after.externalConversationKey ??
-					thread.externalConversationKey,
-				browserProof: proofFor(action, after),
+					composer.externalConversationKey,
+				browserProof: proofFor(action, observedIdentity),
 				observedIdentity,
 				observedAt: new Date(),
 			};
