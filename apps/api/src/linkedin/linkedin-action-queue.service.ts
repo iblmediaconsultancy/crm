@@ -16,6 +16,7 @@ import {
 	type LinkedInRoutineActionType,
 } from "./linkedin-action-policy";
 import { LinkedInChannelService } from "./linkedin-channel.service";
+import { canReuseConsumedLinkedInConnectionClaim } from "./linkedin-first-touch";
 
 const LINKEDIN_CHANNEL = "LINKEDIN" as const;
 
@@ -187,6 +188,7 @@ export class LinkedInActionQueueService {
 						body: input.body,
 						approvedAt,
 						coldOutreach,
+						firstMessage: input.action === "FIRST_MESSAGE_TO_CONNECTED_PERSON",
 						accountKey: input.accountKey,
 						connectionLimit: input.connectionLimit,
 					});
@@ -431,6 +433,16 @@ export class LinkedInActionQueueService {
 					consent: true,
 					status: true,
 					classification: true,
+					messages: {
+						where: {
+							direction: "OUTBOUND",
+							status: {
+								in: ["HISTORICAL", "QUEUED", "SENDING", "SENT", "AMBIGUOUS"],
+							},
+						},
+						select: { status: true },
+						take: 1,
+					},
 				},
 			}),
 			tx.organizationProtection.findFirst({
@@ -477,7 +489,7 @@ export class LinkedInActionQueueService {
 			}),
 			tx.relationshipColdTouchClaim.findUnique({
 				where: { contactId: input.contactId },
-				select: { status: true },
+				select: { channel: true, status: true, idempotencyKey: true },
 			}),
 			tx.lead.findFirst({
 				where: {
@@ -488,6 +500,25 @@ export class LinkedInActionQueueService {
 				orderBy: { updatedAt: "desc" },
 			}),
 		]);
+		const [connectionRequest, messageJob] =
+			claim?.status === "CONSUMED"
+				? await Promise.all([
+						tx.linkedInConnectionRequestJob.findUnique({
+							where: { idempotencyKey: claim.idempotencyKey },
+							select: { action: true, status: true, actionPayload: true },
+						}),
+						tx.linkedInSendJob.findUnique({
+							where: { idempotencyKey: claim.idempotencyKey },
+							select: { id: true },
+						}),
+					])
+				: [null, null];
+		const canReuseConnectionClaim = canReuseConsumedLinkedInConnectionClaim({
+			claimChannel: claim?.channel,
+			claimStatus: claim?.status,
+			connectionRequest,
+			messageJobExists: Boolean(messageJob),
+		});
 		if (conversation && conversation.contactId !== input.contactId)
 			return {
 				classification: "AMBIGUOUS_REVIEW_REQUIRED",
@@ -519,6 +550,16 @@ export class LinkedInActionQueueService {
 			};
 		if (suppressions.length > 0)
 			return { classification: "BLOCKED", reason: "LINKEDIN_SUPPRESSION" };
+		if (conversation?.messages[0]?.status === "AMBIGUOUS")
+			return {
+				classification: "AMBIGUOUS_REVIEW_REQUIRED",
+				reason: "LINKEDIN_FIRST_MESSAGE_HISTORY_AMBIGUOUS",
+			};
+		if (conversation?.messages[0])
+			return {
+				classification: "BLOCKED",
+				reason: "LINKEDIN_FIRST_MESSAGE_ALREADY_SENT",
+			};
 		if (conversation?.consent === "DO_NOT_CONTACT")
 			return {
 				classification: "BLOCKED",
@@ -565,7 +606,9 @@ export class LinkedInActionQueueService {
 			contactSuppressed: false,
 			organizationSuppressed: false,
 			organizationProtected: false,
-			firstTouchStatus: claim?.status ?? null,
+			firstTouchStatus: canReuseConnectionClaim
+				? null
+				: (claim?.status ?? null),
 			personProtected: false,
 		});
 		if (coldReason && coldReason !== "FIRST_TOUCH_CLAIMED")
