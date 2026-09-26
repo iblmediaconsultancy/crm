@@ -2,6 +2,7 @@ import {
 	coldOutreachBlockReason,
 	type Db,
 	isPersonProtected,
+	linkedInProfileIdentityMatches,
 	Prisma,
 } from "@crm/db";
 import { withPrincipal } from "@crm/db/security";
@@ -23,6 +24,11 @@ type MessageRoutineAction = Exclude<
 	"CONNECTION_REQUEST"
 >;
 
+type ExistingConversationMessageAction = Exclude<
+	MessageRoutineAction,
+	"FIRST_MESSAGE_TO_CONNECTED_PERSON"
+>;
+
 type CommonInput = {
 	action: LinkedInRoutineActionType;
 	idempotencyKey: string;
@@ -42,7 +48,15 @@ export type LinkedInRoutineActionInput =
 			profileIdentifier: string;
 	  })
 	| (CommonInput & {
-			action: MessageRoutineAction;
+			action: "FIRST_MESSAGE_TO_CONNECTED_PERSON";
+			contactId: string;
+			routeId: string;
+			profileUrl: string;
+			profileIdentifier: string;
+			body: string;
+	  })
+	| (CommonInput & {
+			action: ExistingConversationMessageAction;
 			conversationId: string;
 			body: string;
 	  });
@@ -58,6 +72,10 @@ export type LinkedInRoutineActionResult = {
 type PreflightResult = {
 	classification: LinkedInActionClassification;
 	reason: string | null;
+	conversationId?: string;
+	identityKey?: string;
+	profileUrl?: string;
+	normalizedProfileUrl?: string;
 };
 
 function routineColdOutreach(action: LinkedInRoutineActionType): boolean {
@@ -119,6 +137,28 @@ export class LinkedInActionQueueService {
 		if (preflight.classification !== "ROUTINE_AUTONOMOUS")
 			return result(input, preflight.classification, preflight.reason);
 
+		let conversationId =
+			"conversationId" in input ? input.conversationId : null;
+		if (input.action === "FIRST_MESSAGE_TO_CONNECTED_PERSON") {
+			if (
+				!preflight.identityKey ||
+				!preflight.profileUrl ||
+				!preflight.normalizedProfileUrl
+			)
+				return result(
+					input,
+					"AMBIGUOUS_REVIEW_REQUIRED",
+					"LINKEDIN_CONVERSATION_TARGET_UNRESOLVED",
+				);
+			const conversation = await this.channel.ensureConversation({
+				contactId: input.contactId,
+				identityKey: preflight.identityKey,
+				profileUrl: preflight.profileUrl,
+				normalizedProfileUrl: preflight.normalizedProfileUrl,
+				connectionState: "CONNECTED",
+			});
+			conversationId = conversation.id;
+		}
 		const approvedAt = new Date();
 		const coldOutreach =
 			input.coldOutreach ?? routineColdOutreach(input.action);
@@ -138,7 +178,7 @@ export class LinkedInActionQueueService {
 						connectionLimit: input.connectionLimit,
 					})
 				: await this.channel.queueAction({
-						conversationId: input.conversationId,
+						conversationId: conversationId as string,
 						action: "MESSAGE",
 						idempotencyKey: input.idempotencyKey,
 						actionPayload,
@@ -160,6 +200,8 @@ export class LinkedInActionQueueService {
 			async (tx) => {
 				if (input.action === "CONNECTION_REQUEST")
 					return this.preflightConnection(tx, input);
+				if (input.action === "FIRST_MESSAGE_TO_CONNECTED_PERSON")
+					return this.preflightFirstMessage(tx, input);
 				return this.preflightMessage(tx, input);
 			},
 		);
@@ -293,11 +335,254 @@ export class LinkedInActionQueueService {
 		return { classification: "ROUTINE_AUTONOMOUS", reason: null };
 	}
 
+	private async preflightFirstMessage(
+		tx: Prisma.TransactionClient,
+		input: Extract<
+			LinkedInRoutineActionInput,
+			{ action: "FIRST_MESSAGE_TO_CONNECTED_PERSON" }
+		>,
+	): Promise<PreflightResult> {
+		const [contact, route, personProtected] = await Promise.all([
+			tx.contact.findUnique({
+				where: { id: input.contactId },
+				select: {
+					companyId: true,
+					lifecycleState: true,
+					outreachState: true,
+				},
+			}),
+			tx.contactRoute.findFirst({
+				where: {
+					id: input.routeId,
+					contactId: input.contactId,
+					type: "LINKEDIN",
+					lifecycleState: "ACTIVE",
+				},
+				select: { value: true, normalizedValue: true },
+			}),
+			isPersonProtected(tx, input.contactId),
+		]);
+		if (!contact)
+			return { classification: "BLOCKED", reason: "CONTACT_NOT_FOUND" };
+		if (!route)
+			return {
+				classification: "AMBIGUOUS_REVIEW_REQUIRED",
+				reason: "LINKEDIN_ROUTE_NOT_ACTIVE",
+			};
+		if (
+			!linkedInProfileIdentityMatches(
+				{
+					profileUrl: route.value,
+					profileIdentifier: route.normalizedValue,
+				},
+				{
+					profileUrl: input.profileUrl,
+					profileIdentifier: input.profileIdentifier,
+				},
+			)
+		)
+			return {
+				classification: "AMBIGUOUS_REVIEW_REQUIRED",
+				reason: "LINKEDIN_ROUTE_IDENTITY_CHANGED",
+			};
+		if (personProtected)
+			return { classification: "BLOCKED", reason: "PERSON_OWNER_PROTECTED" };
+		if (input.context?.identityVerified !== true)
+			return {
+				classification: "AMBIGUOUS_REVIEW_REQUIRED",
+				reason: "IDENTITY_NOT_VERIFIED",
+			};
+		if (input.context?.relationshipVerified !== true)
+			return {
+				classification: "AMBIGUOUS_REVIEW_REQUIRED",
+				reason: "RELATIONSHIP_NOT_VERIFIED",
+			};
+		if (input.context?.relationshipState !== "CONNECTED")
+			return {
+				classification:
+					input.context.relationshipState === "UNKNOWN"
+						? "AMBIGUOUS_REVIEW_REQUIRED"
+						: "BLOCKED",
+				reason:
+					input.context.relationshipState === "UNKNOWN"
+						? "RELATIONSHIP_STATE_AMBIGUOUS"
+						: "LINKEDIN_CONNECTION_REQUIRED",
+			};
+
+		const [
+			conversation,
+			organizationProtection,
+			suppressions,
+			channelState,
+			otherState,
+			claim,
+			lead,
+		] = await Promise.all([
+			tx.linkedInConversation.findUnique({
+				where: { identityKey: route.normalizedValue },
+				select: {
+					id: true,
+					contactId: true,
+					profileUrl: true,
+					normalizedProfileUrl: true,
+					connectionState: true,
+					consent: true,
+					status: true,
+					classification: true,
+				},
+			}),
+			tx.organizationProtection.findFirst({
+				where: { companyId: contact.companyId ?? "", status: "ACTIVE" },
+				select: { id: true },
+			}),
+			tx.outreachSuppression.findMany({
+				where: {
+					OR: [
+						{ scope: "CONTACT", contactId: input.contactId },
+						{
+							scope: "ROUTE",
+							contactId: input.contactId,
+							channel: LINKEDIN_CHANNEL,
+						},
+						...(contact.companyId
+							? [
+									{
+										scope: "ORGANIZATION" as const,
+										companyId: contact.companyId,
+									},
+								]
+							: []),
+					],
+				},
+				select: { scope: true, channel: true },
+			}),
+			tx.channelEngagementState.findUnique({
+				where: {
+					contactId_channel: {
+						contactId: input.contactId,
+						channel: LINKEDIN_CHANNEL,
+					},
+				},
+				select: { status: true },
+			}),
+			tx.channelEngagementState.findFirst({
+				where: {
+					contactId: input.contactId,
+					channel: { not: LINKEDIN_CHANNEL },
+					status: { in: ["ACTIVE_HUMAN_CONVERSATION", "NEEDS_IHSAN"] },
+				},
+				select: { status: true },
+			}),
+			tx.relationshipColdTouchClaim.findUnique({
+				where: { contactId: input.contactId },
+				select: { status: true },
+			}),
+			tx.lead.findFirst({
+				where: {
+					contactId: input.contactId,
+					attentionState: { not: "NONE" },
+				},
+				select: { attentionState: true },
+				orderBy: { updatedAt: "desc" },
+			}),
+		]);
+		if (conversation && conversation.contactId !== input.contactId)
+			return {
+				classification: "AMBIGUOUS_REVIEW_REQUIRED",
+				reason: "LINKEDIN_IDENTITY_ATTACHED_TO_ANOTHER_CONTACT",
+			};
+		if (
+			conversation &&
+			(!conversation.profileUrl ||
+				!conversation.normalizedProfileUrl ||
+				!linkedInProfileIdentityMatches(
+					{
+						profileUrl: route.value,
+						profileIdentifier: route.normalizedValue,
+					},
+					{
+						profileUrl: conversation.profileUrl,
+						profileIdentifier: conversation.normalizedProfileUrl,
+					},
+				))
+		)
+			return {
+				classification: "AMBIGUOUS_REVIEW_REQUIRED",
+				reason: "LINKEDIN_CONVERSATION_IDENTITY_CHANGED",
+			};
+		if (organizationProtection)
+			return {
+				classification: "BLOCKED",
+				reason: "ORGANIZATION_OWNER_PROTECTED",
+			};
+		if (suppressions.length > 0)
+			return { classification: "BLOCKED", reason: "LINKEDIN_SUPPRESSION" };
+		if (conversation?.consent === "DO_NOT_CONTACT")
+			return {
+				classification: "BLOCKED",
+				reason: "LINKEDIN_CONVERSATION_SUPPRESSED",
+			};
+		if (
+			conversation?.status === "NEEDS_IHSAN" ||
+			conversation?.classification === "WARM_HANDOFF"
+		)
+			return {
+				classification: "WITH_IHSAN",
+				reason: "CONVERSATION_NEEDS_IHSAN",
+			};
+		if (conversation?.classification === "AMBIGUOUS_OR_NEEDS_IHSAN")
+			return {
+				classification: "AMBIGUOUS_REVIEW_REQUIRED",
+				reason: "CONVERSATION_AMBIGUOUS",
+			};
+		if (contact.lifecycleState !== "ACTIVE")
+			return { classification: "BLOCKED", reason: "CONTACT_NOT_ACTIVE" };
+		if (contact.outreachState !== "ALLOWED")
+			return {
+				classification: "BLOCKED",
+				reason: `CONTACT_${contact.outreachState}`,
+			};
+		if (channelState?.status === "NEEDS_IHSAN")
+			return { classification: "WITH_IHSAN", reason: "CHANNEL_NEEDS_IHSAN" };
+		if (otherState?.status === "NEEDS_IHSAN")
+			return {
+				classification: "WITH_IHSAN",
+				reason: "OTHER_CHANNEL_NEEDS_IHSAN",
+			};
+		if (lead?.attentionState && lead.attentionState !== "NONE")
+			return {
+				classification: "WITH_IHSAN",
+				reason: `LEAD_${lead.attentionState}`,
+			};
+		const coldReason = coldOutreachBlockReason({
+			contactOutreachState: contact.outreachState,
+			leadAttentionState: lead?.attentionState ?? "NONE",
+			channelStatus: channelState?.status ?? null,
+			otherChannelStatus: otherState?.status ?? null,
+			routeSuppressed: false,
+			contactSuppressed: false,
+			organizationSuppressed: false,
+			organizationProtected: false,
+			firstTouchStatus: claim?.status ?? null,
+			personProtected: false,
+		});
+		if (coldReason && coldReason !== "FIRST_TOUCH_CLAIMED")
+			return { classification: "BLOCKED", reason: coldReason };
+		return {
+			classification: "ROUTINE_AUTONOMOUS",
+			reason: null,
+			conversationId: conversation?.id,
+			identityKey: route.normalizedValue,
+			profileUrl: route.value,
+			normalizedProfileUrl: route.normalizedValue,
+		};
+	}
+
 	private async preflightMessage(
 		tx: Prisma.TransactionClient,
 		input: Extract<
 			LinkedInRoutineActionInput,
-			{ action: MessageRoutineAction }
+			{ action: ExistingConversationMessageAction }
 		>,
 	): Promise<PreflightResult> {
 		const conversation = await tx.linkedInConversation.findUnique({

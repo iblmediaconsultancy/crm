@@ -25,6 +25,7 @@ export type LinkedInActionContext = {
 	strategicAmbiguity?: boolean;
 	identityVerified?: boolean;
 	relationshipVerified?: boolean;
+	relationshipState?: "CONNECTED" | "PENDING" | "NOT_CONNECTED" | "UNKNOWN";
 	conversationVerified?: boolean;
 };
 

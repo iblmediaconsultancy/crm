@@ -79,6 +79,14 @@ type ConversationInput = {
 	profileUrl?: string | null;
 	normalizedProfileUrl?: string | null;
 	externalConversationKey?: string | null;
+	connectionState?:
+		| "UNKNOWN"
+		| "NOT_CONNECTED"
+		| "PENDING_SENT"
+		| "PENDING_RECEIVED"
+		| "CONNECTED"
+		| "DECLINED"
+		| "WITHDRAWN";
 };
 
 type QueueInput = {
@@ -297,6 +305,9 @@ export class LinkedInChannelService {
 			this.db,
 			{ userId: null, kind: "worker" },
 			async (tx) => {
+				await tx.$executeRaw(
+					Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey(input.contactId)}))`,
+				);
 				const contact = await tx.contact.findUnique({
 					where: { id: input.contactId },
 					select: { id: true, companyId: true },
@@ -334,6 +345,7 @@ export class LinkedInChannelService {
 						profileUrl: input.profileUrl ?? null,
 						normalizedProfileUrl: input.normalizedProfileUrl ?? null,
 						externalConversationKey: input.externalConversationKey ?? null,
+						connectionState: input.connectionState ?? undefined,
 					},
 					update: {
 						companyId: input.companyId ?? undefined,
@@ -341,6 +353,7 @@ export class LinkedInChannelService {
 						profileUrl: input.profileUrl ?? undefined,
 						normalizedProfileUrl: input.normalizedProfileUrl ?? undefined,
 						externalConversationKey: input.externalConversationKey ?? undefined,
+						connectionState: input.connectionState ?? undefined,
 					},
 				});
 				await tx.channelEngagementState.upsert({

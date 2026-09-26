@@ -20,10 +20,14 @@ if (!testDatabaseUrl) {
 	const conversationId = `linkedin-action-queue-conversation-${suffix}`;
 	const connectionContactId = `linkedin-action-queue-connection-contact-${suffix}`;
 	const connectionRouteId = `linkedin-action-queue-connection-route-${suffix}`;
+	const firstMessageContactId = `linkedin-action-queue-first-message-contact-${suffix}`;
+	const firstMessageRouteId = `linkedin-action-queue-first-message-route-${suffix}`;
 	const profileIdentifier = `linkedin-action-queue-profile-${suffix}`;
 	const profileUrl = `https://www.linkedin.com/in/${profileIdentifier}/`;
 	const connectionProfileIdentifier = `linkedin-action-queue-connection-profile-${suffix}`;
 	const connectionProfileUrl = `https://www.linkedin.com/in/${connectionProfileIdentifier}/`;
+	const firstMessageProfileIdentifier = `linkedin-action-queue-first-message-profile-${suffix}`;
+	const firstMessageProfileUrl = `https://www.linkedin.com/in/${firstMessageProfileIdentifier}/`;
 	const accountKey = `linkedin-action-queue-account-${suffix}`;
 	const service = new LinkedInActionQueueService(
 		db,
@@ -50,6 +54,23 @@ if (!testDatabaseUrl) {
 					type: "LINKEDIN",
 					value: profileUrl,
 					normalizedValue: profileIdentifier,
+				},
+			});
+			await db.contact.create({
+				data: {
+					id: firstMessageContactId,
+					firstName: "First",
+					lastName: "Message",
+				},
+			});
+			await db.contactRoute.create({
+				data: {
+					id: firstMessageRouteId,
+					contactId: firstMessageContactId,
+					ownerUserId: actorId,
+					type: "LINKEDIN",
+					value: firstMessageProfileUrl,
+					normalizedValue: firstMessageProfileIdentifier,
 				},
 			});
 			await db.linkedInConversation.create({
@@ -151,6 +172,83 @@ if (!testDatabaseUrl) {
 			expect(connectionJob.approvedAt).toBeInstanceOf(Date);
 		});
 
+		it("creates and reuses one conversation for a verified first message", async () => {
+			const baseInput = {
+				action: "FIRST_MESSAGE_TO_CONNECTED_PERSON" as const,
+				contactId: firstMessageContactId,
+				routeId: firstMessageRouteId,
+				profileUrl: firstMessageProfileUrl,
+				profileIdentifier: firstMessageProfileIdentifier,
+				body: "A relevant first message without commercial terms.",
+				accountKey,
+				context: {
+					identityVerified: true,
+					relationshipVerified: true,
+					relationshipState: "CONNECTED" as const,
+				},
+			};
+			const handoff = await service.queueRoutineAction({
+				...baseInput,
+				idempotencyKey: `linkedin-action-queue:first-handoff:${suffix}`,
+				body: "Our pricing is available in three packages.",
+			});
+			expect(handoff).toMatchObject({
+				classification: "WITH_IHSAN",
+				jobId: null,
+			});
+			expect(
+				await db.linkedInConversation.count({
+					where: { identityKey: firstMessageProfileIdentifier },
+				}),
+			).toBe(0);
+			const ambiguous = await service.queueRoutineAction({
+				...baseInput,
+				idempotencyKey: `linkedin-action-queue:first-ambiguous:${suffix}`,
+				context: {
+					identityVerified: true,
+					relationshipVerified: true,
+					relationshipState: "UNKNOWN",
+				},
+			});
+			expect(ambiguous).toMatchObject({
+				classification: "AMBIGUOUS_REVIEW_REQUIRED",
+				jobId: null,
+			});
+			const [first, second] = await Promise.all([
+				service.queueRoutineAction({
+					...baseInput,
+					idempotencyKey: `linkedin-action-queue:first:${suffix}`,
+				}),
+				service.queueRoutineAction({
+					...baseInput,
+					idempotencyKey: `linkedin-action-queue:first:${suffix}`,
+				}),
+			]);
+			expect(first.classification).toBe("ROUTINE_AUTONOMOUS");
+			expect(second.jobId).toBe(first.jobId);
+			expect(first.approvedAt).toBeInstanceOf(Date);
+			const conversation = await db.linkedInConversation.findUniqueOrThrow({
+				where: { identityKey: firstMessageProfileIdentifier },
+				select: {
+					id: true,
+					connectionState: true,
+					externalConversationKey: true,
+				},
+			});
+			expect(conversation.connectionState).toBe("CONNECTED");
+			expect(conversation.externalConversationKey).toBeNull();
+			expect(
+				await db.linkedInConversation.count({
+					where: { contactId: firstMessageContactId },
+				}),
+			).toBe(1);
+			expect(
+				await db.linkedInSendJob.count({
+					where: { conversationId: conversation.id },
+				}),
+			).toBe(1);
+		});
+
 		it("does not queue handoff, protected, or ambiguous actions", async () => {
 			const withIhsan = await service.queueRoutineAction({
 				action: "ROUTINE_REPLY",
@@ -208,6 +306,26 @@ if (!testDatabaseUrl) {
 		});
 		await db.contactRoute.deleteMany({ where: { id: connectionRouteId } });
 		await db.contact.deleteMany({ where: { id: connectionContactId } });
+		const firstMessageConversation = await db.linkedInConversation.findUnique({
+			where: { identityKey: firstMessageProfileIdentifier },
+			select: { id: true },
+		});
+		if (firstMessageConversation) {
+			await db.linkedInSendJob.deleteMany({
+				where: { conversationId: firstMessageConversation.id },
+			});
+			await db.linkedInMessage.deleteMany({
+				where: { conversationId: firstMessageConversation.id },
+			});
+			await db.linkedInConversation.delete({
+				where: { id: firstMessageConversation.id },
+			});
+		}
+		await db.relationshipColdTouchClaim.deleteMany({
+			where: { contactId: firstMessageContactId },
+		});
+		await db.contactRoute.deleteMany({ where: { id: firstMessageRouteId } });
+		await db.contact.deleteMany({ where: { id: firstMessageContactId } });
 		await db.linkedInSendJob.deleteMany({ where: { conversationId } });
 		await db.linkedInMessage.deleteMany({ where: { conversationId } });
 		await db.personProtection.deleteMany({ where: { contactId } });
