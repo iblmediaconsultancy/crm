@@ -181,6 +181,99 @@ function isOpaqueStableIdentifier(value: string): boolean {
 	return /^ACo[A-Za-z0-9_-]+$/.test(value.trim());
 }
 
+export type LinkedInComposeConversationEvidence =
+	| {
+			status: "NOT_APPLICABLE";
+			participantIdentifier: null;
+			externalConversationKey: null;
+	  }
+	| {
+			status: "RESOLVED";
+			participantIdentifier: string;
+			externalConversationKey: string | null;
+	  }
+	| {
+			status: "AMBIGUOUS";
+			participantIdentifier: null;
+			externalConversationKey: null;
+	  };
+
+export function resolveLinkedInComposeConversationEvidence(
+	composeUrl: string,
+	eventUrns: readonly string[],
+	recipientPillCount: number,
+): LinkedInComposeConversationEvidence {
+	let url: URL;
+	try {
+		url = new URL(composeUrl);
+	} catch {
+		return {
+			status: "AMBIGUOUS",
+			participantIdentifier: null,
+			externalConversationKey: null,
+		};
+	}
+	if (!/^\/messaging\/compose\/?$/i.test(url.pathname))
+		return {
+			status: "NOT_APPLICABLE",
+			participantIdentifier: null,
+			externalConversationKey: null,
+		};
+	const recipient = url.searchParams.get("recipient")?.trim() ?? "";
+	const profileUrn = url.searchParams.get("profileUrn")?.trim() ?? "";
+	const profileMember = profileUrn.split(":").at(-1)?.trim() ?? "";
+	if (
+		!isOpaqueStableIdentifier(recipient) ||
+		!isOpaqueStableIdentifier(profileMember) ||
+		profileMember !== recipient ||
+		recipientPillCount !== 1
+	)
+		return {
+			status: "AMBIGUOUS",
+			participantIdentifier: null,
+			externalConversationKey: null,
+		};
+	const conversationKeys = new Set<string>();
+	for (const eventUrn of eventUrns) {
+		const match = eventUrn.match(/^urn:li:msg_message:\([^,]+,(2-[^)]+)\)$/);
+		const encodedMessageKey = match?.[1]?.slice(2);
+		let decodedMessageKey: string | null = null;
+		if (encodedMessageKey && /^[A-Za-z0-9_-]+={0,2}$/.test(encodedMessageKey)) {
+			try {
+				decodedMessageKey = atob(
+					encodedMessageKey.replace(/-/g, "+").replace(/_/g, "/"),
+				);
+			} catch {
+				decodedMessageKey = null;
+			}
+		}
+		const separator = decodedMessageKey?.lastIndexOf("&") ?? -1;
+		const key =
+			separator >= 0 ? (decodedMessageKey?.slice(separator + 1) ?? null) : null;
+		if (!key || !/^[A-Za-z0-9_-]+={0,2}$/.test(key))
+			return {
+				status: "AMBIGUOUS",
+				participantIdentifier: null,
+				externalConversationKey: null,
+			};
+		conversationKeys.add(key);
+	}
+	if (conversationKeys.size > 1)
+		return {
+			status: "AMBIGUOUS",
+			participantIdentifier: null,
+			externalConversationKey: null,
+		};
+	return {
+		status: "RESOLVED",
+		participantIdentifier: recipient,
+		externalConversationKey:
+			conversationKeys.size === 1
+				? `2-${btoa([...conversationKeys][0] ?? "")}`
+				: null,
+	};
+}
+
 export function canonicalLinkedInProfileIdentity(
 	value: string,
 ): CanonicalLinkedInProfileIdentity | null {
@@ -255,6 +348,7 @@ export function linkedInConversationIdentityMatches(
 		? canonicalLinkedInConversationKey(observed.externalConversationKey)
 		: null;
 	if (targetKey && observedKey && targetKey === observedKey) return true;
+	if (targetKey && observedKey) return false;
 	const targetMember =
 		opaqueProfileIdentifierFromUrl(target.profileUrl) ??
 		(target.profileIdentifier &&
