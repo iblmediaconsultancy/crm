@@ -16,6 +16,7 @@ import {
 	type LinkedInMessageComposerResolution,
 	type LinkedInMessageComposerSnapshot,
 	type LinkedInMessageComposerSurface,
+	linkedInMessageComposerControlReady,
 	resolveLinkedInMessageComposer,
 } from "./message-composer-resolver";
 import {
@@ -812,6 +813,7 @@ class CdpPage {
 				const value = ${JSON.stringify(body)};
 				const collectSnapshot = ${collect};
 				const resolveComposer = ${resolve};
+				const sendControlReady = ${linkedInMessageComposerControlReady.toString()};
 				const isVisible = (element) => {
 					const rect = element.getBoundingClientRect();
 					const style = getComputedStyle(element);
@@ -856,7 +858,10 @@ class CdpPage {
 				const freshSends = freshSurface ? Array.from(freshSurface.querySelectorAll("button, [role=button]")) : [];
 				const freshEditor = freshEditors[fresh.editorIndex];
 				const freshSend = freshSends[fresh.sendControlIndex];
+				const freshSurfaceSnapshot = collectSnapshot().surfaces.find((surface) => surface.index === fresh.surfaceIndex);
+				const freshSendSnapshot = freshSurfaceSnapshot?.sendControls.find((control) => control.index === fresh.sendControlIndex);
 				if (!freshEditor || !freshSend || !freshEditor.isConnected || !freshSend.isConnected || !isVisible(freshEditor) || !isVisible(freshSend) || !sendLabel(freshSend)) return false;
+				if (!freshSendSnapshot || !sendControlReady(freshSendSnapshot)) return false;
 				const freshText = freshEditor instanceof HTMLTextAreaElement ? freshEditor.value : freshEditor.textContent || "";
 				if (freshText !== value) return false;
 				freshSend.click();

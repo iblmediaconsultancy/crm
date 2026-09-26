@@ -41,6 +41,15 @@ export type LinkedInMessageComposerResolution =
 			externalConversationKey: string | null;
 	  };
 
+export function linkedInMessageComposerControlReady(
+	control: Pick<
+		LinkedInMessageComposerElement,
+		"visible" | "connected" | "disabled"
+	>,
+): boolean {
+	return control.visible && control.connected && !control.disabled;
+}
+
 export function linkedInMessageControlRecipientIdentifier(
 	href: string | null,
 ): string | null {
@@ -125,7 +134,7 @@ export function resolveLinkedInMessageComposer(
 				editor.tagName.toLocaleLowerCase() === "textarea"),
 	);
 	const sendControls = surface.sendControls.filter(
-		(control) => control.visible && control.connected && !control.disabled,
+		(control) => control.visible && control.connected,
 	);
 	if (editors.length !== 1 || sendControls.length !== 1)
 		return { status: "AMBIGUOUS" };
