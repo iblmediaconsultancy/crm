@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import {
 	type LinkedInMessageComposerSnapshot,
 	type LinkedInMessageComposerSurface,
+	linkedInMessageComposerControlReady,
 	linkedInMessageControlConversationKey,
 	linkedInMessageControlRecipientIdentifier,
 	resolveLinkedInMessageComposer,
@@ -26,7 +27,7 @@ function editor(index = 0, visible = true) {
 	};
 }
 
-function sendControl(index = 0, visible = true) {
+function sendControl(index = 0, visible = true, disabled = false) {
 	return {
 		index,
 		tagName: "BUTTON",
@@ -38,7 +39,7 @@ function sendControl(index = 0, visible = true) {
 		contentEditable: false,
 		visible,
 		connected: true,
-		disabled: false,
+		disabled,
 	};
 }
 
@@ -96,6 +97,18 @@ describe("LinkedIn message composer resolver", () => {
 			{ expectedRecipientIdentifier: recipient },
 		);
 		expect(result.status).toBe("FOUND");
+	});
+
+	it("resolves the Gijs profile composer before Send is enabled", () => {
+		const result = resolveLinkedInMessageComposer(
+			snapshot({ sendControls: [sendControl(7, true, true)] }),
+			{ expectedRecipientIdentifier: recipient },
+		);
+		expect(result.status).toBe("FOUND");
+		expect(
+			linkedInMessageComposerControlReady(sendControl(7, true, true)),
+		).toBe(false);
+		expect(linkedInMessageComposerControlReady(sendControl(7))).toBe(true);
 	});
 
 	it("fails closed for an exact recipient mismatch", () => {
