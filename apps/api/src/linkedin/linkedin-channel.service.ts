@@ -13,6 +13,7 @@ import {
 	NotFoundException,
 } from "@nestjs/common";
 import { InjectDatabase } from "../database/database.constants";
+import { canReuseConsumedLinkedInConnectionClaim } from "./linkedin-first-touch";
 
 const ATLAS_OPERATOR_ID = "atlas-operator";
 const LINKEDIN_CHANNEL = "LINKEDIN" as const;
@@ -112,6 +113,7 @@ type QueueInput = {
 	body?: string;
 	approvedAt: Date;
 	coldOutreach?: boolean;
+	firstMessage?: boolean;
 	accountKey?: string;
 	connectionLimit?: number;
 };
@@ -499,7 +501,11 @@ export class LinkedInChannelService {
 					}),
 					tx.relationshipColdTouchClaim.findUnique({
 						where: { contactId: conversation.contactId },
-						select: { status: true, idempotencyKey: true },
+						select: {
+							channel: true,
+							status: true,
+							idempotencyKey: true,
+						},
 					}),
 					tx.organizationProtection.findFirst({
 						where: {
@@ -509,6 +515,31 @@ export class LinkedInChannelService {
 						select: { id: true },
 					}),
 				]);
+				const [connectionRequest, messageJob] =
+					input.firstMessage && claim?.status === "CONSUMED"
+						? await Promise.all([
+								tx.linkedInConnectionRequestJob.findUnique({
+									where: { idempotencyKey: claim.idempotencyKey },
+									select: {
+										action: true,
+										status: true,
+										actionPayload: true,
+									},
+								}),
+								tx.linkedInSendJob.findUnique({
+									where: { idempotencyKey: claim.idempotencyKey },
+									select: { id: true },
+								}),
+							])
+						: [null, null];
+				const canReuseConnectionClaim = canReuseConsumedLinkedInConnectionClaim(
+					{
+						claimChannel: claim?.channel,
+						claimStatus: claim?.status,
+						connectionRequest,
+						messageJobExists: Boolean(messageJob),
+					},
+				);
 				if (!contact)
 					throw new NotFoundException("LinkedIn contact not found.");
 				if (input.coldOutreach ?? true) {
@@ -528,7 +559,9 @@ export class LinkedInChannelService {
 							(row) => row.scope === "ORGANIZATION",
 						),
 						organizationProtected: Boolean(organizationProtection),
-						firstTouchStatus: claim?.status ?? null,
+						firstTouchStatus: canReuseConnectionClaim
+							? null
+							: (claim?.status ?? null),
 					});
 					if (reason && reason !== "FIRST_TOUCH_CLAIMED")
 						throw new ConflictException(
@@ -537,7 +570,8 @@ export class LinkedInChannelService {
 					if (
 						claim &&
 						claim.status !== "RELEASED" &&
-						claim.idempotencyKey !== input.idempotencyKey
+						claim.idempotencyKey !== input.idempotencyKey &&
+						!canReuseConnectionClaim
 					)
 						throw new ConflictException(
 							"A cold first touch already exists for this contact.",
@@ -551,7 +585,7 @@ export class LinkedInChannelService {
 								idempotencyKey: input.idempotencyKey,
 							},
 						});
-					} else if (claim.status === "RELEASED") {
+					} else if (claim.status === "RELEASED" || canReuseConnectionClaim) {
 						await tx.relationshipColdTouchClaim.update({
 							where: { contactId: conversation.contactId },
 							data: {

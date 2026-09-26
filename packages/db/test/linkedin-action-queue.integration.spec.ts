@@ -22,6 +22,8 @@ if (!testDatabaseUrl) {
 	const connectionRouteId = `linkedin-action-queue-connection-route-${suffix}`;
 	const firstMessageContactId = `linkedin-action-queue-first-message-contact-${suffix}`;
 	const firstMessageRouteId = `linkedin-action-queue-first-message-route-${suffix}`;
+	const firstMessageConnectionJobId = `linkedin-action-queue-first-message-connection-job-${suffix}`;
+	const firstMessageClaimKey = `linkedin-action-queue:first-connection:${suffix}`;
 	const profileIdentifier = `linkedin-action-queue-profile-${suffix}`;
 	const profileUrl = `https://www.linkedin.com/in/${profileIdentifier}/`;
 	const connectionProfileIdentifier = `linkedin-action-queue-connection-profile-${suffix}`;
@@ -173,6 +175,28 @@ if (!testDatabaseUrl) {
 		});
 
 		it("creates and reuses one conversation for a verified first message", async () => {
+			await db.relationshipColdTouchClaim.create({
+				data: {
+					contactId: firstMessageContactId,
+					channel: "LINKEDIN",
+					status: "CONSUMED",
+					idempotencyKey: firstMessageClaimKey,
+					consumedAt: new Date(),
+				},
+			});
+			await db.linkedInConnectionRequestJob.create({
+				data: {
+					id: firstMessageConnectionJobId,
+					contactId: firstMessageContactId,
+					routeId: firstMessageRouteId,
+					profileUrl: firstMessageProfileUrl,
+					profileIdentifier: firstMessageProfileIdentifier,
+					status: "SUCCEEDED",
+					idempotencyKey: firstMessageClaimKey,
+					quotaDay: new Date(),
+					actionPayload: { noNote: true, note: null },
+				},
+			});
 			const baseInput = {
 				action: "FIRST_MESSAGE_TO_CONNECTED_PERSON" as const,
 				contactId: firstMessageContactId,
@@ -239,6 +263,15 @@ if (!testDatabaseUrl) {
 			expect(conversation.connectionState).toBe("CONNECTED");
 			expect(conversation.classification).toBe("ACTION_REQUIRED");
 			expect(conversation.externalConversationKey).toBeNull();
+			expect(
+				await db.relationshipColdTouchClaim.findUniqueOrThrow({
+					where: { contactId: firstMessageContactId },
+					select: { status: true, idempotencyKey: true },
+				}),
+			).toMatchObject({
+				status: "CLAIMED",
+				idempotencyKey: `linkedin-action-queue:first:${suffix}`,
+			});
 			expect(
 				await db.linkedInConversation.count({
 					where: { contactId: firstMessageContactId },
@@ -323,6 +356,9 @@ if (!testDatabaseUrl) {
 				where: { id: firstMessageConversation.id },
 			});
 		}
+		await db.linkedInConnectionRequestJob.deleteMany({
+			where: { id: firstMessageConnectionJobId },
+		});
 		await db.relationshipColdTouchClaim.deleteMany({
 			where: { contactId: firstMessageContactId },
 		});
