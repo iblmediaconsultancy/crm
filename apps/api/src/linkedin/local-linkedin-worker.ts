@@ -43,6 +43,13 @@ function wait(milliseconds: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+function shouldStopForResult(result: LocalLinkedInExecutorResult): boolean {
+	if (result.status !== "NEEDS_IHSAN") return false;
+	return /CAPTCHA|CHALLENGE|UNAUTHENTICATED|RESTRICTION|RATE_LIMIT|SUSPICIOUS/i.test(
+		result.reason,
+	);
+}
+
 export class LocalLinkedInWorker {
 	private stopRequested = false;
 
@@ -53,6 +60,7 @@ export class LocalLinkedInWorker {
 		private readonly pollMs: number,
 		private readonly persist: PersistState,
 		private readonly externalStopRequested: StopRequested = () => false,
+		private readonly gateEnabled: StopRequested = () => true,
 	) {}
 
 	stop(): void {
@@ -61,7 +69,11 @@ export class LocalLinkedInWorker {
 
 	async run(): Promise<LocalLinkedInWorkerState> {
 		this.write({ status: "STARTING" });
-		while (!this.stopRequested && !this.externalStopRequested()) {
+		while (
+			!this.stopRequested &&
+			!this.externalStopRequested() &&
+			this.gateEnabled()
+		) {
 			const shouldStop = await this.runCycle();
 			if (shouldStop) break;
 			await wait(this.pollMs);
@@ -103,7 +115,7 @@ export class LocalLinkedInWorker {
 			});
 			return false;
 		}
-		if (result.status === "NEEDS_IHSAN") {
+		if (shouldStopForResult(result)) {
 			this.write({ status: "NEEDS_IHSAN", browser, lastResult: result });
 			return true;
 		}

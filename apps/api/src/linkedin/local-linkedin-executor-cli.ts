@@ -9,11 +9,13 @@ import {
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { CdpLinkedInBrowserAdapter } from "./cdp-linkedin-browser-adapter";
+import type { LinkedInRoutineActionInput } from "./linkedin-action-queue.service";
 import type { LinkedInChannelService } from "./linkedin-channel.service";
 import { LocalLinkedInExecutor } from "./local-linkedin-executor";
 import {
 	assertLocalLinkedInDatabaseAccess,
 	localLinkedInDatabaseTarget,
+	localLinkedInExecutorEnabled,
 	localLinkedInExecutorGateState,
 } from "./local-linkedin-executor-config";
 import {
@@ -201,6 +203,18 @@ function requireProductionWorkerDatabase(): void {
 	requireExecutionDatabase(true);
 }
 
+function requireActionQueueDatabase(): void {
+	if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL_REQUIRED");
+	const target = localLinkedInDatabaseTarget(process.env.DATABASE_URL);
+	if (!target.isLocal)
+		throw new Error("LINKEDIN_ACTION_QUEUE_DATABASE_MUST_BE_LOCAL");
+	if (
+		!target.isAuthoritative &&
+		!process.argv.includes("--allow-disposable-db")
+	)
+		throw new Error("QUEUE_REQUIRES_ALLOW_DISPOSABLE_DB");
+}
+
 async function createExecutor() {
 	const { db } = await import("@crm/db");
 	const { LinkedInChannelService } = await import("./linkedin-channel.service");
@@ -275,6 +289,35 @@ async function runOnce(): Promise<void> {
 	}
 }
 
+async function queueRoutineAction(): Promise<void> {
+	requireActionQueueDatabase();
+	const raw = option("--input-json", "");
+	if (!raw) throw new Error("INPUT_JSON_REQUIRED");
+	let input: unknown;
+	try {
+		input = JSON.parse(raw);
+	} catch {
+		throw new Error("INPUT_JSON_INVALID");
+	}
+	const { db } = await import("@crm/db");
+	const { LinkedInActionQueueService } = await import(
+		"./linkedin-action-queue.service"
+	);
+	const { LinkedInChannelService } = await import("./linkedin-channel.service");
+	const service = new LinkedInActionQueueService(
+		db,
+		new LinkedInChannelService(db),
+	);
+	try {
+		const result = await service.queueRoutineAction(
+			input as LinkedInRoutineActionInput,
+		);
+		console.log(JSON.stringify(result));
+	} finally {
+		await db.$disconnect();
+	}
+}
+
 async function startWorker(): Promise<void> {
 	requireProductionWorkerDatabase();
 	const pidFile = workerPidPath();
@@ -334,6 +377,7 @@ async function runWorker(): Promise<void> {
 		numberOption("--poll-ms", 10_000),
 		writeWorkerState,
 		() => existsSync(workerStopPath()),
+		() => localLinkedInExecutorEnabled(),
 	);
 	try {
 		await worker.run();
@@ -403,6 +447,7 @@ async function main(): Promise<void> {
 	if (command === "stop") return stopBrowser();
 	if (command === "health") return health();
 	if (command === "run-once") return runOnce();
+	if (command === "queue-routine") return queueRoutineAction();
 	if (command === "worker") {
 		const subcommand = process.argv[3] ?? "status";
 		if (subcommand === "start") return startWorker();
@@ -411,7 +456,9 @@ async function main(): Promise<void> {
 		throw new Error("WORKER_COMMAND_MUST_BE_START_STOP_OR_STATUS");
 	}
 	if (command === "worker-run") return runWorker();
-	throw new Error("COMMAND_MUST_BE_START_STOP_HEALTH_RUN_ONCE_OR_WORKER");
+	throw new Error(
+		"COMMAND_MUST_BE_START_STOP_HEALTH_RUN_ONCE_QUEUE_ROUTINE_OR_WORKER",
+	);
 }
 
 main().catch((error) => {

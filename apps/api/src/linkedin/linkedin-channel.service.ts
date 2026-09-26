@@ -17,7 +17,6 @@ import { InjectDatabase } from "../database/database.constants";
 const ATLAS_OPERATOR_ID = "atlas-operator";
 const LINKEDIN_CHANNEL = "LINKEDIN" as const;
 const RELATIONSHIP_LOCK_PREFIX = "atlas-relationship:";
-const DEFAULT_LINKEDIN_MESSAGE_LIMIT = 20;
 const DEFAULT_LINKEDIN_CONNECTION_LIMIT = 5;
 
 const CLAIM_NEXT_JOB = [
@@ -91,7 +90,6 @@ type QueueInput = {
 	approvedAt: Date;
 	coldOutreach?: boolean;
 	accountKey?: string;
-	messageLimit?: number;
 	connectionLimit?: number;
 };
 
@@ -395,9 +393,20 @@ export class LinkedInChannelService {
 				);
 				const existingJob = await tx.linkedInSendJob.findUnique({
 					where: { idempotencyKey: input.idempotencyKey },
-					select: { id: true, status: true, messageId: true },
+					select: { id: true, status: true, messageId: true, approvedAt: true },
 				});
-				if (existingJob) return existingJob;
+				if (existingJob) {
+					if (
+						!existingJob.approvedAt &&
+						existingJob.status === "PENDING" &&
+						input.approvedAt
+					)
+						await tx.linkedInSendJob.update({
+							where: { id: existingJob.id },
+							data: { approvedAt: input.approvedAt },
+						});
+					return existingJob;
+				}
 				const [
 					contact,
 					lead,
@@ -528,10 +537,6 @@ export class LinkedInChannelService {
 				}
 				const accountKey = input.accountKey?.trim() || "default";
 				const quotaDay = utcDay(new Date());
-				const messageLimit = Math.max(
-					1,
-					input.messageLimit ?? DEFAULT_LINKEDIN_MESSAGE_LIMIT,
-				);
 				const connectionLimit = Math.max(
 					1,
 					input.connectionLimit ?? DEFAULT_LINKEDIN_CONNECTION_LIMIT,
@@ -541,7 +546,7 @@ export class LinkedInChannelService {
 					create: {
 						day: quotaDay,
 						accountKey,
-						messageLimit,
+						messageLimit: 0,
 						connectionLimit,
 					},
 					update: {},
@@ -549,7 +554,7 @@ export class LinkedInChannelService {
 				const quotaRows =
 					input.action === "MESSAGE"
 						? await tx.$queryRaw<{ id: string }[]>(
-								Prisma.sql`UPDATE "linkedinQuota" SET "messageReserved" = "messageReserved" + 1, "updatedAt" = NOW() WHERE "day" = ${quotaDay} AND "accountKey" = ${accountKey} AND "messageReserved" + "messageSent" < "messageLimit" RETURNING "id"`,
+								Prisma.sql`UPDATE "linkedinQuota" SET "messageReserved" = "messageReserved" + 1, "updatedAt" = NOW() WHERE "day" = ${quotaDay} AND "accountKey" = ${accountKey} RETURNING "id"`,
 							)
 						: await tx.$queryRaw<{ id: string }[]>(
 								Prisma.sql`UPDATE "linkedinQuota" SET "connectionReserved" = "connectionReserved" + 1, "updatedAt" = NOW() WHERE "day" = ${quotaDay} AND "accountKey" = ${accountKey} AND "connectionReserved" + "connectionSent" < "connectionLimit" RETURNING "id"`,
@@ -615,6 +620,7 @@ export class LinkedInChannelService {
 						routeId: true,
 						profileUrl: true,
 						profileIdentifier: true,
+						approvedAt: true,
 					},
 				});
 				if (existingJob) {
@@ -627,6 +633,11 @@ export class LinkedInChannelService {
 						throw new ConflictException(
 							"LinkedIn connection request idempotency key is bound to another target.",
 						);
+					if (!existingJob.approvedAt && existingJob.status === "PENDING")
+						await tx.linkedInConnectionRequestJob.update({
+							where: { id: existingJob.id },
+							data: { approvedAt: input.approvedAt },
+						});
 					return existingJob;
 				}
 				await tx.$executeRaw(
@@ -642,6 +653,7 @@ export class LinkedInChannelService {
 							routeId: true,
 							profileUrl: true,
 							profileIdentifier: true,
+							approvedAt: true,
 						},
 					});
 				if (existingJobAfterLock) {
@@ -654,6 +666,14 @@ export class LinkedInChannelService {
 						throw new ConflictException(
 							"LinkedIn connection request idempotency key is bound to another target.",
 						);
+					if (
+						!existingJobAfterLock.approvedAt &&
+						existingJobAfterLock.status === "PENDING"
+					)
+						await tx.linkedInConnectionRequestJob.update({
+							where: { id: existingJobAfterLock.id },
+							data: { approvedAt: input.approvedAt },
+						});
 					return existingJobAfterLock;
 				}
 				const [contact, route, personProtected] = await Promise.all([
@@ -855,7 +875,7 @@ export class LinkedInChannelService {
 					create: {
 						day: quotaDay,
 						accountKey,
-						messageLimit: DEFAULT_LINKEDIN_MESSAGE_LIMIT,
+						messageLimit: 0,
 						connectionLimit,
 					},
 					update: {},
