@@ -19,6 +19,16 @@ const ATLAS_OPERATOR_ID = "atlas-operator";
 const LINKEDIN_CHANNEL = "LINKEDIN" as const;
 const RELATIONSHIP_LOCK_PREFIX = "atlas-relationship:";
 const DEFAULT_LINKEDIN_CONNECTION_LIMIT = 5;
+const TERMINAL_UNSENT_MESSAGE_FAILURES = new Set([
+	"MESSAGE_EDITOR_UNAVAILABLE",
+	"WRONG_CONVERSATION",
+	"EXTERNAL_CONVERSATION_MISMATCH",
+	"CONVERSATION_ID_MISMATCH",
+	"PROFILE_URL_MISMATCH",
+	"PROFILE_IDENTIFIER_MISMATCH",
+	"DISPLAY_NAME_MISMATCH",
+	"MESSAGE_COMPOSER_AMBIGUOUS",
+]);
 
 const CLAIM_NEXT_JOB = [
 	'UPDATE "linkedinSendJob"',
@@ -27,10 +37,8 @@ const CLAIM_NEXT_JOB = [
 	'  "attemptCount" = "attemptCount" + 1, "updatedAt" = NOW()',
 	'WHERE "id" = (',
 	'  SELECT "id" FROM "linkedinSendJob"',
-	"  WHERE \"status\" IN ('PENDING', 'FAILED', 'LEASED')",
+	'  WHERE ("status" = \'PENDING\' OR ("status" = \'FAILED\' AND "retryAt" IS NOT NULL AND "retryAt" <= NOW()) OR ("status" = \'LEASED\' AND "leasedUntil" IS NOT NULL AND "leasedUntil" <= NOW()))',
 	'    AND "approvedAt" IS NOT NULL',
-	'    AND ("retryAt" IS NULL OR "retryAt" <= NOW())',
-	'    AND ("leasedUntil" IS NULL OR "leasedUntil" <= NOW())',
 	'    AND "attemptCount" < "maxAttempts"',
 	"    AND \"action\" = 'MESSAGE'",
 	"    AND NOT EXISTS (",
@@ -283,31 +291,38 @@ async function releaseMessageReservation(
 		idempotencyKey: string;
 	},
 	errorCode: string,
+	options: {
+		jobStatus?: "CANCELLED" | "FAILED";
+		messageStatus?: "CANCELLED" | "FAILED";
+		retryAt?: Date | null;
+	} = {},
 ) {
-	if (job.coldOutreach)
-		await tx.relationshipColdTouchClaim.updateMany({
-			where: {
-				contactId: job.contactId,
-				status: "CLAIMED",
-				idempotencyKey: job.idempotencyKey,
-			},
-			data: { status: "RELEASED", releasedAt: new Date() },
-		});
-	await tx.$executeRaw(
-		Prisma.sql`UPDATE "linkedinQuota" SET "messageReserved" = GREATEST("messageReserved" - 1, 0), "updatedAt" = NOW() WHERE "day" = ${job.quotaDay} AND "accountKey" = ${job.accountKey}`,
-	);
+	const claimRelease = job.coldOutreach
+		? await tx.relationshipColdTouchClaim.updateMany({
+				where: {
+					contactId: job.contactId,
+					status: "CLAIMED",
+					idempotencyKey: job.idempotencyKey,
+				},
+				data: { status: "RELEASED", releasedAt: new Date() },
+			})
+		: { count: 1 };
+	if (claimRelease.count > 0)
+		await tx.$executeRaw(
+			Prisma.sql`UPDATE "linkedinQuota" SET "messageReserved" = GREATEST("messageReserved" - 1, 0), "updatedAt" = NOW() WHERE "day" = ${job.quotaDay} AND "accountKey" = ${job.accountKey}`,
+		);
 	if (job.messageId)
 		await tx.linkedInMessage.update({
 			where: { id: job.messageId },
-			data: { status: "CANCELLED" },
+			data: { status: options.messageStatus ?? "CANCELLED" },
 		});
 	await tx.linkedInSendJob.update({
 		where: { id: job.id },
 		data: {
-			status: "CANCELLED",
+			status: options.jobStatus ?? "CANCELLED",
 			leaseOwner: null,
 			leasedUntil: null,
-			retryAt: null,
+			retryAt: options.retryAt ?? null,
 			lastErrorCode: errorCode,
 		},
 	});
@@ -1701,6 +1716,31 @@ export class LinkedInChannelService {
 						completedAt,
 					},
 				});
+				if (
+					input.status === "FAILED" &&
+					TERMINAL_UNSENT_MESSAGE_FAILURES.has(input.errorCode ?? "")
+				) {
+					await releaseMessageReservation(
+						tx,
+						{
+							id: job.id,
+							messageId: job.messageId,
+							conversationId: job.conversationId,
+							contactId: job.conversation.contactId,
+							coldOutreach: job.coldOutreach,
+							quotaDay: job.quotaDay,
+							accountKey: job.accountKey,
+							idempotencyKey: job.idempotencyKey,
+						},
+						input.errorCode ?? "LINKEDIN_EXECUTION_FAILED",
+						{
+							jobStatus: "FAILED",
+							messageStatus: "FAILED",
+							retryAt: null,
+						},
+					);
+					return { status: "FAILED" as const };
+				}
 				if (input.status === "SUCCEEDED") {
 					if (job.messageId) {
 						await tx.linkedInMessage.update({
@@ -1851,6 +1891,81 @@ export class LinkedInChannelService {
 				return {
 					status: ambiguous ? ("WAITING_REVIEW" as const) : ("FAILED" as const),
 				};
+			},
+		);
+	}
+
+	async recoverUnsentMessage(
+		jobId: string,
+		errorCode = "MESSAGE_EDITOR_UNAVAILABLE",
+	) {
+		return withPrincipal(
+			this.db,
+			{ userId: null, kind: "worker" },
+			async (tx) => {
+				const job = await tx.linkedInSendJob.findUnique({
+					where: { id: jobId },
+					include: {
+						message: true,
+						conversation: { select: { id: true, contactId: true } },
+					},
+				});
+				if (!job)
+					throw new NotFoundException("LinkedIn message job not found.");
+				if (job.action !== "MESSAGE")
+					throw new ConflictException(
+						"Only LinkedIn message jobs can be recovered.",
+					);
+				const activity = job.messageId
+					? await tx.activity.findFirst({
+							where: { linkedinMessageId: job.messageId },
+							select: { id: true },
+						})
+					: null;
+				if (
+					job.status === "SUCCEEDED" ||
+					job.message?.status === "SENT" ||
+					job.message?.occurredAt ||
+					job.message?.externalMessageKey ||
+					activity
+				)
+					throw new ConflictException(
+						"A confirmed LinkedIn message cannot be recovered as unsent.",
+					);
+				if (job.leaseOwner || job.status === "LEASED")
+					throw new ConflictException("LinkedIn message job is still leased.");
+				const claim = job.coldOutreach
+					? await tx.relationshipColdTouchClaim.findUnique({
+							where: { contactId: job.conversation.contactId },
+							select: { status: true, idempotencyKey: true },
+						})
+					: null;
+				if (
+					job.status === "FAILED" &&
+					job.retryAt === null &&
+					claim?.status !== "CLAIMED"
+				)
+					return { status: "ALREADY_RELEASED" as const };
+				await releaseMessageReservation(
+					tx,
+					{
+						id: job.id,
+						messageId: job.messageId,
+						conversationId: job.conversationId,
+						contactId: job.conversation.contactId,
+						coldOutreach: job.coldOutreach,
+						quotaDay: job.quotaDay,
+						accountKey: job.accountKey,
+						idempotencyKey: job.idempotencyKey,
+					},
+					errorCode,
+					{
+						jobStatus: "FAILED",
+						messageStatus: "FAILED",
+						retryAt: null,
+					},
+				);
+				return { status: "RECOVERED" as const };
 			},
 		);
 	}

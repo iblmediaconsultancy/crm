@@ -195,6 +195,13 @@ function requireExecutionDatabase(worker: boolean): void {
 	});
 }
 
+function requireRecoveryDatabase(): void {
+	if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL_REQUIRED");
+	const target = localLinkedInDatabaseTarget(process.env.DATABASE_URL);
+	if (!target.isAuthoritative)
+		throw new Error("MESSAGE_RECOVERY_REQUIRES_AUTHORITATIVE_CRM");
+}
+
 function requireProductionWorkerDatabase(): void {
 	if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL_REQUIRED");
 	const target = localLinkedInDatabaseTarget(process.env.DATABASE_URL);
@@ -282,6 +289,23 @@ async function runOnce(): Promise<void> {
 			join(profileDirectory(), "last-result.json"),
 			JSON.stringify(result),
 			"utf8",
+		);
+		console.log(JSON.stringify(result));
+	} finally {
+		await db.$disconnect();
+	}
+}
+
+async function recoverUnsentMessage(): Promise<void> {
+	requireRecoveryDatabase();
+	const jobId = option("--job-id", "");
+	if (!jobId) throw new Error("JOB_ID_REQUIRED");
+	const { db } = await import("@crm/db");
+	const { LinkedInChannelService } = await import("./linkedin-channel.service");
+	try {
+		const result = await new LinkedInChannelService(db).recoverUnsentMessage(
+			jobId,
+			option("--error-code", "MESSAGE_EDITOR_UNAVAILABLE"),
 		);
 		console.log(JSON.stringify(result));
 	} finally {
@@ -447,6 +471,7 @@ async function main(): Promise<void> {
 	if (command === "stop") return stopBrowser();
 	if (command === "health") return health();
 	if (command === "run-once") return runOnce();
+	if (command === "recover-unsent-message") return recoverUnsentMessage();
 	if (command === "queue-routine") return queueRoutineAction();
 	if (command === "worker") {
 		const subcommand = process.argv[3] ?? "status";
@@ -457,7 +482,7 @@ async function main(): Promise<void> {
 	}
 	if (command === "worker-run") return runWorker();
 	throw new Error(
-		"COMMAND_MUST_BE_START_STOP_HEALTH_RUN_ONCE_QUEUE_ROUTINE_OR_WORKER",
+		"COMMAND_MUST_BE_START_STOP_HEALTH_RUN_ONCE_RECOVER_UNSENT_MESSAGE_QUEUE_ROUTINE_OR_WORKER",
 	);
 }
 

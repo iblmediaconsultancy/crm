@@ -31,10 +31,8 @@ if (!testDatabaseUrl) {
 	const firstMessageProfileIdentifier = `linkedin-action-queue-first-message-profile-${suffix}`;
 	const firstMessageProfileUrl = `https://www.linkedin.com/in/${firstMessageProfileIdentifier}/`;
 	const accountKey = `linkedin-action-queue-account-${suffix}`;
-	const service = new LinkedInActionQueueService(
-		db,
-		new LinkedInChannelService(db),
-	);
+	const channelService = new LinkedInChannelService(db);
+	const service = new LinkedInActionQueueService(db, channelService);
 
 	describe("LinkedIn action queue handoff", () => {
 		it("auto-approves idempotent routine messages and does not enforce 20", async () => {
@@ -282,6 +280,54 @@ if (!testDatabaseUrl) {
 					where: { conversationId: conversation.id },
 				}),
 			).toBe(1);
+			const leasedJobId = first.jobId;
+			if (!leasedJobId) throw new Error("CLEANUP_JOB_NOT_CREATED");
+			await db.linkedInSendJob.update({
+				where: { id: leasedJobId },
+				data: {
+					status: "LEASED",
+					leaseOwner: "linkedin-action-queue-cleanup-worker",
+					leasedUntil: new Date(Date.now() + 60_000),
+					attemptCount: 1,
+				},
+			});
+			const attempt = await channelService.prepareMessageExecution(
+				leasedJobId,
+				"linkedin-action-queue-cleanup-worker",
+			);
+			if ("blockedReason" in attempt)
+				throw new Error(`CLEANUP_PREPARE_BLOCKED:${attempt.blockedReason}`);
+			await channelService.recordAttempt({
+				jobId: leasedJobId,
+				workerId: "linkedin-action-queue-cleanup-worker",
+				attemptNumber: attempt.attempt.attemptNumber,
+				status: "FAILED",
+				errorCode: "MESSAGE_EDITOR_UNAVAILABLE",
+			});
+			const cleaned = await db.linkedInSendJob.findUniqueOrThrow({
+				where: { id: leasedJobId },
+				include: { message: true },
+			});
+			expect(cleaned.status).toBe("FAILED");
+			expect(cleaned.retryAt).toBeNull();
+			expect(cleaned.message?.status).toBe("FAILED");
+			expect(
+				await db.relationshipColdTouchClaim.findUniqueOrThrow({
+					where: { contactId: firstMessageContactId },
+					select: { status: true },
+				}),
+			).toMatchObject({ status: "RELEASED" });
+			expect(
+				await db.activity.count({
+					where: { linkedinMessageId: cleaned.messageId ?? "" },
+				}),
+			).toBe(0);
+			expect(
+				await channelService.recoverUnsentMessage(
+					leasedJobId,
+					"MESSAGE_EDITOR_UNAVAILABLE",
+				),
+			).toMatchObject({ status: "ALREADY_RELEASED" });
 		});
 
 		it("does not queue handoff, protected, or ambiguous actions", async () => {
