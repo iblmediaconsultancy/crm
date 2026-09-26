@@ -306,6 +306,7 @@ async function recoverUnsentMessage(): Promise<void> {
 		const result = await new LinkedInChannelService(db).recoverUnsentMessage(
 			jobId,
 			option("--error-code", "MESSAGE_EDITOR_UNAVAILABLE"),
+			{ restoreRoutineState: process.argv.includes("--restore-routine-state") },
 		);
 		console.log(JSON.stringify(result));
 	} finally {
