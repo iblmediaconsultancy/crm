@@ -81,6 +81,7 @@ if (!testDatabaseUrl) {
 					profileUrl,
 					normalizedProfileUrl: profileIdentifier,
 					connectionState: "CONNECTED",
+					classification: "ACTION_REQUIRED",
 					consent: "ALLOWED",
 				},
 			});
@@ -144,7 +145,9 @@ if (!testDatabaseUrl) {
 				atlasActionType: "EXISTING_CONVERSATION_MESSAGE",
 			});
 			expect(
-				await db.linkedInSendJob.count({ where: { conversationId } }),
+				await db.linkedInSendJob.count({
+					where: { conversationId, idempotencyKey: input.idempotencyKey },
+				}),
 			).toBe(1);
 			expect(
 				await db.linkedInQuota.findFirst({
