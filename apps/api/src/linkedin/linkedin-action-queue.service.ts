@@ -156,6 +156,8 @@ export class LinkedInActionQueueService {
 				profileUrl: preflight.profileUrl,
 				normalizedProfileUrl: preflight.normalizedProfileUrl,
 				connectionState: "CONNECTED",
+				status: "ACTIVE",
+				classification: "ACTION_REQUIRED",
 			});
 			conversationId = conversation.id;
 		}

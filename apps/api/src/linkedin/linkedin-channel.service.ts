@@ -87,6 +87,21 @@ type ConversationInput = {
 		| "CONNECTED"
 		| "DECLINED"
 		| "WITHDRAWN";
+	status?:
+		| "ACTIVE"
+		| "WAITING_ON_PROSPECT"
+		| "PARKED"
+		| "CLOSED"
+		| "NEEDS_IHSAN";
+	classification?:
+		| "ACTION_REQUIRED"
+		| "REFERRAL_OR_PLAYER_OPPORTUNITY"
+		| "WARM_HANDOFF"
+		| "WAITING_ON_PROSPECT"
+		| "POSITIVE_LIGHT"
+		| "PARKED_NO_CURRENT_NEED"
+		| "CLOSED_OR_DO_NOT_PUSH"
+		| "AMBIGUOUS_OR_NEEDS_IHSAN";
 };
 
 type QueueInput = {
@@ -346,6 +361,8 @@ export class LinkedInChannelService {
 						normalizedProfileUrl: input.normalizedProfileUrl ?? null,
 						externalConversationKey: input.externalConversationKey ?? null,
 						connectionState: input.connectionState ?? undefined,
+						status: input.status ?? undefined,
+						classification: input.classification ?? undefined,
 					},
 					update: {
 						companyId: input.companyId ?? undefined,

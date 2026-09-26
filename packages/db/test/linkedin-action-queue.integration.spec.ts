@@ -232,10 +232,12 @@ if (!testDatabaseUrl) {
 				select: {
 					id: true,
 					connectionState: true,
+					classification: true,
 					externalConversationKey: true,
 				},
 			});
 			expect(conversation.connectionState).toBe("CONNECTED");
+			expect(conversation.classification).toBe("ACTION_REQUIRED");
 			expect(conversation.externalConversationKey).toBeNull();
 			expect(
 				await db.linkedInConversation.count({
