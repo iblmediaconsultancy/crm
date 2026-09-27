@@ -31,7 +31,7 @@ export function EmailThreadEntry({
 	const [opened, setOpened] = useState(false);
 
 	const thread = useQuery({
-		...trpc.google.thread.queryOptions({ threadId }),
+		...trpc.mailbox.thread.queryOptions({ threadId }),
 		enabled: opened,
 	});
 

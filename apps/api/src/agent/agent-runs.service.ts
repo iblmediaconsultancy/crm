@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Db } from "@crm/db";
 import { lockIdempotencyKey } from "@crm/db/idempotency";
+import { DEFAULT_AGENT_MODEL } from "@crm/db/settings";
 import {
 	BadRequestException,
 	Injectable,
@@ -173,6 +174,7 @@ export class AgentRunsService {
 					versionId: agent.currentVersionId,
 					initiatedById: userId,
 					triggerType: "MANUAL",
+					modelId: DEFAULT_AGENT_MODEL.id,
 					idempotencyKey: input.clientRequestId,
 					correlationId: randomUUID(),
 					events: {

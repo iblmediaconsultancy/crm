@@ -8,7 +8,7 @@ import {
 	RecordSource,
 } from "@crm/db";
 import { RETIRED_OUTCOME } from "@crm/db/agent-tasks";
-import { readAgentModel } from "@crm/db/settings";
+import { DEFAULT_AGENT_MODEL } from "@crm/db/settings";
 import { WORKSPACE_ID } from "@crm/db/workspace";
 import {
 	bucket,
@@ -133,9 +133,8 @@ export class RollupService {
 	}
 
 	private async shape(): Promise<Properties> {
-		const [model, members, ssoProviders, postgres, contextKey] =
+		const [members, ssoProviders, postgres, contextKey] =
 			await Promise.all([
-				readAgentModel(this.db).catch(() => null),
 				this.db.member.count({ where: { organizationId: WORKSPACE_ID } }),
 				this.db.ssoProvider.count(),
 				this.postgresMajor(),
@@ -152,17 +151,14 @@ export class RollupService {
 			cap_context_dev: Boolean(contextKey?.contextDevApiKey?.trim()),
 			cap_blob: isSet("BLOB_READ_WRITE_TOKEN"),
 			cap_github: isSet("GITHUB_TOKEN"),
-			cap_redis: isSet("REDIS_URL"),
 			cap_agent_bridge: isSet("AGENT_BRIDGE_SECRET"),
 			cap_cron_secret: isSet("CRON_SECRET"),
-			cap_ai_gateway: isSet("AI_GATEWAY_API_KEY"),
-			cap_google_oauth:
-				isSet("GOOGLE_CLIENT_ID") && isSet("GOOGLE_CLIENT_SECRET"),
+			cap_gemini_api: isSet("GOOGLE_GENERATIVE_AI_API_KEY"),
 			cap_sso_provider: ssoProviders > 0,
 			is_marketing: process.env.IS_MARKETING === "true",
 
-			agent_model_id: model?.id ?? null,
-			agent_model_context_window: model?.contextWindowTokens ?? null,
+			agent_model_id: DEFAULT_AGENT_MODEL.id,
+			agent_model_context_window: DEFAULT_AGENT_MODEL.contextWindowTokens,
 		};
 	}
 
@@ -238,7 +234,8 @@ export class RollupService {
 				COALESCE("data"->>'status', 'completed') <> 'completed' AS failed,
 				COUNT(*) AS count
 			FROM "agentEvent"
-			WHERE "type" = 'action.result' AND "emittedAt" >= ${since}
+			WHERE "lifecycleState" = 'ACTIVE'
+				AND "type" = 'action.result' AND "emittedAt" >= ${since}
 			GROUP BY 1, 2;
 		`;
 
@@ -267,7 +264,8 @@ export class RollupService {
 		const rows = await this.db.$queryRaw<{ type: string; sessions: bigint }[]>`
 			SELECT "type", COUNT(DISTINCT "sessionId") AS sessions
 			FROM "agentEvent"
-			WHERE "emittedAt" >= ${since}
+			WHERE "lifecycleState" = 'ACTIVE'
+				AND "emittedAt" >= ${since}
 				AND "type" IN ('session.started', 'session.waiting', 'session.failed', 'action.result')
 			GROUP BY 1;
 		`;
@@ -291,12 +289,12 @@ export class RollupService {
 		const [claimed, finished] = await Promise.all([
 			this.db.agentTask.groupBy({
 				by: ["kind"],
-				where: { startedAt: { gte: since } },
+				where: { lifecycleState: "ACTIVE", startedAt: { gte: since } },
 				_count: { _all: true },
 			}),
 			this.db.agentTask.groupBy({
 				by: ["kind", "outcome"],
-				where: { finishedAt: { gte: since } },
+				where: { lifecycleState: "ACTIVE", finishedAt: { gte: since } },
 				_count: { _all: true },
 			}),
 		]);
@@ -324,7 +322,7 @@ export class RollupService {
 	): Promise<{ mean: Record<string, number>; max: Record<string, number> }> {
 		const rows = await this.db.agentTask.groupBy({
 			by: ["kind"],
-			where: { finishedAt: { gte: since } },
+			where: { lifecycleState: "ACTIVE", finishedAt: { gte: since } },
 			_avg: { attempts: true },
 			_max: { attempts: true },
 		});
@@ -345,7 +343,11 @@ export class RollupService {
 		since: Date,
 	): Promise<{ total: number; buckets: Record<string, number> }> {
 		const rows = await this.db.agentTask.findMany({
-			where: { kind: "recheck", createdAt: { gte: since } },
+			where: {
+				lifecycleState: "ACTIVE",
+				kind: "recheck",
+				createdAt: { gte: since },
+			},
 			select: { createdAt: true, dueAt: true },
 		});
 

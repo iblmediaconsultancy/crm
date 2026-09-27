@@ -10,6 +10,7 @@ export default defineConfig({
 		seed: "bun run prisma/seed.ts",
 	},
 	datasource: {
-		url: env("DATABASE_URL"),
+		url: process.env.DATABASE_MIGRATION_URL ?? env("DATABASE_URL"),
+		shadowDatabaseUrl: process.env.SHADOW_DATABASE_URL,
 	},
 });

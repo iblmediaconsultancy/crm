@@ -10,6 +10,7 @@ node_modules
 .env
 .env.*
 !.env.example
+.env.phase0.local
 
 # Testing
 coverage
@@ -25,6 +26,12 @@ coverage
 out/
 build
 dist
+
+# V1 migration exports can contain personal and mailbox data. Only redacted
+# manifests and reconciliation summaries belong in source control.
+/phase6/artifacts/
+/rehearsal-input/v1-authorized-copy/
+/phase7/.rehearsal-secrets/
 
 
 # Debug

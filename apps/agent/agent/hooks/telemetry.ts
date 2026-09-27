@@ -1,30 +1,16 @@
-import { db } from "@crm/db";
-import { readAgentModel } from "@crm/db/settings";
+import { DEFAULT_AGENT_MODEL } from "@crm/db/settings";
 import { agentError, modelError } from "@crm/telemetry";
 import { defineHook } from "eve/hooks";
 
-let modelId: string | null = null;
-
-async function configuredModel(): Promise<string | null> {
-	if (modelId) return modelId;
-
-	try {
-		modelId = (await readAgentModel(db)).id;
-	} catch {
-		modelId = null;
-	}
-
-	return modelId;
-}
-
 const MODEL_CODES = [
 	"model",
-	"gateway",
 	"provider",
 	"rate_limit",
 	"context_length",
 	"overloaded",
 	"unauthorized",
+	"quota",
+	"resource_exhausted",
 ];
 
 function taskKind(
@@ -74,7 +60,7 @@ export default defineHook({
 
 			modelError({
 				error: event.data.code,
-				modelId: await configuredModel(),
+				modelId: DEFAULT_AGENT_MODEL.id,
 			});
 		},
 	},

@@ -1,9 +1,10 @@
-import { ssoClient } from "@better-auth/sso/client";
+import { organizationClient } from "better-auth/client/plugins";
+import { workspaceAccess, workspaceRoles } from "./access";
 import { createAuthClient } from "better-auth/react";
 
 export const authClient = createAuthClient({
 	baseURL: typeof window === "undefined" ? undefined : window.location.origin,
-	plugins: [ssoClient()],
+	plugins: [organizationClient({ ac: workspaceAccess, roles: workspaceRoles })],
 });
 
 export const { getSession, signIn, signOut, useSession } = authClient;

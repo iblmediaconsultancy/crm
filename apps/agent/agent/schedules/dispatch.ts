@@ -1,17 +1,76 @@
+import { db } from "@crm/db";
 import { defineSchedule } from "eve/schedules";
 import crm from "../channels/crm";
+import { scheduleDueAtlasCommercialEnrichment } from "../lib/atlas-commercial-enrichment";
+import { atlasLocalDateKey, atlasReportWindow } from "../lib/atlas-report";
 import {
 	pendingAgentRunIds,
 	pendingBuilderSubmissionIds,
 	queueDueAgentRuns,
 } from "../lib/custom-agent-dispatch";
 import { brief, drainAll, taskAuth } from "../lib/dispatch";
+import {
+	claimResearchRequests,
+	noteResearchContinuation,
+	researchRequestAuth,
+	settleResearchRequest,
+} from "../lib/ibl-research";
+import { isScheduledExecutionEnabled } from "../lib/scheduled-execution";
+import { scheduleTask } from "../lib/tasks";
 
 export default defineSchedule({
 	cron: "* * * * *",
 	async run({ receive, waitUntil, appAuth }) {
+		if (!isScheduledExecutionEnabled()) return;
 		waitUntil(
 			Promise.all([
+				(async () => {
+					await scheduleDueAtlasCommercialEnrichment();
+				})(),
+				(async () => {
+					const settings = await db.appSetting.findUnique({
+						where: { id: "app" },
+						select: { atlasWorkingTimeZone: true, atlasReportMinute: true },
+					});
+					const timeZone = settings?.atlasWorkingTimeZone ?? "Europe/Amsterdam";
+					const reportMinute = settings?.atlasReportMinute ?? 1140;
+					if (!atlasReportWindow(new Date(), timeZone, reportMinute)) return;
+					const reportDate = new Date(
+						`${atlasLocalDateKey(new Date(), timeZone)}T00:00:00.000Z`,
+					);
+					const existing = await db.atlasDailyReport.findUnique({
+						where: { reportDate_timeZone: { reportDate, timeZone } },
+						select: { id: true },
+					});
+					if (existing) return;
+					await scheduleTask({
+						kind: "atlas-daily-report",
+						reason:
+							"Generate the weekday Atlas operating report at the configured local report time.",
+						dueAt: new Date(),
+						priority: 90,
+						budget: 2,
+					});
+				})(),
+				(async () => {
+					if (
+						process.env.ATLAS_LIVE_OUTREACH_ENABLED?.trim().toLowerCase() !==
+						"true"
+					)
+						return;
+					const settings = await db.appSetting.findUnique({
+						where: { id: "app" },
+						select: { atlasLiveOutreachEnabled: true },
+					});
+					if (!settings?.atlasLiveOutreachEnabled) return;
+					await scheduleTask({
+						kind: "atlas-outreach",
+						reason: "Run the Atlas autonomous outreach cycle within policy.",
+						dueAt: new Date(),
+						priority: 100,
+						budget: 4,
+					});
+				})(),
 				drainAll((task) =>
 					receive(crm, {
 						message: brief(task),
@@ -42,6 +101,27 @@ export default defineSchedule({
 							}),
 						),
 					]);
+				})(),
+				(async () => {
+					const requests = await claimResearchRequests();
+					await Promise.all(
+						requests.map(async (request) => {
+							try {
+								const session = await receive(crm, {
+									message: `Research request ${request.id}: ${request.prompt}`,
+									target: { researchRequestId: request.id },
+									auth: researchRequestAuth(request),
+								});
+								await noteResearchContinuation(request.id, session.id);
+							} catch {
+								await settleResearchRequest(
+									request.id,
+									"FAILED",
+									"DISPATCH_FAILED",
+								);
+							}
+						}),
+					);
 				})(),
 			]),
 		);

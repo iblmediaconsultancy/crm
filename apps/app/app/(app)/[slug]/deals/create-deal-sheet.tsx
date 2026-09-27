@@ -71,12 +71,18 @@ function CreateDealForm({ companyId }: { companyId?: string }) {
 	const [company, setCompany] = useState(companyId ?? UNSET);
 	const [ownerId, setOwnerId] = useState(UNSET);
 	const [stage, setStage] = useState<string>("DEMO_BOOKED");
+	const [potentialPackageName, setPotentialPackageName] = useState("");
 	const [amount, setAmount] = useState("");
+	const [potentialMonthlyRevenue, setPotentialMonthlyRevenue] = useState("");
+	const [potentialOneOffRevenue, setPotentialOneOffRevenue] = useState("");
 	const [currency, setCurrency] = useState("");
 	const [closeDate, setCloseDate] = useState("");
 
 	const nameId = useId();
+	const potentialPackageNameId = useId();
 	const amountId = useId();
+	const potentialMonthlyRevenueId = useId();
+	const potentialOneOffRevenueId = useId();
 	const closeDateId = useId();
 
 	const users = useQuery(trpc.users.list.queryOptions());
@@ -95,7 +101,10 @@ function CreateDealForm({ companyId }: { companyId?: string }) {
 				toast.success(`${deal.name} added.`);
 				await setOpen(null);
 				setName("");
+				setPotentialPackageName("");
 				setAmount("");
+				setPotentialMonthlyRevenue("");
+				setPotentialOneOffRevenue("");
 				setCurrency("");
 				setCloseDate("");
 				openRecord({ kind: "deal", id: deal.id });
@@ -131,11 +140,22 @@ function CreateDealForm({ companyId }: { companyId?: string }) {
 							companyId: company,
 							ownerId: resolvedOwner,
 							stage: stage as never,
+							potentialPackageName: potentialPackageName.trim() || null,
 							amountCents: Number.isFinite(parsed)
 								? Math.round(parsed * 100)
 								: null,
 							currency: currency || workspaceCurrency,
 							expectedCloseDate: closeDate || null,
+							potentialMonthlyRevenueCents: Number.isFinite(
+								Number.parseFloat(potentialMonthlyRevenue),
+							)
+								? Math.round(Number.parseFloat(potentialMonthlyRevenue) * 100)
+								: null,
+							potentialOneOffRevenueCents: Number.isFinite(
+								Number.parseFloat(potentialOneOffRevenue),
+							)
+								? Math.round(Number.parseFloat(potentialOneOffRevenue) * 100)
+								: null,
 						});
 					}}
 				>
@@ -149,6 +169,56 @@ function CreateDealForm({ companyId }: { companyId?: string }) {
 								placeholder="Stripe — Comp AI"
 								autoComplete="off"
 								required
+							/>
+						</Field>
+
+						<Field>
+							<FieldLabel htmlFor={potentialPackageNameId}>
+								Proposed package
+							</FieldLabel>
+							<Input
+								id={potentialPackageNameId}
+								value={potentialPackageName}
+								onChange={(event) =>
+									setPotentialPackageName(event.target.value)
+								}
+								placeholder="Monthly representation"
+								autoComplete="off"
+							/>
+						</Field>
+
+						<Field>
+							<FieldLabel htmlFor={potentialMonthlyRevenueId}>
+								Potential monthly MRR
+							</FieldLabel>
+							<Input
+								id={potentialMonthlyRevenueId}
+								value={potentialMonthlyRevenue}
+								onChange={(event) =>
+									setPotentialMonthlyRevenue(event.target.value)
+								}
+								placeholder="1000"
+								inputMode="decimal"
+								autoComplete="off"
+							/>
+							<FieldDescription>
+								Used for weighted pipeline forecasts.
+							</FieldDescription>
+						</Field>
+
+						<Field>
+							<FieldLabel htmlFor={potentialOneOffRevenueId}>
+								Potential one-off revenue
+							</FieldLabel>
+							<Input
+								id={potentialOneOffRevenueId}
+								value={potentialOneOffRevenue}
+								onChange={(event) =>
+									setPotentialOneOffRevenue(event.target.value)
+								}
+								placeholder="0"
+								inputMode="decimal"
+								autoComplete="off"
 							/>
 						</Field>
 

@@ -61,6 +61,7 @@ import { useTRPC } from "@/lib/trpc/client";
 import type { RouterOutputs } from "@/lib/trpc/types";
 import { QuickAddContact, QuickAddDeal } from "./quick-add";
 import { RecordActions } from "./record-actions";
+import { RecordFinance } from "./record-finance";
 import {
 	AddRow,
 	DealAmount,
@@ -209,6 +210,11 @@ export function CompanySheet({ companyId }: { companyId: string }) {
 					),
 				},
 				{
+					value: "finance",
+					label: "Finance",
+					content: <RecordFinance companyId={company.id} />,
+				},
+				{
 					value: "activity",
 					label: "Activity",
 					content: <Timeline anchor={{ companyId: company.id }} />,
@@ -265,7 +271,8 @@ export function CompanySheet({ companyId }: { companyId: string }) {
 						<RecordActions
 							record={{ kind: "company", id: company.id }}
 							name={company.name}
-							consequence={companyConsequence(company)}
+							version={company.version}
+							lifecycleState={company.lifecycleState}
 						/>
 					</>
 				) : null

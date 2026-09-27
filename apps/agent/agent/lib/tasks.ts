@@ -1,8 +1,9 @@
-import { db, Prisma } from "@crm/db";
+import { COMMERCIAL_ENRICHMENT_MAX_ATTEMPTS, db, Prisma } from "@crm/db";
 import { MAX_ATTEMPTS, RETIRED_OUTCOME } from "@crm/db/agent-tasks";
 
 export type LeasedTask = {
 	id: string;
+	leadId: string | null;
 	contactId: string | null;
 	companyId: string | null;
 	kind: string;
@@ -15,6 +16,7 @@ export type LeasedTask = {
 
 export type TaskSubject = {
 	id: string;
+	leadId: string | null;
 	contactId: string | null;
 	companyId: string | null;
 	kind: string;
@@ -44,7 +46,8 @@ export async function claimDue(
 			"attempts" = t."attempts" + 1
 		FROM (
 			SELECT t2.id FROM "agentTask" AS t2
-			WHERE t2."finishedAt" IS NULL
+			WHERE t2."lifecycleState" = 'ACTIVE'
+				AND t2."finishedAt" IS NULL
 				AND t2."dueAt" <= ${now}
 				AND (t2."leasedUntil" IS NULL OR t2."leasedUntil" < ${now})
 				AND t2."attempts" < ${MAX_ATTEMPTS}
@@ -54,9 +57,25 @@ export async function claimDue(
 			FOR UPDATE SKIP LOCKED
 		) AS due
 		WHERE t.id = due.id
-		RETURNING t.id, t."contactId", t."companyId", t.kind, t.reason,
+		RETURNING t.id, t."leadId", t."contactId", t."companyId", t.kind, t.reason,
 			t.budget, t.attempts, t.priority, t."dueAt";
 	`;
+	const enrichmentLeadIds = claimed
+		.filter(
+			(task) => task.kind === "atlas-commercial-enrichment" && task.leadId,
+		)
+		.map((task) => task.leadId as string);
+	if (enrichmentLeadIds.length > 0) {
+		await db.lead.updateMany({
+			where: {
+				id: { in: enrichmentLeadIds },
+				commercialEnrichmentAttempts: {
+					lt: COMMERCIAL_ENRICHMENT_MAX_ATTEMPTS,
+				},
+			},
+			data: { commercialEnrichmentAttempts: { increment: 1 } },
+		});
+	}
 
 	return claimed.sort(
 		(a, b) => b.priority - a.priority || a.dueAt.getTime() - b.dueAt.getTime(),
@@ -71,9 +90,10 @@ export async function retireExhausted(): Promise<TaskSubject[]> {
 		SET "finishedAt" = ${now},
 			"outcome" = ${RETIRED_OUTCOME}
 		WHERE t."finishedAt" IS NULL
+			AND t."lifecycleState" = 'ACTIVE'
 			AND t."attempts" >= ${MAX_ATTEMPTS}
 			AND (t."leasedUntil" IS NULL OR t."leasedUntil" < ${now})
-		RETURNING t.id, t."contactId", t."companyId", t.kind;
+		RETURNING t.id, t."leadId", t."contactId", t."companyId", t.kind;
 	`;
 }
 
@@ -83,7 +103,7 @@ export async function completeTask(
 	sessionId?: string,
 ): Promise<TaskSubject | null> {
 	const { count } = await db.agentTask.updateMany({
-		where: { id: taskId, finishedAt: null },
+		where: { id: taskId, lifecycleState: "ACTIVE", finishedAt: null },
 		data: {
 			finishedAt: new Date(),
 			outcome: outcome.slice(0, 500),
@@ -93,16 +113,58 @@ export async function completeTask(
 
 	if (count === 0) return null;
 
-	return db.agentTask.findUnique({
+	const subject = await db.agentTask.findUnique({
 		where: { id: taskId },
-		select: { id: true, contactId: true, companyId: true, kind: true },
+		select: {
+			id: true,
+			leadId: true,
+			contactId: true,
+			companyId: true,
+			kind: true,
+		},
 	});
+	if (subject?.kind === "atlas-commercial-enrichment" && subject.leadId) {
+		const lead = await db.lead.findUnique({
+			where: { id: subject.leadId },
+			select: {
+				commercialEnrichmentStatus: true,
+				commercialEnrichmentAttempts: true,
+			},
+		});
+		if (lead?.commercialEnrichmentStatus === "QUEUED") {
+			await db.lead.update({
+				where: { id: subject.leadId },
+				data: {
+					commercialEnrichmentStatus:
+						lead.commercialEnrichmentAttempts >=
+						COMMERCIAL_ENRICHMENT_MAX_ATTEMPTS
+							? "EXHAUSTED"
+							: "QUEUED",
+					commercialEnrichmentNextAttemptAt:
+						lead.commercialEnrichmentAttempts >=
+						COMMERCIAL_ENRICHMENT_MAX_ATTEMPTS
+							? null
+							: new Date(
+									Date.now() + lead.commercialEnrichmentAttempts * 15 * 60_000,
+								),
+				},
+			});
+		}
+	}
+
+	return subject;
 }
 
 export async function taskSubject(taskId: string): Promise<TaskSubject | null> {
 	return db.agentTask.findUnique({
 		where: { id: taskId },
-		select: { id: true, contactId: true, companyId: true, kind: true },
+		select: {
+			id: true,
+			leadId: true,
+			contactId: true,
+			companyId: true,
+			kind: true,
+		},
 	});
 }
 
@@ -111,12 +173,13 @@ export async function noteSession(
 	sessionId: string,
 ): Promise<void> {
 	await db.agentTask.updateMany({
-		where: { id: taskId, finishedAt: null },
+		where: { id: taskId, lifecycleState: "ACTIVE", finishedAt: null },
 		data: { sessionId },
 	});
 }
 
 export async function scheduleTask(input: {
+	leadId?: string | null;
 	contactId?: string | null;
 	companyId?: string | null;
 	kind: string;
@@ -128,7 +191,9 @@ export async function scheduleTask(input: {
 	const existing = await db.agentTask.findFirst({
 		where: {
 			kind: input.kind,
+			lifecycleState: "ACTIVE",
 			finishedAt: null,
+			leadId: input.leadId ?? undefined,
 			contactId: input.contactId ?? undefined,
 			companyId: input.companyId ?? undefined,
 		},
@@ -145,6 +210,7 @@ export async function scheduleTask(input: {
 
 	return db.agentTask.create({
 		data: {
+			leadId: input.leadId ?? null,
 			contactId: input.contactId ?? null,
 			companyId: input.companyId ?? null,
 			kind: input.kind,

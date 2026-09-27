@@ -1,0 +1,109 @@
+name: ibl-command-center-v2
+
+x-runtime-environment: &runtime-environment
+  DATABASE_URL: postgresql://ibl_v2_app:ibl_v2_app_local@postgres:5432/ibl_command_center_v2
+  API_URL: http://api:3001
+  APP_URL: http://localhost:3300,http://127.0.0.1:3300
+  BETTER_AUTH_URL: http://api:3001
+  BETTER_AUTH_SECRET: phase1-local-development-secret-change-me
+  ALLOWED_SIGN_IN: local.test
+  CRM_TELEMETRY_DISABLED: "1"
+  NEXT_TELEMETRY_DISABLED: "1"
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ibl_v2_root
+      POSTGRES_PASSWORD: ibl_v2_root_local
+      POSTGRES_DB: postgres
+    ports:
+      - "127.0.0.1:55433:5432"
+    volumes:
+      - ./docker/postgres-init.sql:/docker-entrypoint-initdb.d/00-roles.sql:ro
+      - ibl-v2-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ibl_v2_root -d postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks: [private]
+
+  migrate:
+    build:
+      context: ..
+      dockerfile: phase1/docker/Dockerfile
+      target: migrate
+    environment:
+      DATABASE_MIGRATION_URL: postgresql://ibl_v2_migration:ibl_v2_migration_local@postgres:5432/ibl_command_center_v2
+      DATABASE_URL: postgresql://ibl_v2_app:ibl_v2_app_local@postgres:5432/ibl_command_center_v2
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [private]
+    restart: "no"
+
+  api:
+    build:
+      context: ..
+      dockerfile: phase1/docker/Dockerfile
+      target: api
+    environment:
+      <<: *runtime-environment
+      AGENT_URL: http://agent:2000
+      AGENT_BRIDGE_SECRET: ${AGENT_BRIDGE_SECRET:-phase1-local-development-secret-change-me}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:3301:3001"
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:3001/health').then(r=>{if(!r.ok)process.exit(1)})"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [private, edge]
+
+  app:
+    build:
+      context: ..
+      dockerfile: phase1/docker/Dockerfile
+      target: app
+    environment: *runtime-environment
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:3300:3000"
+    networks: [private, edge]
+
+  agent:
+    build:
+      context: ..
+      dockerfile: phase1/docker/Dockerfile
+      target: agent
+    environment:
+      <<: *runtime-environment
+      AGENT_URL: http://agent:2000
+      AGENT_BRIDGE_SECRET: ${AGENT_BRIDGE_SECRET:-phase1-local-development-secret-change-me}
+      GOOGLE_GENERATIVE_AI_API_KEY: ${GOOGLE_GENERATIVE_AI_API_KEY:?Set GOOGLE_GENERATIVE_AI_API_KEY in the ignored root .env}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:2000:2000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:2000/').then(r=>{if(!r.ok)process.exit(1)})"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [private, edge]
+
+networks:
+  private:
+    internal: true
+  edge:
+
+volumes:
+  ibl-v2-postgres-data:
+    name: ibl-v2-postgres-data

@@ -1,0 +1,103 @@
+import { describe, expect, test } from "bun:test";
+import {
+	canonicalJson,
+	planRows,
+	sourceIdentity,
+	summarize,
+} from "../src/core";
+
+describe("V1 migration planner", () => {
+	test("stable keys do not depend on object key order", () => {
+		expect(canonicalJson({ b: 2, a: 1 })).toBe(canonicalJson({ a: 1, b: 2 }));
+		expect(sourceIdentity("legacy", { a: 1, b: 2 })).toEqual(
+			sourceIdentity("legacy", { b: 2, a: 1 }),
+		);
+	});
+
+	test("maps supported rows and explicitly excludes credential material", () => {
+		const outcomes = planRows(
+			[
+				{
+					table: "leads",
+					row: { id: "1", name: "Example Lead", status: "qualified" },
+				},
+				{ table: "templates", row: { id: "2", name: "Intro", body: "Hello" } },
+				{
+					table: "mailbox_credentials",
+					row: { id: "3", encrypted_secret: "never copied" },
+				},
+			],
+			{ ownerUserId: "user_1" },
+		);
+		expect(summarize(outcomes)).toEqual({
+			total: 3,
+			accounted: 3,
+			byOutcome: {
+				MAPPED: 2,
+				REJECTED: 0,
+				DUPLICATE_CANDIDATE: 0,
+				EXCLUDED: 1,
+			},
+			byReason: { SECRET_NOT_MIGRATED: 1 },
+			platformInternalRows: 0,
+			controlOnlyRows: 1,
+			intentionallyExcludedBusinessRows: 0,
+			unresolvedBusinessRows: 0,
+			fieldCoverageComplete: true,
+			complete: true,
+		});
+		expect(outcomes[2]?.fieldCoverage?.intentionallyExcluded).toEqual({
+			id: "SECRET_NOT_MIGRATED",
+			encrypted_secret: "SECRET_NOT_MIGRATED",
+		});
+	});
+
+	test("surfaces normalized duplicates without merging", () => {
+		const outcomes = planRows(
+			[
+				{
+					table: "football_entities",
+					row: { id: "1", entity_kind: "player", display_name: "Ada  Striker" },
+				},
+				{
+					table: "football_entities",
+					row: { id: "2", entity_kind: "player", display_name: "ada-striker" },
+				},
+			],
+			{ ownerUserId: "user_1" },
+		);
+		expect(outcomes.map((item) => item.outcome)).toEqual([
+			"MAPPED",
+			"DUPLICATE_CANDIDATE",
+		]);
+	});
+
+	test("does not represent excluded business data as migration-complete", () => {
+		const summary = summarize([
+			{
+				idempotencyKey: "1",
+				sourceTable: "sessions",
+				sourceIdHash: "a",
+				outcome: "EXCLUDED",
+				reasonCode: "PLATFORM_INTERNAL",
+			},
+			{
+				idempotencyKey: "2",
+				sourceTable: "legacy_contacts",
+				sourceIdHash: "b",
+				outcome: "EXCLUDED",
+				reasonCode: "INTENTIONALLY_EXCLUDED",
+			},
+		]);
+		expect(summary.platformInternalRows).toBe(0);
+		expect(summary.intentionallyExcludedBusinessRows).toBe(1);
+		expect(summary.complete).toBe(false);
+	});
+	test("fails closed without an explicit V2 owner", () => {
+		const [outcome] = planRows(
+			[{ table: "leads", row: { id: "1", name: "Lead" } }],
+			{ ownerUserId: "" },
+		);
+		expect(outcome?.reasonCode).toBe("MISSING_V2_OWNER");
+	});
+});

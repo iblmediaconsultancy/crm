@@ -30,7 +30,7 @@ export default function DealsPage({
 				<PageShellHeading>
 					<PageShellTitle>Deals</PageShellTitle>
 					<PageShellDescription>
-						The pipeline, and everything that has already closed.
+						Commercial opportunities, active client work and closed history.
 					</PageShellDescription>
 				</PageShellHeading>
 				<PageShellActions>

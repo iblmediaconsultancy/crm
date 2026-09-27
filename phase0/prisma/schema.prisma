@@ -1,0 +1,91 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  schemas  = ["phase0"]
+}
+
+model User {
+  id       String    @id @db.Uuid
+  sourceId String    @unique @map("source_id")
+  name     String
+  crmRole  String    @map("crm_role")
+  mailboxes Mailbox[]
+  @@map("users")
+  @@schema("phase0")
+}
+
+model Mailbox {
+  id          String         @id @db.Uuid
+  ownerUserId String         @map("owner_user_id") @db.Uuid
+  address     String         @unique
+  displayName String         @map("display_name")
+  signature   String
+  owner       User           @relation(fields: [ownerUserId], references: [id])
+  grants      MailboxGrant[]
+  threads     EmailThread[]
+  @@map("mailboxes")
+  @@schema("phase0")
+}
+
+model MailboxGrant {
+  mailboxId String @map("mailbox_id") @db.Uuid
+  userId    String @map("user_id") @db.Uuid
+  permission String
+  mailbox   Mailbox @relation(fields: [mailboxId], references: [id])
+  @@id([mailboxId, userId])
+  @@map("mailbox_grants")
+  @@schema("phase0")
+}
+
+model EmailThread {
+  id          String         @id @db.Uuid
+  sourceId    String         @unique @map("source_id")
+  mailboxId   String         @map("mailbox_id") @db.Uuid
+  subject     String
+  mailbox     Mailbox        @relation(fields: [mailboxId], references: [id])
+  messages    EmailMessage[]
+  @@map("email_threads")
+  @@schema("phase0")
+}
+
+model EmailMessage {
+  id        String      @id @db.Uuid
+  sourceId  String      @unique @map("source_id")
+  threadId  String      @map("thread_id") @db.Uuid
+  messageId String      @unique @map("message_id")
+  body      String
+  direction String
+  thread    EmailThread @relation(fields: [threadId], references: [id])
+  @@map("email_messages")
+  @@schema("phase0")
+}
+
+model WorkItem {
+  id          String    @id @db.Uuid
+  kind        String
+  dueAt       DateTime  @map("due_at") @db.Timestamptz(6)
+  priority    Int
+  attempts    Int       @default(0)
+  leasedUntil DateTime? @map("leased_until") @db.Timestamptz(6)
+  leaseOwner  String?   @map("lease_owner")
+  completedAt DateTime? @map("completed_at") @db.Timestamptz(6)
+  failedAt    DateTime? @map("failed_at") @db.Timestamptz(6)
+  @@map("work_items")
+  @@schema("phase0")
+}
+
+model MigrationIdMap {
+  sourceType String @map("source_type")
+  sourceId   String @map("source_id")
+  targetType String @map("target_type")
+  targetId   String @map("target_id") @db.Uuid
+  outcome    String
+  reason     String?
+  @@id([sourceType, sourceId])
+  @@map("migration_id_map")
+  @@schema("phase0")
+}

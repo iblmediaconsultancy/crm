@@ -1,20 +1,70 @@
 import { db } from "@crm/db";
-import { WORKSPACE_ID, workspaceSlug } from "@crm/db/workspace";
+import { WORKSPACE_ID } from "@crm/db/workspace";
+import {
+	WORKSPACE_PERMISSIONS,
+	WORKSPACE_ROLES,
+	type WorkspacePermission,
+	type WorkspaceRole,
+} from "./permissions";
 
+export {
+	FINANCE_PERMISSIONS,
+	type FinancePermission,
+	WORKSPACE_PERMISSIONS,
+	WORKSPACE_ROLES,
+	type WorkspacePermission,
+	type WorkspaceRole,
+} from "./permissions";
 export { WORKSPACE_ID };
 
-export const DEFAULT_WORKSPACE_NAME = "CRM";
+export const DEFAULT_WORKSPACE_NAME = "IBL Media Consultancy";
 
-export const WORKSPACE_ROLES = ["owner", "admin", "member"] as const;
+const ROLE_PERMISSIONS: Record<
+	WorkspaceRole,
+	ReadonlySet<WorkspacePermission>
+> = {
+	admin: new Set(WORKSPACE_PERMISSIONS),
+	team: new Set([
+		"crm.read",
+		"crm.create",
+		"crm.update.shared",
+		"crm.update.owned",
+		"crm.archive",
+		"crm.restore",
+		"crm.bulk.assign",
+		"football.manage",
+		"allocation.manage",
+		"duplicates.review",
+		"outreach.approve",
+		"providers.verify",
+		"finance.company.mrr",
+		"finance.goals.read",
+		"finance.pipeline.value",
+		"finance.team.performance.own",
+		"finance.compensation.own",
+	]),
+	contributor: new Set([
+		"crm.read",
+		"crm.create",
+		"crm.update.owned",
+		"finance.team.performance.own",
+		"finance.compensation.own",
+	]),
+};
 
-export type WorkspaceRole = (typeof WORKSPACE_ROLES)[number];
+export function hasWorkspacePermission(
+	role: WorkspaceRole,
+	permission: WorkspacePermission,
+): boolean {
+	return ROLE_PERMISSIONS[role].has(permission);
+}
 
 export function isWorkspaceRole(value: string): value is WorkspaceRole {
 	return (WORKSPACE_ROLES as readonly string[]).includes(value);
 }
 
 export function isWorkspaceAdmin(role: WorkspaceRole | null): boolean {
-	return role === "owner" || role === "admin";
+	return role === "admin";
 }
 
 export function canRenameWorkspace(role: WorkspaceRole | null): boolean {
@@ -32,72 +82,19 @@ export function canManageCurrency(role: WorkspaceRole | null): boolean {
 export async function ensureWorkspaceMembership(
 	userId: string,
 ): Promise<string | undefined> {
-	try {
-		return await db.$transaction(async (tx) => {
-			const workspace = await tx.organization.upsert({
-				where: { id: WORKSPACE_ID },
-				create: {
-					id: WORKSPACE_ID,
-					name: DEFAULT_WORKSPACE_NAME,
-					slug: workspaceSlug(DEFAULT_WORKSPACE_NAME),
-					createdAt: new Date(),
-				},
-				update: {},
-				select: { id: true, name: true, slug: true },
-			});
-
-			const slug = workspaceSlug(workspace.name);
-
-			if (workspace.slug !== slug) {
-				await tx.organization.update({
-					where: { id: workspace.id },
-					data: { slug },
-				});
-			}
-
-			const enrolled = await tx.member.count({
-				where: { organizationId: workspace.id },
-			});
-
-			if (enrolled === 0) {
-				const existing = await tx.user.findMany({
-					select: { id: true },
-					orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-				});
-
-				await tx.member.createMany({
-					data: existing.map((user, index) => ({
-						id: crypto.randomUUID(),
-						organizationId: workspace.id,
-						userId: user.id,
-						role: index === 0 ? "owner" : "member",
-						createdAt: new Date(),
-					})),
-					skipDuplicates: true,
-				});
-			}
-
-			await tx.member.upsert({
-				where: {
-					organizationId_userId: { organizationId: workspace.id, userId },
-				},
-				create: {
-					id: crypto.randomUUID(),
-					organizationId: workspace.id,
-					userId,
-					role: "member",
-					createdAt: new Date(),
-				},
-				update: {},
-			});
-
-			return workspace.id;
-		});
-	} catch (error) {
-		console.error(
-			`[auth] could not enrol user ${userId} in workspace ${WORKSPACE_ID}; the next sign-in will retry`,
-			error,
-		);
-		return undefined;
-	}
+	const membership = await db.member.findUnique({
+		where: {
+			organizationId_userId: {
+				organizationId: WORKSPACE_ID,
+				userId,
+			},
+		},
+		select: {
+			organizationId: true,
+			user: { select: { profile: { select: { status: true } } } },
+		},
+	});
+	return membership?.user.profile?.status === "ACTIVE"
+		? membership.organizationId
+		: undefined;
 }

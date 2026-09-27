@@ -5,6 +5,11 @@ export {
 	type PrismaLogSink,
 	setPrismaLogSink,
 } from "./client";
+export * from "./commercial-quality";
+export type {
+	ProviderCapability,
+	UserProfile,
+} from "./generated/prisma/client";
 export { Prisma, PrismaClient } from "./generated/prisma/client";
 export * from "./generated/prisma/enums";
 export type * from "./generated/prisma/models";
@@ -13,3 +18,8 @@ export type {
 	FactEvidence,
 	WorkspaceProfileSections,
 } from "./json";
+export * from "./linkedin-browser-adapter";
+export * from "./outreach-policy";
+export * from "./person-protection";
+export * from "./player-protection";
+export * from "./prospect-backlog";

@@ -10,6 +10,7 @@ let dealId: string;
 let paulaId: string;
 let placeholderId: string;
 let userId: string;
+let mailboxId: string;
 
 const daysAgo = (days: number) => new Date(Date.now() - days * 86_400_000);
 const daysAhead = (days: number) => new Date(Date.now() + days * 86_400_000);
@@ -27,6 +28,16 @@ beforeAll(async () => {
 		select: { id: true },
 	});
 	userId = user.id;
+	const mailbox = await db.mailbox.create({
+		data: {
+			ownerUserId: userId,
+			address: `rep.${suffix}@example.test`,
+			normalizedAddress: `rep.${suffix}@example.test`,
+			status: "UNVERIFIED",
+		},
+		select: { id: true },
+	});
+	mailboxId = mailbox.id;
 
 	const company = await db.company.create({
 		data: {
@@ -122,6 +133,7 @@ beforeAll(async () => {
 
 	const thread = await db.emailThread.create({
 		data: {
+			mailboxId,
 			rootMessageId: `<root.${suffix}@example.test>`,
 			subject: "Re: Contract",
 			companyId,
@@ -137,6 +149,7 @@ beforeAll(async () => {
 		data: [
 			{
 				threadId: thread.id,
+				mailboxId,
 				rfcMessageId: `<out.${suffix}@example.test>`,
 				direction: EmailDirection.OUTBOUND,
 				fromEmail: `rep.${suffix}@example.test`,
@@ -147,6 +160,7 @@ beforeAll(async () => {
 			},
 			{
 				threadId: thread.id,
+				mailboxId,
 				rfcMessageId: `<in.${suffix}@example.test>`,
 				direction: EmailDirection.INBOUND,
 				fromEmail: `paula.marchetti@${domain}`,

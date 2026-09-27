@@ -18,9 +18,9 @@ import { AgentTriggerService } from "../agent/agent-trigger.service";
 import { CompanyDirectoryService } from "../companies/company-directory.service";
 import {
 	ActivityStampService,
-	type StampTargets,
 } from "../crm/activity-stamp.service";
 import { type BulkResult, requireOwner, runBulk } from "../crm/bulk";
+import { DuplicateService } from "../crm/duplicate.service";
 import { blankToNull, normalizeEmail, toCents } from "../crm/values";
 import { InjectDatabase } from "../database/database.constants";
 import { FieldsService } from "../fields/fields.service";
@@ -70,6 +70,10 @@ const FACT_COLUMNS: Record<string, string | undefined> = {
 
 export type ContactRow = {
 	id: string;
+	lifecycleState: "ACTIVE" | "ARCHIVED";
+	version: number;
+	archiveReason: string | null;
+	archivedAt: string | null;
 	firstName: string;
 	lastName: string | null;
 	email: string | null;
@@ -119,6 +123,7 @@ export class ContactsService {
 		private readonly queue: AgentQueueService,
 		private readonly stamp: ActivityStampService,
 		private readonly fields: FieldsService,
+		private readonly duplicates: DuplicateService,
 	) {}
 
 	async list(input: ContactListInput): Promise<ListResult<ContactRow>> {
@@ -133,6 +138,10 @@ export class ContactsService {
 				orderBy: resolveOrderBy(input, SORTABLE, [{ createdAt: "desc" }]),
 				select: {
 					id: true,
+					lifecycleState: true,
+					version: true,
+					archiveReason: true,
+					archivedAt: true,
 					firstName: true,
 					lastName: true,
 					email: true,
@@ -159,6 +168,7 @@ export class ContactsService {
 				...row,
 				lastActivityAt: row.lastActivityAt?.toISOString() ?? null,
 				createdAt: row.createdAt.toISOString(),
+				archivedAt: row.archivedAt?.toISOString() ?? null,
 				fields: tableFields.get(row.id) ?? {},
 			})),
 			total,
@@ -171,6 +181,10 @@ export class ContactsService {
 			where: { id },
 			select: {
 				id: true,
+					lifecycleState: true,
+					version: true,
+					archiveReason: true,
+					archivedAt: true,
 				firstName: true,
 				lastName: true,
 				email: true,
@@ -182,6 +196,8 @@ export class ContactsService {
 				imageUrl: true,
 				enrichmentStatus: true,
 				enrichmentError: true,
+
+
 				createdAt: true,
 				brief: {
 					select: {
@@ -275,17 +291,6 @@ export class ContactsService {
 	async create(input: ContactCreateInput) {
 		const email = normalizeEmail(input.email ?? "");
 
-		if (email) {
-			const existing = await this.db.contact.findFirst({
-				where: { email: { equals: email, mode: "insensitive" } },
-				select: { id: true, firstName: true, lastName: true },
-			});
-			if (existing) {
-				throw new ConflictException(
-					`${[existing.firstName, existing.lastName].filter(Boolean).join(" ")} already uses ${email}.`,
-				);
-			}
-		}
 
 		const companyId =
 			input.companyId ??
@@ -312,6 +317,7 @@ export class ContactsService {
 			});
 		});
 
+		await this.duplicates.detectContact(contact.id);
 		this.logger.log({ message: "Contact created", contactId: contact.id });
 
 		await this.agent.contactCreated(
@@ -320,58 +326,6 @@ export class ContactsService {
 		);
 
 		return contact;
-	}
-
-	async delete(id: string): Promise<{ id: string; name: string }> {
-		let deleted: {
-			targets: StampTargets;
-			name: string;
-			suppressed: boolean;
-		};
-
-		try {
-			deleted = await this.db.$transaction(async (tx) => {
-				const targets = await this.stamp.targetsOf({ contactId: id }, tx);
-
-				await tx.agentTask.deleteMany({ where: { contactId: id } });
-				await tx.agentEvent.deleteMany({ where: { contactId: id } });
-
-				const contact = await tx.contact.delete({
-					where: { id },
-					select: { firstName: true, lastName: true, email: true },
-				});
-
-				const name = [contact.firstName, contact.lastName]
-					.filter(Boolean)
-					.join(" ");
-				const suppress = normalizeEmail(contact.email ?? "");
-
-				if (suppress) {
-					await tx.suppressedContact.upsert({
-						where: { email: suppress },
-						create: {
-							email: suppress,
-							reason: `Deleted from the CRM (${name})`,
-						},
-						update: {},
-					});
-				}
-
-				return { targets, name, suppressed: suppress !== null };
-			});
-		} catch (error) {
-			throw this.translate(error, id);
-		}
-
-		await this.stamp.recomputeAfterDelete(deleted.targets, { contactId: id });
-
-		this.logger.log({
-			message: "Contact deleted",
-			contactId: id,
-			suppressed: deleted.suppressed,
-		});
-
-		return { id, name: deleted.name };
 	}
 
 	async update(id: string, input: ContactUpdateInput) {
@@ -404,7 +358,7 @@ export class ContactsService {
 		}
 
 		try {
-			return await this.db.$transaction(async (tx) => {
+			const updated = await this.db.$transaction(async (tx) => {
 				if (input.fields) {
 					await this.fields.applyValues(tx, "CONTACT", id, input.fields);
 				}
@@ -421,6 +375,8 @@ export class ContactsService {
 
 				return updated;
 			});
+			await this.duplicates.detectContact(id);
+			return updated;
 		} catch (error) {
 			throw this.translate(error, id);
 		}
@@ -486,10 +442,6 @@ export class ContactsService {
 
 	async bulkEnrich(ids: string[]): Promise<BulkResult> {
 		return runBulk(ids, (id) => this.enrich(id));
-	}
-
-	async bulkDelete(ids: string[]): Promise<BulkResult> {
-		return runBulk(ids, (id) => this.delete(id));
 	}
 
 	private async allowAgain(
@@ -688,6 +640,7 @@ export class ContactsService {
 		const where: Prisma.ContactWhereInput = {
 			...this.searchFilter(input.q),
 			...ownerFilter(input.owner),
+			lifecycleState: input.lifecycle,
 		};
 
 		if (input.company !== FACET_ALL) {

@@ -1,0 +1,72 @@
+{
+  "formatVersion": 1,
+  "source": "sanitized-fixtures-only",
+  "redaction": "no_credentials_or_live_source_identifiers",
+  "snapshot": {
+    "repeatableRead": true,
+    "databaseSnapshotWatermark": true,
+    "captureTimestampWatermark": true,
+    "deterministicFingerprint": true
+  },
+  "delta": {
+    "orderedUpserts": true,
+    "orderedDeletes": true,
+    "multipleDeltas": true,
+    "checksumTamperDetected": true,
+    "deterministicReplay": true
+  },
+  "apply": {
+    "businessFixtureRows": 69,
+    "accountedRows": 69,
+    "zeroUnexplainedLoss": true,
+    "foreignKeyViolations": 0,
+    "ownershipMismatches": 0
+  },
+  "fullLifecycle": {
+    "isolatedDatabase": "ibl_v2_migration_milestone_20260822",
+    "initialApplyRows": 69,
+    "initialReconciliationPassed": true,
+    "deltaRows": 1,
+    "deltaReplayRows": 69,
+    "deltaReconciliationPassed": true,
+    "rollbackEntries": 117,
+    "rollbackReconciliationPassed": true,
+    "createdTargetsRemainingAfterRollback": 0,
+    "preservedAppendOnlyRows": 10,
+    "retainedDurableTargets": 8,
+    "beforeImageEntries": 1,
+    "beforeImagesRolledBack": 1,
+    "reapplyRows": 69,
+    "finalReconciliationPassed": true,
+    "duplicateRecordsAfterReapply": 0,
+    "foreignKeyViolationsThroughout": 0,
+    "fingerprintGuardRefusedTamperedRollback": true
+  },
+  "interruptedRun": {
+    "fixtureRows": 2,
+    "interruptedAfter": 2,
+    "resumed": true,
+    "duplicateBusinessRows": 0
+  },
+  "updateRollback": {
+    "beforeImageCaptured": true,
+    "restored": true
+  },
+  "createdRowRollback": {
+    "targetRowsRemoved": 3,
+    "outcomesRemoved": true
+  },
+  "reapply": {
+    "cleanReapply": true,
+    "duplicateBusinessRows": 0
+  },
+  "appendOnly": {
+    "preservedAndMarked": true,
+    "mutated": false
+  },
+  "coverage": {
+    "companyEnrichment": "PROVEN_UNREACHABLE_FROM_CURRENT_EFFECTIVE_V1_MAPPINGS",
+    "contactFact": "PROVEN_UNREACHABLE_FROM_CURRENT_EFFECTIVE_V1_MAPPINGS",
+    "saved_searches": "EXPLICITLY_REJECTED"
+  }
+}

@@ -10,6 +10,7 @@ import {
 import type { z } from "zod";
 import type { AuthedTrpcContext } from "../trpc/context.types";
 import { AuthMiddleware } from "../trpc/middlewares/auth.middleware";
+import { PermissionMiddleware } from "../trpc/middlewares/permission.middleware";
 import { AgentDefinitionsService } from "./agent-definitions.service";
 import { AgentRunsService } from "./agent-runs.service";
 import {
@@ -21,7 +22,7 @@ import {
 } from "./agents.contracts";
 
 @Router({ alias: "agents" })
-@UseMiddlewares(AuthMiddleware)
+@UseMiddlewares(AuthMiddleware, PermissionMiddleware)
 export class AgentsRouter {
 	constructor(
 		@Inject(AgentDefinitionsService)
@@ -30,17 +31,17 @@ export class AgentsRouter {
 		private readonly runs: AgentRunsService,
 	) {}
 
-	@Query()
+	@Query({ meta: { permission: "crm.read" } })
 	async list(@Ctx() ctx: AuthedTrpcContext) {
 		return this.agents.list(ctx.user.id);
 	}
 
-	@Query({ input: agentIdInput })
+	@Query({ input: agentIdInput, meta: { permission: "crm.read" } })
 	async byId(@Ctx() ctx: AuthedTrpcContext, @Input("id") id: string) {
 		return this.agents.byId(id, ctx.user.id);
 	}
 
-	@Query({ input: agentHistoryInput })
+	@Query({ input: agentHistoryInput, meta: { permission: "crm.read" } })
 	async history(
 		@Ctx() ctx: AuthedTrpcContext,
 		@Input() input: z.infer<typeof agentHistoryInput>,
@@ -48,7 +49,7 @@ export class AgentsRouter {
 		return this.runs.list(input.id, input.limit, ctx.user.id);
 	}
 
-	@Query({ input: agentHistoryInput })
+	@Query({ input: agentHistoryInput, meta: { permission: "crm.read" } })
 	async activity(
 		@Ctx() ctx: AuthedTrpcContext,
 		@Input() input: z.infer<typeof agentHistoryInput>,
@@ -56,7 +57,7 @@ export class AgentsRouter {
 		return this.runs.activity(input.id, input.limit, ctx.user.id);
 	}
 
-	@Mutation({ input: agentUpdateInput })
+	@Mutation({ input: agentUpdateInput, meta: { permission: "workspace.manage" } })
 	async update(
 		@Ctx() ctx: AuthedTrpcContext,
 		@Input() input: z.infer<typeof agentUpdateInput>,
@@ -64,7 +65,7 @@ export class AgentsRouter {
 		return this.agents.update(input, ctx.user.id);
 	}
 
-	@Mutation({ input: agentDeployInput })
+	@Mutation({ input: agentDeployInput, meta: { permission: "workspace.manage" } })
 	async deploy(
 		@Ctx() ctx: AuthedTrpcContext,
 		@Input() input: z.infer<typeof agentDeployInput>,
@@ -72,32 +73,32 @@ export class AgentsRouter {
 		return this.agents.deploy(input, ctx.user.id);
 	}
 
-	@Mutation({ input: agentIdInput })
+	@Mutation({ input: agentIdInput, meta: { permission: "workspace.manage" } })
 	async pause(@Ctx() ctx: AuthedTrpcContext, @Input("id") id: string) {
 		return this.agents.pause(id, ctx.user.id);
 	}
 
-	@Mutation({ input: agentIdInput })
+	@Mutation({ input: agentIdInput, meta: { permission: "workspace.manage" } })
 	async resume(@Ctx() ctx: AuthedTrpcContext, @Input("id") id: string) {
 		return this.agents.resume(id, ctx.user.id);
 	}
 
-	@Mutation({ input: agentIdInput })
+	@Mutation({ input: agentIdInput, meta: { permission: "workspace.manage" } })
 	async archive(@Ctx() ctx: AuthedTrpcContext, @Input("id") id: string) {
 		return this.agents.archive(id, ctx.user.id);
 	}
 
-	@Mutation({ input: agentIdInput })
+	@Mutation({ input: agentIdInput, meta: { permission: "workspace.manage" } })
 	async restore(@Ctx() ctx: AuthedTrpcContext, @Input("id") id: string) {
 		return this.agents.restore(id, ctx.user.id);
 	}
 
-	@Mutation({ input: agentIdInput })
+	@Mutation({ input: agentIdInput, meta: { permission: "workspace.manage" } })
 	async remove(@Ctx() ctx: AuthedTrpcContext, @Input("id") id: string) {
 		return this.agents.remove(id, ctx.user.id);
 	}
 
-	@Mutation({ input: agentRunNowInput })
+	@Mutation({ input: agentRunNowInput, meta: { permission: "workspace.manage" } })
 	async runNow(
 		@Ctx() ctx: AuthedTrpcContext,
 		@Input() input: z.infer<typeof agentRunNowInput>,

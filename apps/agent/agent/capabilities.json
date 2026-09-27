@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "defaultPolicy": "deny",
+  "networkPolicy": "deny-all",
+  "identityContext": {
+    "profileWithoutMailbox": true,
+    "ownedUnverifiedMailboxMetadata": true,
+    "providerOperations": false
+  },
+  "allowedCapabilityClasses": ["research", "read", "proposal"],
+  "forbiddenCapabilities": [
+    "email.send",
+    "resend.send",
+    "smtp.send",
+    "transport.outbound",
+    "credential.read",
+    "shell.generic",
+    "delegate.unrestricted"
+  ]
+}

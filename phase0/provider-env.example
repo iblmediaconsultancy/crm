@@ -1,0 +1,9 @@
+PHASE0_PROVIDER_SCOPE=DEDICATED_NON_PRODUCTION
+PHASE0_IMAP_HOST=box.nonproduction-example.test
+PHASE0_IMAP_PORT=993
+PHASE0_IMAP_USER=phase0-inbox@nonproduction-example.test
+PHASE0_IMAP_PASSWORD=dedicated-test-account-only
+PHASE0_RESEND_API_KEY=re_test_only
+PHASE0_RESEND_FROM=IBL Phase 0 <phase0@send.nonproduction-example.test>
+PHASE0_RESEND_TO=phase0-inbox@nonproduction-example.test
+PHASE0_SEND_APPROVAL=NO

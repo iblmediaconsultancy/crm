@@ -148,3 +148,5 @@ never reuse one from an example, a tutorial, or another environment.
 bun run --filter=api test
 bun run --filter=agent test    # integration specs need DATABASE_URL + real Postgres
 ```
+
+Atlas outreach configuration and the staged enablement procedure are documented in [docs/atlas.md](atlas.md).

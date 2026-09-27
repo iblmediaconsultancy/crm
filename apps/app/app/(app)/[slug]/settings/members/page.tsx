@@ -14,9 +14,10 @@ import { HydrateClient } from "@/lib/trpc/hydrate";
 import { getServerQueryClient, getServerTrpc } from "@/lib/trpc/server";
 import { membersSearchParams } from "./members-search-params";
 import { MembersTable } from "./members-table";
+import { MemberInvitations } from "./member-invitations";
 
 export const metadata: Metadata = {
-	title: "Members",
+	title: "Team",
 };
 
 export default function MembersSettingsPage({
@@ -26,9 +27,10 @@ export default function MembersSettingsPage({
 		<PageShell className="min-h-0">
 			<PageShellHeader>
 				<PageShellHeading>
-					<PageShellTitle>Members</PageShellTitle>
+					<PageShellTitle>Team</PageShellTitle>
 					<PageShellDescription>
-						Everyone who has access to your CRM.
+						IBL workspace roles and member status. Mailbox access remains
+						separate.
 					</PageShellDescription>
 				</PageShellHeading>
 			</PageShellHeader>
@@ -61,7 +63,7 @@ async function Members({
 
 	return (
 		<HydrateClient>
-			<MembersTable />
+			<div className="grid gap-4"><MemberInvitations /><MembersTable /></div>
 		</HydrateClient>
 	);
 }

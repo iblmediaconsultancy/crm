@@ -17,9 +17,9 @@ import { AgentQueueService } from "../agent/agent-queue.service";
 import { AgentTriggerService } from "../agent/agent-trigger.service";
 import {
 	ActivityStampService,
-	type StampTargets,
 } from "../crm/activity-stamp.service";
 import { type BulkResult, requireOwner, runBulk } from "../crm/bulk";
+import { DuplicateService } from "../crm/duplicate.service";
 import { blankToNull, toCents } from "../crm/values";
 import { ConversionService } from "../currency/conversion.service";
 import { InjectDatabase } from "../database/database.constants";
@@ -51,6 +51,10 @@ const OWNER_SELECT = {
 
 export type CompanyRow = {
 	id: string;
+	lifecycleState: "ACTIVE" | "ARCHIVED";
+	version: number;
+	archiveReason: string | null;
+	archivedAt: string | null;
 	name: string;
 	domain: string | null;
 	iconUrl: string | null;
@@ -101,6 +105,7 @@ export class CompaniesService {
 		private readonly stamp: ActivityStampService,
 		private readonly conversion: ConversionService,
 		private readonly fields: FieldsService,
+		private readonly duplicates: DuplicateService,
 	) {}
 
 	async list(input: CompanyListInput): Promise<ListResult<CompanyRow>> {
@@ -117,6 +122,10 @@ export class CompaniesService {
 				}),
 				select: {
 					id: true,
+					lifecycleState: true,
+					version: true,
+					archiveReason: true,
+					archivedAt: true,
 					name: true,
 					domain: true,
 					iconUrl: true,
@@ -151,6 +160,10 @@ export class CompaniesService {
 		return {
 			rows: rows.map((row) => ({
 				id: row.id,
+				lifecycleState: row.lifecycleState,
+				version: row.version,
+				archiveReason: row.archiveReason,
+				archivedAt: row.archivedAt?.toISOString() ?? null,
 				name: row.name,
 				domain: row.domain,
 				iconUrl: row.iconUrl,
@@ -179,6 +192,10 @@ export class CompaniesService {
 			where: { id },
 			select: {
 				id: true,
+					lifecycleState: true,
+					version: true,
+					archiveReason: true,
+					archivedAt: true,
 				name: true,
 				domain: true,
 				website: true,
@@ -205,7 +222,8 @@ export class CompaniesService {
 				enrichmentStatus: true,
 				enrichedAt: true,
 				enrichmentError: true,
-				source: true,
+
+
 				createdAt: true,
 				owner: { select: OWNER_SELECT },
 				primaryContact: {
@@ -284,17 +302,6 @@ export class CompaniesService {
 	async create(input: CompanyCreateInput) {
 		const domain = normalizeDomain(input.domain);
 
-		if (domain) {
-			const existing = await this.db.company.findUnique({
-				where: { domain },
-				select: { id: true, name: true },
-			});
-			if (existing) {
-				throw new ConflictException(
-					`${existing.name} already uses the domain ${domain}.`,
-				);
-			}
-		}
 
 		const company = await this.db.company.create({
 			data: {
@@ -305,6 +312,8 @@ export class CompaniesService {
 			},
 			select: { id: true, name: true, domain: true },
 		});
+
+		await this.duplicates.detectCompany(company.id);
 
 		this.logger.log({
 			message: "Company created",
@@ -387,44 +396,11 @@ export class CompaniesService {
 				void this.favicon.backfill(id, updated.domain);
 			}
 
+			await this.duplicates.detectCompany(id);
 			return updated;
 		} catch (error) {
 			throw this.translate(error, id);
 		}
-	}
-
-	async delete(id: string): Promise<{ id: string; name: string }> {
-		let deleted: { targets: StampTargets; name: string };
-
-		try {
-			deleted = await this.db.$transaction(async (tx) => {
-				const targets = await this.stamp.targetsOf(
-					{ OR: [{ companyId: id }, { deal: { companyId: id } }] },
-					tx,
-				);
-
-				await tx.agentTask.deleteMany({ where: { companyId: id } });
-
-				const company = await tx.company.delete({
-					where: { id },
-					select: { name: true },
-				});
-
-				return { targets, name: company.name };
-			});
-		} catch (error) {
-			throw this.translate(error, id);
-		}
-
-		await this.stamp.recomputeAfterDelete(deleted.targets, { companyId: id });
-
-		this.logger.log({
-			message: "Company deleted",
-			companyId: id,
-			name: deleted.name,
-		});
-
-		return { id, name: deleted.name };
 	}
 
 	async bulkAssignOwner(input: CompanyBulkOwnerInput): Promise<BulkResult> {
@@ -454,10 +430,6 @@ export class CompaniesService {
 
 	async bulkEnrich(ids: string[]): Promise<BulkResult> {
 		return runBulk(ids, (id) => this.enrich(id));
-	}
-
-	async bulkDelete(ids: string[]): Promise<BulkResult> {
-		return runBulk(ids, (id) => this.delete(id));
 	}
 
 	async enrich(id: string): Promise<{ id: string; queued: boolean }> {
@@ -546,6 +518,7 @@ export class CompaniesService {
 		const where: Prisma.CompanyWhereInput = {
 			...this.searchFilter(input.q),
 			...ownerFilter(input.owner),
+			lifecycleState: input.lifecycle,
 		};
 
 		if (input.industry !== FACET_ALL) {

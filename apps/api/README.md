@@ -13,16 +13,7 @@ bun run test
 bun run build && bun run start:prod
 ```
 
-Three values are required and the process refuses to boot without them, naming
-the one it is missing: `DATABASE_URL`, `BETTER_AUTH_SECRET` and
-`ALLOWED_SIGN_IN`. `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are the fourth
-value almost every install wants — they are both the sign-in button and the
-Gmail and Calendar sync — but they are optional and set as a pair, because an
-install that signs in through its own identity provider on **Settings → SSO**
-needs neither. With them, register
-`http://localhost:3001/api/auth/callback/google` as an authorised redirect URI.
-`src/config/env.validation.ts` is the full list of what this process reads;
-[`docs/environment.md`](../../docs/environment.md) explains where the file is
+The API requires `DATABASE_URL`, `BETTER_AUTH_SECRET`, and `ALLOWED_SIGN_IN`. Public signup is disabled; users enter through an invitation or an Admin bootstrap. Google and Microsoft authentication and mailbox modules are quarantined and are not part of the V2 runtime. Provider sending credentials belong only to the PostgreSQL-backed worker. `src/config/env.validation.ts` defines the runtime groups; [`docs/environment.md`](../../docs/environment.md) explains where the file is
 found.
 
 Bun is the runtime, not just the package manager: `@crm/db` and `@crm/auth`
@@ -37,7 +28,6 @@ used for type checking only (`bun run check-types`).
 | `/auth/me`       | required   | Cached profile of the signed-in user          |
 | `/auth/session`  | optional   | Whether the caller is signed in               |
 | `/health`        | anonymous  | 200 with a database round-trip, 503 otherwise |
-| `/internal/sync/google` | `CRON_SECRET` bearer | Vercel Cron entrypoint for Gmail/Calendar sync. Fails closed when the secret is unset. |
 
 ## How auth is wired
 
@@ -70,12 +60,7 @@ the library throws at startup without them.
 
 ## Caching
 
-`AppCacheModule` registers `@nestjs/cache-manager` globally. It uses `REDIS_URL`
-when set and otherwise falls back to a per-instance in-memory store — fine for
-local development, not for more than one API instance.
-
-`AuthService.getProfile` is the reference pattern: read through the cache, write
-with an explicit TTL, invalidate on change.
+`AppCacheModule` is a bounded, per-process optimization only. PostgreSQL remains authoritative for authorization, onboarding, jobs, schedules, leases, retries, idempotency, and worker coordination. No shared cache or Redis service is required for correctness.
 
 ## Notes
 

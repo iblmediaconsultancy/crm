@@ -26,6 +26,7 @@ export const CLOSING_WINDOWS = [
 export type ClosingWindow = (typeof CLOSING_WINDOWS)[number];
 
 export const dealListInput = listInput.extend({
+	lifecycle: z.enum(["ACTIVE", "ARCHIVED"]).default("ACTIVE"),
 	status: z.string().default("all"),
 	owner: z.string().default("all"),
 	stage: z.string().default("all"),
@@ -46,6 +47,9 @@ export const dealCreateInput = z.object({
 	amountCents,
 	currency: currencyCode.optional(),
 	expectedCloseDate: z.string().nullable().optional(),
+	potentialPackageName: z.string().trim().max(160).nullable().optional(),
+	potentialMonthlyRevenueCents: amountCents,
+	potentialOneOffRevenueCents: amountCents,
 });
 
 export type DealCreateInput = z.infer<typeof dealCreateInput>;
@@ -58,6 +62,9 @@ const dealUpdateInput = z.object({
 	amountCents,
 	currency: currencyCode.optional(),
 	expectedCloseDate: z.string().nullable().optional(),
+	potentialPackageName: z.string().trim().max(160).nullable().optional(),
+	potentialMonthlyRevenueCents: amountCents,
+	potentialOneOffRevenueCents: amountCents,
 	fields: recordFieldValues.optional(),
 });
 

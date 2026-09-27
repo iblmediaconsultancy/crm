@@ -4,6 +4,7 @@ import { recordFieldValues } from "../fields/fields.contracts";
 import { listInput } from "../trpc/list-input";
 
 export const companyListInput = listInput.extend({
+	lifecycle: z.enum(["ACTIVE", "ARCHIVED"]).default("ACTIVE"),
 	owner: z.string().default("all"),
 	industry: z.string().default("all"),
 	enrichment: z.string().default("all"),

@@ -12,6 +12,7 @@ import {
 	AlertDialogTitle,
 } from "@crm/ui/components/alert-dialog";
 import { Button } from "@crm/ui/components/button";
+import { Input } from "@crm/ui/components/input";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -24,7 +25,7 @@ import {
 	DropdownMenuTrigger,
 } from "@crm/ui/components/dropdown-menu";
 import { Spinner } from "@crm/ui/components/spinner";
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
 
 export type BulkResult = {
@@ -141,6 +142,37 @@ export function BulkDeleteDialog({
 					<AlertDialogAction variant="destructive" onClick={onConfirm}>
 						Delete
 					</AlertDialogAction>
+				</AlertDialogFooter>
+			</AlertDialogContent>
+		</AlertDialog>
+	);
+}
+
+export function BulkArchiveDialog({
+	open,
+	onOpenChange,
+	title,
+	description,
+	onConfirm,
+}: {
+	open: boolean;
+	onOpenChange: (open: boolean) => void;
+	title: string;
+	description: string;
+	onConfirm: (reason: string) => void;
+}) {
+	const [reason, setReason] = useState("");
+	return (
+		<AlertDialog open={open} onOpenChange={onOpenChange}>
+			<AlertDialogContent>
+				<AlertDialogHeader>
+					<AlertDialogTitle>{title}</AlertDialogTitle>
+					<AlertDialogDescription>{description}</AlertDialogDescription>
+				</AlertDialogHeader>
+				<Input aria-label="Archive reason" placeholder="Reason (required)" value={reason} onChange={(event) => setReason(event.target.value)} />
+				<AlertDialogFooter>
+					<AlertDialogCancel>Cancel</AlertDialogCancel>
+					<AlertDialogAction disabled={reason.trim().length < 3} onClick={() => onConfirm(reason.trim())}>Archive</AlertDialogAction>
 				</AlertDialogFooter>
 			</AlertDialogContent>
 		</AlertDialog>

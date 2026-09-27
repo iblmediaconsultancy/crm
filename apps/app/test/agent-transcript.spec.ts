@@ -487,7 +487,7 @@ describe("pendingQuestion", () => {
 });
 
 describe("latestTurnFailure", () => {
-	it("recognizes the Vercel Gateway free-tier rate limit", () => {
+	it("recognizes a Gemini rate limit", () => {
 		expect(
 			latestTurnFailure([
 				{
@@ -495,7 +495,7 @@ describe("latestTurnFailure", () => {
 					data: {
 						code: "MODEL_CALL_FAILED",
 						message:
-							"GatewayRateLimitError: Free tier requests on this model are rate-limited.",
+							"Gemini resource exhausted: requests are rate-limited.",
 					},
 				},
 			]),
@@ -521,7 +521,7 @@ describe("latestTurnFailure", () => {
 		).toBeNull();
 	});
 
-	it("recognizes a model restricted to paid Gateway credits", () => {
+	it("recognizes restricted Gemini access", () => {
 		expect(
 			latestTurnFailure([
 				{

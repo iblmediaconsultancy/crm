@@ -3,6 +3,7 @@ import { type Db, RecordSource } from "@crm/db";
 import { Injectable, Logger } from "@nestjs/common";
 import { AgentTriggerService } from "../agent/agent-trigger.service";
 import { CompanyDirectoryService } from "../companies/company-directory.service";
+import { DuplicateService } from "../crm/duplicate.service";
 import { EnrichmentLogService } from "../crm/enrichment-log.service";
 import { InjectDatabase } from "../database/database.constants";
 import {
@@ -47,6 +48,7 @@ export class MailboxMatchService {
 		private readonly companies: CompanyDirectoryService,
 		private readonly agent: AgentTriggerService,
 		private readonly log: EnrichmentLogService,
+		private readonly duplicates: DuplicateService,
 	) {}
 
 	async internalIdentity(): Promise<{
@@ -87,6 +89,42 @@ export class MailboxMatchService {
 		request: MatchRequest,
 		context: MatchContext,
 	): Promise<MatchResult> {
+		const participantEmails = [
+			...new Set(
+				request.participants
+					.map((participant) => participant.email.trim().toLowerCase())
+					.filter(Boolean),
+			),
+		];
+		const knownContact = await this.db.contact.findFirst({
+			where: {
+				lifecycleState: "ACTIVE",
+				OR: [
+					{ email: { in: participantEmails } },
+					{
+						contactRoutes: {
+							some: {
+								type: "EMAIL",
+								normalizedValue: { in: participantEmails },
+								lifecycleState: "ACTIVE",
+							},
+						},
+					},
+				],
+			},
+			orderBy: { createdAt: "asc" },
+			select: { id: true, companyId: true },
+		});
+		if (knownContact) {
+			return {
+				companyId: knownContact.companyId,
+				contactId: knownContact.id,
+				external: request.participants.filter((participant) =>
+					participantEmails.includes(participant.email.trim().toLowerCase()),
+				),
+			};
+		}
+
 		const external = externalParticipants(request.participants, {
 			ourDomains: context.ourDomains,
 			ourAddresses: context.ourAddresses,
@@ -213,26 +251,32 @@ export class MailboxMatchService {
 
 		const { firstName, lastName } = splitName(person.name, person.email);
 
-		const existing = await this.db.contact.findUnique({
-			where: { email: person.email },
-			select: { id: true },
+		const existing = await this.db.contact.findFirst({
+			where: { email: { equals: person.email, mode: "insensitive" } },
+			select: { id: true, lifecycleState: true },
+			orderBy: { createdAt: "asc" },
 		});
+		if (existing?.lifecycleState === "ARCHIVED") return null;
 
-		const contact = await this.db.contact.upsert({
-			where: { email: person.email },
-			create: {
-				firstName,
-				lastName,
-				email: person.email,
-				companyId,
-				source: request.source,
-				ownerId: request.ownerId,
-			},
-			update: {},
-			select: { id: true, firstName: true, lastName: true },
-		});
+		const contact = existing
+			? await this.db.contact.findUniqueOrThrow({
+					where: { id: existing.id },
+					select: { id: true, firstName: true, lastName: true },
+				})
+			: await this.db.contact.create({
+					data: {
+						firstName,
+						lastName,
+						email: person.email,
+						companyId,
+						source: request.source,
+						ownerId: request.ownerId,
+					},
+					select: { id: true, firstName: true, lastName: true },
+				});
 
 		if (!existing) {
+			await this.duplicates.detectContact(contact.id);
 			await this.log.record({
 				contactId: contact.id,
 				companyId,

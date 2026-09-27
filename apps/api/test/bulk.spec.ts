@@ -29,6 +29,7 @@ const conversion = new ConversionService(db);
 const directory = new CompanyDirectoryService(db, agent);
 
 const fields = new FieldsService(db, agent);
+const duplicates = { detectContact: async () => [], detectCompany: async () => [] };
 const contacts = new ContactsService(
 	db,
 	directory,
@@ -36,6 +37,7 @@ const contacts = new ContactsService(
 	queue,
 	stamp,
 	fields,
+	duplicates as never,
 );
 const companies = new CompaniesService(
 	db,
@@ -45,6 +47,7 @@ const companies = new CompaniesService(
 	stamp,
 	conversion,
 	fields,
+	duplicates as never,
 );
 const deals = new DealsService(db, stamp, conversion, fields);
 
@@ -145,72 +148,6 @@ describe("assigning an owner to a selection", () => {
 				select: { ownerId: true },
 			}),
 		).toEqual({ ownerId: null });
-	});
-});
-
-describe("deleting a selection", () => {
-	it("suppresses every address, exactly as deleting them one by one would", async () => {
-		const first = await contacts.create({
-			firstName: "Gone",
-			email: `gone@${domain}`,
-		});
-		const second = await contacts.create({
-			firstName: "Also Gone",
-			email: `also-gone@${domain}`,
-		});
-
-		expect(await contacts.bulkDelete([first.id, second.id])).toEqual({
-			requested: 2,
-			succeeded: 2,
-			failed: 0,
-			message: null,
-		});
-
-		expect(
-			await db.suppressedContact.count({
-				where: { email: { in: [`gone@${domain}`, `also-gone@${domain}`] } },
-			}),
-		).toBe(2);
-	});
-
-	it("finishes the rest and says what it could not do", async () => {
-		const survivor = await contacts.create({
-			firstName: "Doomed",
-			email: `doomed@${domain}`,
-		});
-
-		const result = await contacts.bulkDelete([
-			survivor.id,
-			`missing-${suffix}`,
-		]);
-
-		expect(result.succeeded).toBe(1);
-		expect(result.failed).toBe(1);
-		expect(result.message).toMatch(/No contact with id/);
-		expect(
-			await db.contact.findUnique({ where: { id: survivor.id } }),
-		).toBeNull();
-	});
-
-	it("takes a company's deals with it", async () => {
-		const doomed = await companies.create({
-			name: `Doomed Co ${suffix}`,
-			domain: `doomed-${domain}`,
-		});
-		const deal = await deals.create({
-			name: `Doomed deal ${suffix}`,
-			companyId: doomed.id,
-			ownerId,
-		});
-
-		expect(await companies.bulkDelete([doomed.id])).toEqual({
-			requested: 1,
-			succeeded: 1,
-			failed: 0,
-			message: null,
-		});
-
-		expect(await db.deal.findUnique({ where: { id: deal.id } })).toBeNull();
 	});
 });
 

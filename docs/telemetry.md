@@ -97,7 +97,7 @@ whose event never arrived, which cannot be recovered.
 #### Capabilities — booleans, never values
 
 `cap_rapidapi`, `cap_perplexity`, `cap_context_dev`, `cap_blob`, `cap_github`, `cap_redis`,
-`cap_agent_bridge`, `cap_cron_secret`, `cap_ai_gateway`, `cap_google_oauth`, `cap_sso_provider`,
+`cap_agent_bridge`, `cap_cron_secret`, `cap_gemini_api`, `cap_google_oauth`, `cap_sso_provider`,
 `is_marketing`.
 
 Each is only whether the key is set. `cap_context_dev` is whether an `AppSetting` row holds one,

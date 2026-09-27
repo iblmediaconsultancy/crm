@@ -31,16 +31,18 @@ import { workspaceLabel } from "@/lib/workspace-label";
 type User = { name: string; email: string; image: string | null };
 
 export function AppHeader({ user }: { user: User }) {
-	const { setOpen: setMobileNavOpen } = useMobileNav();
+	const { setOpen: setMobileNavOpen, triggerRef } = useMobileNav();
 	const trpc = useTRPC();
 	const workspaceUrl = useWorkspaceUrl();
 	const workspace = useQuery(trpc.workspace.get.queryOptions());
-	const label = workspaceLabel(workspace.data?.name);
+	const label =
+		workspace.data?.name?.trim() || workspaceLabel(workspace.data?.name);
 
 	return (
 		<header className="flex h-12 shrink-0 items-center gap-2 border-b px-3 [view-transition-name:app-header]">
 			<div className="flex shrink-0 items-center gap-1">
 				<Button
+					ref={triggerRef}
 					variant="ghost"
 					size="icon"
 					className="md:hidden"

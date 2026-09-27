@@ -1,8 +1,6 @@
 import {
 	auth,
 	canConfigureSso,
-	isGoogleConfigured,
-	isMicrosoftConfigured,
 	isWorkspaceRole,
 	ssoCallbackBase,
 	ssoCallbackURL,
@@ -34,8 +32,6 @@ export interface PublicSsoProvider {
 }
 
 export interface SignInOptions {
-	google: boolean;
-	microsoft: boolean;
 	providers: PublicSsoProvider[];
 }
 
@@ -144,8 +140,6 @@ export class SsoService {
 		});
 
 		return {
-			google: isGoogleConfigured(),
-			microsoft: isMicrosoftConfigured(),
 			providers: rows.map((row) => ({
 				providerId: row.providerId,
 				name: ssoProviderName(row.providerId),
@@ -183,46 +177,10 @@ export class SsoService {
 		headers: Headers,
 		input: RegisterSsoProviderInput,
 	): Promise<SsoProvider> {
-		await this.requireConfigurer(userId);
-
-		const domains = splitDomains(input.domain);
-
-		if (domains.length === 0) {
-			throw new BadRequestException(
-				"Give the email domain your people sign in with, for example acme.com.",
-			);
-		}
-
-		await this.call(() =>
-			auth.api.registerSSOProvider({
-				headers,
-				body: {
-					providerId: input.providerId,
-					issuer: input.issuer,
-					domain: domains.join(","),
-					organizationId: WORKSPACE_ID,
-					oidcConfig: {
-						clientId: input.clientId,
-						clientSecret: input.clientSecret,
-						pkce: true,
-					},
-				},
-			}),
-		);
-
-		this.logger.log({
-			message: "SSO provider registered",
-			userId,
-			providerId: input.providerId,
-			issuer: input.issuer,
-		});
-
-		const row = await this.db.ssoProvider.findUniqueOrThrow({
-			where: { providerId: input.providerId },
-			select: PROVIDER_SELECT,
-		});
-
-		return toProvider(row);
+		void userId;
+		void headers;
+		void input;
+		throw new ForbiddenException("SSO is disabled in IBL Command Center Phase 1.");
 	}
 
 	async remove(
@@ -230,24 +188,11 @@ export class SsoService {
 		headers: Headers,
 		input: DeleteSsoProviderInput,
 	): Promise<{ providerId: string }> {
-		await this.requireConfigurer(userId);
-
-		await this.call(() =>
-			auth.api.deleteSSOProvider({
-				headers,
-				body: { providerId: input.providerId },
-			}),
-		);
-
-		this.logger.log({
-			message: "SSO provider removed",
-			userId,
-			providerId: input.providerId,
-		});
-
-		return { providerId: input.providerId };
+		void userId;
+		void headers;
+		void input;
+		throw new ForbiddenException("SSO is disabled in IBL Command Center Phase 1.");
 	}
-
 	private searchWhere(q: string): Prisma.SsoProviderWhereInput {
 		const term = q.trim();
 		const where: Prisma.SsoProviderWhereInput = {
@@ -308,6 +253,6 @@ export class SsoService {
 
 		if (!member) return null;
 
-		return isWorkspaceRole(member.role) ? member.role : "member";
+		return isWorkspaceRole(member.role) ? member.role : "contributor";
 	}
 }

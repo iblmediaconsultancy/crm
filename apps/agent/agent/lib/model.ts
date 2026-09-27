@@ -1,27 +1,6 @@
-import { db } from "@crm/db";
-import { readAgentModel } from "@crm/db/settings";
+import { google } from "@ai-sdk/google";
+import { DEFAULT_AGENT_MODEL } from "@crm/db/settings";
 
-export interface ModelSelection {
-	model: string;
-	modelContextWindowTokens: number;
-}
-
-export async function selectedModel(): Promise<ModelSelection | null> {
-	try {
-		const setting = await readAgentModel(db);
-
-		if (setting.isDefault) return null;
-
-		return {
-			model: setting.id,
-			modelContextWindowTokens: setting.contextWindowTokens,
-		};
-	} catch (error) {
-		console.error(
-			`[agent] could not read the configured model, falling back: ${
-				error instanceof Error ? error.message : String(error)
-			}`,
-		);
-		return null;
-	}
-}
+export const AGENT_MODEL: ReturnType<typeof google> = google(
+	DEFAULT_AGENT_MODEL.id,
+);

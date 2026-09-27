@@ -1,5 +1,6 @@
 import { db, type Prisma } from "@crm/db";
 import type { SendFn } from "eve/channels";
+import { DEFAULT_AGENT_MODEL } from "@crm/db/settings";
 import { lockAgentRun, runTerminalEventId } from "./run-state";
 
 const BUILDER_BATCH = 20;
@@ -238,6 +239,7 @@ export async function queueDueAgentRuns(now = new Date()): Promise<number> {
 					triggerType: "SCHEDULE",
 					idempotencyKey,
 					correlationId: crypto.randomUUID(),
+					modelId: DEFAULT_AGENT_MODEL.id,
 					input: { scheduledFor: scheduledAt.toISOString() },
 					events: {
 						create: { sequence: 0, type: "run.queued", data: {} },
@@ -283,7 +285,6 @@ export async function dispatchAgentRun(runId: string, send: SendFn) {
 			agent: {
 				select: { name: true, createdById: true, status: true },
 			},
-			version: { select: { modelId: true } },
 		},
 	});
 	if (run?.status !== "QUEUED" || run.agent.status !== "LIVE") {
@@ -304,7 +305,7 @@ export async function dispatchAgentRun(runId: string, send: SendFn) {
 			data: {
 				status: "RUNNING",
 				startedAt: new Date(),
-				modelId: run.version.modelId,
+				modelId: DEFAULT_AGENT_MODEL.id,
 			},
 		});
 		return updated.count === 1;
