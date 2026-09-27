@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.2](https://github.com/iblmediaconsultancy/crm/compare/v1.5.1...v1.5.2) (2026-09-27)
+
+
+### Fixes
+
+* **linkedin:** harden history checks and quota rollover ([57e0106](https://github.com/iblmediaconsultancy/crm/commit/57e0106e072fb0d0f70f90bf8a710f2e73c60467))
+
 ## [1.5.1](https://github.com/trycompai/crm/compare/v1.5.0...v1.5.1) (2026-08-08)
 
 
