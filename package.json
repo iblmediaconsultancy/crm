@@ -2,7 +2,7 @@
 	"name": "crm",
 	"private": true,
 	"license": "MIT",
-	"version": "1.4.0",
+	"version": "1.5.1",
 	"scripts": {
 		"prepare": "git rev-parse --git-dir \u003e/dev/null 2\u003e\u00261 \u0026\u0026 git config core.hooksPath .githooks || true",
 		"build": "turbo run build",
