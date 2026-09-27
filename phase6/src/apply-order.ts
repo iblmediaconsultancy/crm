@@ -1,0 +1,51 @@
+export const migrationApplyOrder: Record<string, number> = {
+	user: 10,
+	userProfile: 20,
+	company: 30,
+	contact: 30,
+	agency: 40,
+	club: 40,
+	footballAgent: 50,
+	footballPlayer: 50,
+	companyEnrichment: 60,
+	contactFact: 60,
+	lead: 70,
+	mailbox: 70,
+	contactRoute: 80,
+	contactRouteConsent: 90,
+	sharedRoutePolicy: 90,
+	template: 90,
+	proofItem: 90,
+	calendarEvent: 90,
+	activity: 100,
+	operationalTask: 100,
+	draft: 100,
+	proposal: 100,
+	allocationRequest: 100,
+	duplicateCandidate: 100,
+	canonicalAlias: 100,
+	lifecycleEvent: 100,
+	domainAuditEvent: 100,
+	mailboxSync: 110,
+	emailThread: 110,
+	emailMessage: 120,
+	messageAttachment: 130,
+	representation: 130,
+	researchRequest: 130,
+	evidenceSource: 130,
+	researchFinding: 140,
+	mergeDecision: 140,
+	note: 140,
+	proposalItem: 140,
+	outreachEvent: 150,
+	legacyIdMap: 160,
+};
+
+export const orderMigrationOutcomes = <T extends { targetTable?: string }>(
+	outcomes: T[],
+) =>
+	[...outcomes].sort(
+		(left, right) =>
+			(migrationApplyOrder[left.targetTable ?? ""] ?? 1000) -
+			(migrationApplyOrder[right.targetTable ?? ""] ?? 1000),
+	);

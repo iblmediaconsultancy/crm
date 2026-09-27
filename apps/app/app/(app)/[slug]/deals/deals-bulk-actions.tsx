@@ -1,6 +1,7 @@
 "use client";
 
-import TrashCan from "@carbon/icons-react/es/TrashCan";
+import Renew from "@carbon/icons-react/es/Renew";
+
 import type { DealStage } from "@crm/db/enums";
 import { Button } from "@crm/ui/components/button";
 import {
@@ -28,7 +29,7 @@ import { useId, useState } from "react";
 import { toast } from "sonner";
 import {
 	BulkActionsMenu,
-	BulkDeleteDialog,
+	BulkArchiveDialog,
 	BulkOwnerMenu,
 	reportBulk,
 } from "@/components/crm/bulk-actions";
@@ -82,10 +83,10 @@ export function DealsBulkActions({
 	);
 
 	const remove = useMutation(
-		trpc.deals.bulkDelete.mutationOptions({
+		trpc.deals.bulkArchive.mutationOptions({
 			onSuccess: async (result, variables) => {
 				await cache.removedMany({ kind: "deal", ids: variables.ids });
-				reportBulk(result, (count) => `${deals(count)} deleted.`);
+				reportBulk(result, (count) => `${deals(count)} archived.`);
 				setConfirming(false);
 				onDone();
 			},
@@ -129,11 +130,10 @@ export function DealsBulkActions({
 				<DropdownMenuSeparator />
 				<DropdownMenuGroup>
 					<DropdownMenuItem
-						variant="destructive"
-						onSelect={() => setConfirming(true)}
+												onSelect={() => setConfirming(true)}
 					>
-						<TrashCan />
-						Delete
+						<Renew />
+						Archive
 					</DropdownMenuItem>
 				</DropdownMenuGroup>
 			</BulkActionsMenu>
@@ -202,12 +202,12 @@ export function DealsBulkActions({
 				</DialogContent>
 			</Dialog>
 
-			<BulkDeleteDialog
+			<BulkArchiveDialog
 				open={confirming}
 				onOpenChange={setConfirming}
-				title={`Delete ${deals(ids.length)}?`}
-				description="Everything filed against them — activity, notes, the amounts in your pipeline — goes too. This cannot be undone."
-				onConfirm={() => remove.mutate({ ids })}
+				title={`Archive ${deals(ids.length)}?`}
+				description="Archived records leave active workflows while relationships, communications, assignments, and audit history remain available."
+				onConfirm={(reason) => remove.mutate({ ids, reason })}
 			/>
 		</>
 	);

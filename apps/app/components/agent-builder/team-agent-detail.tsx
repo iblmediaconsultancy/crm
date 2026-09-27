@@ -758,7 +758,7 @@ function ExpandedRun({ run }: { run: RunRow }) {
 					label="Initiated by"
 					value={run.initiatedBy?.name ?? "Eve scheduler"}
 				/>
-				<RunMeta label="Model" value={run.modelId ?? "Gateway default"} />
+				<RunMeta label="Model" value={run.modelId ?? "gemini-3.1-flash-lite"} />
 				<RunMeta label="Version" value={String(run.version.number)} last />
 			</div>
 

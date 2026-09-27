@@ -1,0 +1,23 @@
+name: ibl-v2-phase0
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: ibl-v2-phase0-postgres
+    environment:
+      POSTGRES_USER: ibl_phase0_owner
+      POSTGRES_PASSWORD: ibl_phase0_local_only
+      POSTGRES_DB: ibl_command_center_v2_phase0
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - ibl-v2-phase0-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ibl_phase0_owner -d ibl_command_center_v2_phase0"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  ibl-v2-phase0-postgres-data:
+    name: ibl-v2-phase0-postgres-data

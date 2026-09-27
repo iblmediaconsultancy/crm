@@ -29,7 +29,7 @@ export class AgentAccessService {
 			throw new ForbiddenException("You are not a member of this workspace.");
 		}
 
-		return isWorkspaceRole(member.role) ? member.role : "member";
+		return isWorkspaceRole(member.role) ? member.role : "contributor";
 	}
 
 	async assertCanManageInTransaction(
@@ -49,7 +49,7 @@ export class AgentAccessService {
 			throw new ForbiddenException("You are not a member of this workspace.");
 		}
 
-		const role = isWorkspaceRole(member.role) ? member.role : "member";
+		const role = isWorkspaceRole(member.role) ? member.role : "contributor";
 		const agent = await tx.agentDefinition.findFirst({
 			where: { id: agentId, status: { not: "DELETED" } },
 			select: {

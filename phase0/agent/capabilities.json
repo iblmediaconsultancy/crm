@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "defaultPolicy": "deny",
+  "networkPolicy": "deny-all",
+  "allowedTools": [
+    "read_crm_history",
+    "read_company_history",
+    "read_deal_history",
+    "search_crm",
+    "propose_crm_change"
+  ],
+  "disabledBuiltins": [
+    "agent",
+    "Workflow",
+    "bash",
+    "write_file",
+    "shell",
+    "generic_runner"
+  ],
+  "forbiddenCapabilities": [
+    "email.send",
+    "resend.send",
+    "smtp.send",
+    "transport.outbound",
+    "delegate.unrestricted"
+  ]
+}

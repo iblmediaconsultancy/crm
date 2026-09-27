@@ -9,7 +9,6 @@ import {
 } from "@trpc/tanstack-react-query";
 import type { AppRouter } from "api/app-router";
 import type { FC, ReactNode } from "react";
-import { useState } from "react";
 import { getQueryClient } from "./query-client";
 
 const { TRPCProvider: ContextProvider, useTRPC: useTRPCContext } =
@@ -24,13 +23,12 @@ const TRPCProvider: FC<{
 
 export const useTRPC: () => TRPCOptionsProxy<AppRouter> = useTRPCContext;
 
+const trpcClient = createTRPCClient<AppRouter>({
+	links: [httpBatchLink({ url: "/api/trpc" })],
+});
+
 export function TRPCReactProvider({ children }: { children: ReactNode }) {
 	const queryClient = getQueryClient();
-	const [trpcClient] = useState(() =>
-		createTRPCClient<AppRouter>({
-			links: [httpBatchLink({ url: "/api/trpc" })],
-		}),
-	);
 
 	return (
 		<QueryClientProvider client={queryClient}>

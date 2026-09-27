@@ -9,7 +9,6 @@ import {
 } from "@crm/telemetry";
 import { Injectable, Logger } from "@nestjs/common";
 import { InjectDatabase } from "../database/database.constants";
-import { GOOGLE_PROVIDER_ID } from "../google/google.constants";
 import { SEED_OWNER_PREFIX } from "./seed";
 
 @Injectable()
@@ -55,26 +54,6 @@ export class FunnelService {
 					}),
 					(row) => row.createdAt,
 				);
-
-			case "google_oauth_configured": {
-				const configured =
-					process.env.GOOGLE_CLIENT_ID?.trim() &&
-					process.env.GOOGLE_CLIENT_SECRET?.trim();
-
-				if (!configured) return null;
-
-				const linked = await this.earliest(
-					this.db.account.findFirst({
-						where: { providerId: GOOGLE_PROVIDER_ID },
-						orderBy: { createdAt: "asc" },
-						select: { createdAt: true },
-					}),
-					(row) => row.createdAt,
-				);
-
-				return linked ?? new Date();
-			}
-
 			case "first_mailbox_sync":
 				return this.earliest(
 					this.db.mailboxSync.findFirst({
@@ -123,8 +102,9 @@ export class FunnelService {
 			case "first_fact_applied":
 				return this.firstApplied();
 		}
-	}
 
+		return null;
+	}
 	private async firstApplied(): Promise<Date | null> {
 		const everApplied = {
 			status: { in: [FactStatus.APPLIED, FactStatus.SUPERSEDED] },

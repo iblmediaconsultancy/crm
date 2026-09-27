@@ -1,4 +1,4 @@
-import { type Db, db } from "@crm/db";
+import type { Db } from "@crm/db";
 import {
 	Global,
 	Logger,
@@ -7,10 +7,11 @@ import {
 	type OnModuleInit,
 } from "@nestjs/common";
 import { DATABASE, InjectDatabase } from "./database.constants";
+import { contextualDatabase } from "./database-context";
 
 @Global()
 @Module({
-	providers: [{ provide: DATABASE, useValue: db }],
+	providers: [{ provide: DATABASE, useValue: contextualDatabase }],
 	exports: [DATABASE],
 })
 export class DatabaseModule implements OnModuleInit, OnApplicationShutdown {

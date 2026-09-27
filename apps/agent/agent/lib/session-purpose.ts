@@ -1,6 +1,12 @@
-export type SessionPurpose = "builder" | "team-agent" | "research";
+export type SessionPurpose =
+	| "builder"
+	| "team-agent"
+	| "atlas-outreach"
+	| "atlas-daily-report"
+	| "atlas-commercial-enrichment"
+	| "research";
 
-type PurposeContext = {
+export type PurposeContext = {
 	readonly session: {
 		readonly auth: {
 			readonly current: {
@@ -15,7 +21,14 @@ type PurposeContext = {
 
 export function purposeOf(ctx: PurposeContext): SessionPurpose {
 	const purpose = attribute(ctx, "purpose");
-	if (purpose === "builder" || purpose === "team-agent") return purpose;
+	if (
+		purpose === "builder" ||
+		purpose === "team-agent" ||
+		purpose === "atlas-outreach" ||
+		purpose === "atlas-daily-report" ||
+		purpose === "atlas-commercial-enrichment"
+	)
+		return purpose;
 	return "research";
 }
 

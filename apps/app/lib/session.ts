@@ -1,13 +1,20 @@
-import { auth, needsMailboxGrant, type Session } from "@crm/auth";
-import { db } from "@crm/db";
+import { ensureWorkspaceMembership, type Session } from "@crm/auth";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { cache } from "react";
+import { API_URL } from "@/lib/env";
 
-export const getSession = cache(
-	async (): Promise<Session | null> =>
-		auth.api.getSession({ headers: await headers() }),
-);
+export async function getSession(): Promise<Session | null> {
+	const cookie = (await headers()).get("cookie");
+	if (!cookie) return null;
+
+	const response = await fetch(`${API_URL}/api/auth/get-session`, {
+		headers: { cookie },
+		cache: "no-store",
+	});
+	if (!response.ok) return null;
+
+	return (await response.json()) as Session | null;
+}
 
 export async function requireSession(): Promise<Session> {
 	const session = await getSession();
@@ -15,23 +22,14 @@ export async function requireSession(): Promise<Session> {
 	if (!session) {
 		redirect("/sign-in");
 	}
+	const workspaceId = await ensureWorkspaceMembership(session.user.id);
+	if (!workspaceId) {
+		redirect("/sign-in?error=workspace-access-inactive");
+	}
 
 	return session;
 }
 
-export const signInAccounts = cache(async (userId: string) =>
-	db.account.findMany({
-		where: { userId },
-		select: { providerId: true, scope: true },
-	}),
-);
-
 export async function requireMailboxAccess(): Promise<Session> {
-	const session = await requireSession();
-
-	if (needsMailboxGrant(await signInAccounts(session.user.id))) {
-		redirect("/grant-access");
-	}
-
-	return session;
+	return requireSession();
 }

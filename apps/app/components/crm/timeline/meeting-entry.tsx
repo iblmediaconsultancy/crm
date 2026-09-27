@@ -38,7 +38,7 @@ export function MeetingEntry({
 	const trpc = useTRPC();
 
 	const event = useQuery({
-		...trpc.google.event.queryOptions({ eventId }),
+		...trpc.mailbox.event.queryOptions({ eventId }),
 		enabled: attendeeCount > 0,
 	});
 

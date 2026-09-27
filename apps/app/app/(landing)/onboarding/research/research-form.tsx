@@ -70,10 +70,20 @@ export function ResearchForm() {
 				</Field>
 			</FieldGroup>
 
-			<Button type="submit" disabled={save.isPending}>
-				{save.isPending ? <Spinner data-icon="inline-start" /> : null}
-				Continue
-			</Button>
+			<div className="flex flex-col gap-3 sm:flex-row">
+				<Button type="submit" disabled={save.isPending}>
+					{save.isPending ? <Spinner data-icon="inline-start" /> : null}
+					Save and continue
+				</Button>
+				<Button
+					type="button"
+					variant="outline"
+					disabled={save.isPending}
+					onClick={() => router.replace("/")}
+				>
+					Skip for now
+				</Button>
+			</div>
 		</form>
 	);
 }

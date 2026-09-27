@@ -20,6 +20,7 @@ export class AgentQueueService {
 	}): Promise<boolean> {
 		const row = await this.db.agentTask.findFirst({
 			where: {
+				lifecycleState: "ACTIVE",
 				finishedAt: null,
 				...(subject.companyId ? { companyId: subject.companyId } : {}),
 				...(subject.contactId ? { contactId: subject.contactId } : {}),
@@ -37,7 +38,11 @@ export class AgentQueueService {
 		if (ids.length === 0) return new Set();
 
 		const rows = await this.db.agentTask.findMany({
-			where: { finishedAt: null, [column]: { in: [...ids] } },
+			where: {
+				lifecycleState: "ACTIVE",
+				finishedAt: null,
+				[column]: { in: [...ids] },
+			},
 			select: { [column]: true },
 			distinct: [column],
 		});

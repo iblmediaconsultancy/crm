@@ -1,7 +1,6 @@
 "use client";
 
 import Renew from "@carbon/icons-react/es/Renew";
-import TrashCan from "@carbon/icons-react/es/TrashCan";
 import {
 	DropdownMenuGroup,
 	DropdownMenuItem,
@@ -13,7 +12,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import {
 	BulkActionsMenu,
-	BulkDeleteDialog,
+	BulkArchiveDialog,
 	BulkOwnerMenu,
 	reportBulk,
 } from "@/components/crm/bulk-actions";
@@ -64,10 +63,10 @@ export function CompaniesBulkActions({
 	);
 
 	const remove = useMutation(
-		trpc.companies.bulkDelete.mutationOptions({
+		trpc.companies.bulkArchive.mutationOptions({
 			onSuccess: async (result, variables) => {
 				await cache.removedMany({ kind: "company", ids: variables.ids });
-				reportBulk(result, (count) => `${companies(count)} deleted.`);
+				reportBulk(result, (count) => `${companies(count)} archived.`);
 				setConfirming(false);
 				onDone();
 			},
@@ -94,21 +93,20 @@ export function CompaniesBulkActions({
 				<DropdownMenuSeparator />
 				<DropdownMenuGroup>
 					<DropdownMenuItem
-						variant="destructive"
-						onSelect={() => setConfirming(true)}
+												onSelect={() => setConfirming(true)}
 					>
-						<TrashCan />
-						Delete
+						<Renew />
+						Archive
 					</DropdownMenuItem>
 				</DropdownMenuGroup>
 			</BulkActionsMenu>
 
-			<BulkDeleteDialog
+			<BulkArchiveDialog
 				open={confirming}
 				onOpenChange={setConfirming}
-				title={`Delete ${companies(ids.length)}?`}
-				description="Their contacts stay, with no company. Deals on these companies go with them, and none of it can be undone."
-				onConfirm={() => remove.mutate({ ids })}
+				title={`Archive ${companies(ids.length)}?`}
+				description="Archived records leave active workflows while relationships, communications, assignments, and audit history remain available."
+				onConfirm={(reason) => remove.mutate({ ids, reason })}
 			/>
 		</>
 	);

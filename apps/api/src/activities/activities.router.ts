@@ -10,6 +10,7 @@ import {
 import type { z } from "zod";
 import type { AuthedTrpcContext } from "../trpc/context.types";
 import { AuthMiddleware } from "../trpc/middlewares/auth.middleware";
+import { PermissionMiddleware } from "../trpc/middlewares/permission.middleware";
 import {
 	activityCreateInput,
 	completeInput,
@@ -20,23 +21,23 @@ import {
 import { ActivitiesService } from "./activities.service";
 
 @Router({ alias: "activities" })
-@UseMiddlewares(AuthMiddleware)
+@UseMiddlewares(AuthMiddleware, PermissionMiddleware)
 export class ActivitiesRouter {
 	constructor(
 		@Inject(ActivitiesService) private readonly activities: ActivitiesService,
 	) {}
 
-	@Query({ input: timelineInput })
+	@Query({ input: timelineInput, meta: { permission: "crm.read" } })
 	async timeline(@Input() input: z.infer<typeof timelineInput>) {
 		return this.activities.timeline(input);
 	}
 
-	@Query({ input: timelineCountsInput })
+	@Query({ input: timelineCountsInput, meta: { permission: "crm.read" } })
 	async timelineCounts(@Input() input: z.infer<typeof timelineCountsInput>) {
 		return this.activities.timelineCounts(input);
 	}
 
-	@Query({ input: myTasksInput })
+	@Query({ input: myTasksInput, meta: { permission: "crm.read" } })
 	async myTasks(
 		@Ctx() ctx: AuthedTrpcContext,
 		@Input() input: z.infer<typeof myTasksInput>,
@@ -44,7 +45,7 @@ export class ActivitiesRouter {
 		return this.activities.myTasks(input, ctx.user.id);
 	}
 
-	@Mutation({ input: activityCreateInput })
+	@Mutation({ input: activityCreateInput, meta: { permission: "crm.create" } })
 	async create(
 		@Ctx() ctx: AuthedTrpcContext,
 		@Input() input: z.infer<typeof activityCreateInput>,
@@ -52,8 +53,11 @@ export class ActivitiesRouter {
 		return this.activities.create(input, ctx.user.id);
 	}
 
-	@Mutation({ input: completeInput })
-	async complete(@Input() input: z.infer<typeof completeInput>) {
-		return this.activities.complete(input.id, input.completed);
+	@Mutation({ input: completeInput, meta: { permission: "crm.update.owned" } })
+	async complete(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof completeInput>,
+	) {
+		return this.activities.complete(input.id, input.completed, ctx.user.id);
 	}
 }

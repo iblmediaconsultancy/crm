@@ -13,7 +13,6 @@ import {
 	ForbiddenException,
 	Injectable,
 	Logger,
-	NotFoundException,
 	ServiceUnavailableException,
 } from "@nestjs/common";
 import { AgentTriggerService } from "../agent/agent-trigger.service";
@@ -29,8 +28,10 @@ import {
 import type {
 	MemberListInput,
 	SetMemberRoleInput,
+	SetMemberStatusInput,
 	UpdateWorkspaceInput,
 } from "./workspace.contracts";
+import { MembershipSecurityService } from "./membership-security.service";
 
 export interface Workspace {
 	id: string;
@@ -45,6 +46,7 @@ export interface Workspace {
 
 export interface WorkspaceMember {
 	id: string;
+	status: "ACTIVE" | "SUSPENDED";
 	userId: string;
 	name: string;
 	email: string;
@@ -59,7 +61,7 @@ const MEMBER_SELECT = {
 	role: true,
 	createdAt: true,
 	userId: true,
-	user: { select: { name: true, email: true, image: true } },
+	user: { select: { name: true, email: true, image: true, profile: { select: { status: true } } } },
 } as const;
 
 type MemberRow = Prisma.MemberGetPayload<{ select: typeof MEMBER_SELECT }>;
@@ -75,7 +77,7 @@ const SORTABLE: Record<
 };
 
 function toRole(value: string): WorkspaceRole {
-	return isWorkspaceRole(value) ? value : "member";
+	return isWorkspaceRole(value) ? value : "contributor";
 }
 
 @Injectable()
@@ -85,6 +87,7 @@ export class WorkspaceService {
 	constructor(
 		@InjectDatabase() private readonly db: Db,
 		private readonly agent: AgentTriggerService,
+		private readonly membershipSecurity: MembershipSecurityService,
 	) {}
 
 	async get(userId: string): Promise<Workspace> {
@@ -198,53 +201,38 @@ export class WorkspaceService {
 		userId: string,
 		input: SetMemberRoleInput,
 	): Promise<WorkspaceMember> {
-		const role = await this.roleOf(userId);
+		await this.membershipSecurity.setRole(userId, input.memberId, input.role);
+		return this.readMember(input.memberId, userId);
+	}
 
-		if (!canChangeRole(role)) {
-			throw new ForbiddenException(
-				"Only an owner or an admin can change a member's role.",
-			);
-		}
+	async setMemberStatus(
+		userId: string,
+		input: SetMemberStatusInput,
+	): Promise<WorkspaceMember> {
+		await this.membershipSecurity.setStatus(userId, input.memberId, input.status);
+		return this.readMember(input.memberId, userId);
+	}
 
-		const updated = await this.db.$transaction(async (tx) => {
-			const target = await tx.member.findFirst({
-				where: { id: input.memberId, organizationId: WORKSPACE_ID },
-				select: { id: true, role: true },
-			});
+	async removeMember(userId: string, memberId: string): Promise<void> {
+		return this.membershipSecurity.removeMember(userId, memberId);
+	}
 
-			if (!target) {
-				throw new NotFoundException("That person is not in this workspace.");
-			}
-
-			if (target.role === "owner" && input.role !== "owner") {
-				const owners = await tx.$queryRaw<{ id: string }[]>`
-					SELECT id FROM "member"
-					WHERE "organizationId" = ${WORKSPACE_ID} AND role = 'owner'
-					FOR UPDATE
-				`;
-
-				if (owners.length <= 1) {
-					throw new ForbiddenException(
-						"The workspace needs an owner. Make someone else an owner first.",
-					);
-				}
-			}
-
-			return tx.member.update({
-				where: { id: target.id },
-				data: { role: input.role },
-				select: MEMBER_SELECT,
-			});
-		});
-
-		this.logger.log({
-			message: "Workspace role changed",
+	async transferAdmin(
+		userId: string,
+		input: { replacementMemberId: string; previousMemberId: string },
+	): Promise<void> {
+		return this.membershipSecurity.transferAdmin(
 			userId,
-			memberId: updated.id,
-			role: input.role,
+			input.replacementMemberId,
+			input.previousMemberId,
+		);
+	}
+	private async readMember(memberId: string, userId: string): Promise<WorkspaceMember> {
+		const row = await this.db.member.findUniqueOrThrow({
+			where: { id: memberId },
+			select: MEMBER_SELECT,
 		});
-
-		return this.toMember(updated, userId);
+		return this.toMember(row, userId);
 	}
 
 	private toMember(row: MemberRow, userId: string): WorkspaceMember {
@@ -255,6 +243,7 @@ export class WorkspaceService {
 			email: row.user.email,
 			image: row.user.image,
 			role: toRole(row.role),
+			status: row.user.profile?.status ?? "ACTIVE",
 			joinedAt: row.createdAt.toISOString(),
 			isViewer: row.userId === userId,
 		};

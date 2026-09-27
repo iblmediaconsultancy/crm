@@ -28,45 +28,17 @@ export class EnvironmentVariables {
 	PORT = 3001;
 
 	@IsString()
-	@MinLength(1, {
-		message:
-			"DATABASE_URL is required. `docker compose up -d` starts one, or set it to any Postgres connection string.",
-	})
+	@MinLength(1)
 	DATABASE_URL!: string;
 
+	@IsOptional()
 	@IsString()
-	@MinLength(32, {
-		message:
-			"BETTER_AUTH_SECRET must be at least 32 characters. Generate one with: openssl rand -base64 32",
-	})
-	BETTER_AUTH_SECRET!: string;
+	@MinLength(32)
+	BETTER_AUTH_SECRET?: string;
 
 	@IsString()
-	@MinLength(1, {
-		message:
-			'ALLOWED_SIGN_IN is required — it is the only thing deciding who can sign in. Set it to your email domain, e.g. ALLOWED_SIGN_IN="acme.com", or to a single address for a one-person install.',
-	})
+	@MinLength(1)
 	ALLOWED_SIGN_IN!: string;
-
-	@IsOptional()
-	@IsString()
-	GOOGLE_CLIENT_ID?: string;
-
-	@IsOptional()
-	@IsString()
-	GOOGLE_CLIENT_SECRET?: string;
-
-	@IsOptional()
-	@IsString()
-	MICROSOFT_CLIENT_ID?: string;
-
-	@IsOptional()
-	@IsString()
-	MICROSOFT_CLIENT_SECRET?: string;
-
-	@IsOptional()
-	@IsString()
-	MICROSOFT_TENANT_ID?: string;
 
 	@IsOptional()
 	@IsUrl({ require_tld: false })
@@ -81,10 +53,6 @@ export class EnvironmentVariables {
 	AUTH_COOKIE_DOMAIN?: string;
 
 	@IsOptional()
-	@IsString()
-	REDIS_URL?: string;
-
-	@IsOptional()
 	@Type(() => Number)
 	@IsInt()
 	@Min(0)
@@ -92,9 +60,7 @@ export class EnvironmentVariables {
 
 	@IsOptional()
 	@IsString()
-	@MinLength(16, {
-		message: "CRON_SECRET must be at least 16 characters.",
-	})
+	@MinLength(16)
 	CRON_SECRET?: string;
 
 	@IsOptional()
@@ -102,13 +68,7 @@ export class EnvironmentVariables {
 	BLOB_READ_WRITE_TOKEN?: string;
 
 	@IsOptional()
-	@IsUrl(
-		{ require_tld: false, require_protocol: true },
-		{
-			message:
-				"AGENT_URL must be a full URL with a scheme, like http://127.0.0.1:2000.",
-		},
-	)
+	@IsUrl({ require_tld: false, require_protocol: true })
 	AGENT_URL?: string;
 
 	@IsOptional()
@@ -117,7 +77,120 @@ export class EnvironmentVariables {
 
 	@IsOptional()
 	@IsString()
+	GOOGLE_GENERATIVE_AI_API_KEY?: string;
+
+	@IsOptional()
+	@IsString()
+	GOOGLE_CALENDAR_CLIENT_ID?: string;
+
+	@IsOptional()
+	@IsString()
+	GOOGLE_CALENDAR_CLIENT_SECRET?: string;
+
+	@IsOptional()
+	@IsString()
+	GOOGLE_CALENDAR_CLIENT_SECRET_FILE?: string;
+
+	@IsOptional()
+	@IsString()
+	GOOGLE_CALENDAR_PRIMARY_ID?: string;
+
+	@IsOptional()
+	@IsString()
+	GOOGLE_CALENDAR_HVA_ID?: string;
+
+	@IsOptional()
+	@IsString()
+	GOOGLE_CALENDAR_BLOCKER_IDS?: string;
+
+	@IsOptional()
+	@IsString()
 	CRM_TELEMETRY_DISABLED?: string;
+
+	@IsOptional()
+	@IsString()
+	MIAB_IMAP_HOST?: string;
+
+	@IsOptional()
+	@Type(() => Number)
+	@IsInt()
+	@Min(993)
+	@Max(993)
+	MIAB_IMAP_PORT?: number;
+
+	@IsOptional()
+	@IsString()
+	MIAB_MAILBOX_CREDENTIALS_JSON?: string;
+
+	@IsOptional()
+	@IsString()
+	MIAB_MAILBOX_CREDENTIALS_FILE?: string;
+
+	@IsOptional()
+	@IsString()
+	RESEND_API_KEY?: string;
+
+	@IsOptional()
+	@IsString()
+	RESEND_API_KEY_FILE?: string;
+
+	@IsOptional()
+	@IsString()
+	RESEND_WEBHOOK_SECRET_FILE?: string;
+
+	@IsOptional()
+	@IsString()
+	OBJECT_STORAGE_ACCESS_KEY_FILE?: string;
+
+	@IsOptional()
+	@IsString()
+	OBJECT_STORAGE_SECRET_KEY_FILE?: string;
+
+	@IsOptional()
+	@Type(() => Number)
+	@IsInt()
+	@Min(1)
+	API_RATE_LIMIT_MAX?: number;
+
+	@IsOptional()
+	@Type(() => Number)
+	@IsInt()
+	@Min(1_000)
+	API_RATE_LIMIT_WINDOW_MS?: number;
+
+	@IsOptional()
+	@Type(() => Number)
+	@IsInt()
+	@Min(1_000)
+	WORKER_INTERVAL_MS?: number;
+
+	@IsOptional()
+	@IsString()
+	RESEND_SYSTEM_FROM_EMAIL?: string;
+
+	@IsOptional()
+	@IsString()
+	RESEND_SYSTEM_FROM_NAME?: string;
+
+	@IsOptional()
+	@IsString()
+	RESEND_OUTREACH_FROM_EMAIL?: string;
+
+	@IsOptional()
+	@IsString()
+	RESEND_OUTREACH_FROM_NAME?: string;
+
+	@IsOptional()
+	@IsString()
+	ATLAS_LIVE_OUTREACH_ENABLED?: string;
+
+	@IsOptional()
+	@IsString()
+	ATLAS_LINKEDIN_LOCAL_EXECUTOR_ENABLED?: string;
+
+	@IsOptional()
+	@IsString()
+	IBL_LOCAL_PROVIDER_DOUBLE?: string;
 }
 
 export function validateEnv(
@@ -127,21 +200,82 @@ export function validateEnv(
 		enableImplicitConversion: true,
 		exposeDefaultValues: true,
 	});
-
 	const errors = validateSync(validated, {
 		skipMissingProperties: false,
 		whitelist: false,
 	});
-
 	if (errors.length > 0) {
 		const details = errors
 			.map((error) => Object.values(error.constraints ?? {}).join(", "))
 			.join("\n  - ");
-
 		throw new Error(
 			`Invalid environment configuration:\n  - ${details}\n\nSee .env.example at the root of the repo.`,
 		);
 	}
-
+	validateProductionGroups(config);
 	return validated;
+}
+
+function validateProductionGroups(config: Record<string, unknown>) {
+	if (
+		config.IBL_LOCAL_PROVIDER_DOUBLE === "enabled" &&
+		config.NODE_ENV === NodeEnv.Production
+	) {
+		throw new Error(
+			"IBL_LOCAL_PROVIDER_DOUBLE cannot be enabled in production.",
+		);
+	}
+	if (config.NODE_ENV !== NodeEnv.Production) return;
+	for (const inline of [
+		"MIAB_MAILBOX_CREDENTIALS_JSON",
+		"RESEND_API_KEY",
+		"OBJECT_STORAGE_ACCESS_KEY",
+		"OBJECT_STORAGE_SECRET_KEY",
+	]) {
+		if (typeof config[inline] === "string" && String(config[inline]).trim()) {
+			throw new Error(
+				`${inline} must be supplied through a file secret in production.`,
+			);
+		}
+	}
+	const identity = String(config.IBL_DATABASE_IDENTITY ?? "");
+	const requireGroup = (names: string[], label: string) => {
+		const missing = names.filter(
+			(name) =>
+				typeof config[name] !== "string" || !String(config[name]).trim(),
+		);
+		if (missing.length) {
+			throw new Error(
+				`${label} configuration is incomplete: ${missing.join(", ")}`,
+			);
+		}
+	};
+	if (identity === "api") {
+		requireGroup(
+			["BETTER_AUTH_SECRET", "RESEND_WEBHOOK_SECRET_FILE"],
+			"API security",
+		);
+	}
+	if (identity === "worker") {
+		requireGroup(["MIAB_IMAP_HOST", "MIAB_MAILBOX_CREDENTIALS_FILE"], "MIAB");
+		requireGroup(
+			[
+				"RESEND_API_KEY_FILE",
+				"RESEND_SYSTEM_FROM_EMAIL",
+				"RESEND_OUTREACH_FROM_EMAIL",
+			],
+			"Resend",
+		);
+		requireGroup(
+			[
+				"OBJECT_STORAGE_ENDPOINT",
+				"OBJECT_STORAGE_REGION",
+				"OBJECT_STORAGE_BUCKET",
+				"OBJECT_STORAGE_ACCESS_KEY_FILE",
+				"OBJECT_STORAGE_SECRET_KEY_FILE",
+				"CLAMAV_HOST",
+			],
+			"Attachment storage and scanning",
+		);
+	}
 }

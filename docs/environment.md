@@ -88,9 +88,10 @@ and lists every variable the API reads and nothing else.
 
 ## Optional: what the agent can do
 
-Every outside source is optional and the agent runs with none. A missing key removes a
-place to look; **never an error, never throws**. `agent/lib/capabilities.ts` is the
-single place that knows what is set.
+`GOOGLE_GENERATIVE_AI_API_KEY` is required for agent model requests. Other outside
+sources are optional: a missing integration key removes a place to look; **never an
+error, never throws**. `agent/lib/capabilities.ts` is the single place that knows what
+is set.
 
 | Variable | What it adds |
 | --- | --- |
@@ -98,7 +99,7 @@ single place that knows what is set.
 | `RAPIDAPI_KEY` | LinkedIn profiles via LinkDAPI |
 | `GITHUB_TOKEN` | Raises the GitHub rate limit from 60/hour |
 | `BLOB_READ_WRITE_TOKEN` | Mirrors logos and photos into Blob |
-| `AI_GATEWAY_API_KEY` | The model. Not needed on Vercel (OIDC) |
+| `GOOGLE_GENERATIVE_AI_API_KEY` | Direct Gemini API access for the agent |
 | `AGENT_BRIDGE_SECRET` | The rep-facing Agent panel — see `agent.md` |
 
 `BLOB_READ_WRITE_TOKEN` is also in `env.validation.ts` and `apps/api/turbo.json`

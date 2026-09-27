@@ -363,13 +363,13 @@ export function latestTurnFailure(
 
 		return {
 			code,
-			kind: /free tier users do not have access|RestrictedModelsError/i.test(
+			kind: /free tier users do not have access|RestrictedModelsError|unauthorized|authentication/i.test(
 				message,
 			)
 				? "restricted"
-				: /GatewayRateLimitError|free tier requests.*rate-?limited/i.test(
-							message,
-						)
+				: /rate.?limit|too many requests|resource.?exhausted/i.test(
+						message,
+					)
 					? "rate-limit"
 					: /credits?|quota|billing|usage limit/i.test(message)
 						? "credits"

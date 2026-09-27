@@ -7,6 +7,7 @@ import Close from "@carbon/icons-react/es/Close";
 import Dashboard from "@carbon/icons-react/es/Dashboard";
 import Partnership from "@carbon/icons-react/es/Partnership";
 import Settings from "@carbon/icons-react/es/Settings";
+import Task from "@carbon/icons-react/es/Task";
 import UserMultiple from "@carbon/icons-react/es/UserMultiple";
 import { Button } from "@crm/ui/components/button";
 import { Icon } from "@crm/ui/components/icon";
@@ -39,9 +40,9 @@ type RailItem = {
 };
 
 const ITEMS: RailItem[] = [
-	{ title: "Overview", href: "/", icon: Dashboard, match: "exact" },
+	{ title: "Command Center", href: "/", icon: Dashboard, match: "exact" },
 	{
-		title: "Chat",
+		title: "Atlas",
 		href: "/chat",
 		icon: Chat,
 		match: "prefix",
@@ -54,7 +55,26 @@ const ITEMS: RailItem[] = [
 		icon: UserMultiple,
 		match: "prefix",
 	},
+	{ title: "Leads", href: "/leads", icon: Task, match: "prefix" },
 	{ title: "Deals", href: "/deals", icon: Partnership, match: "prefix" },
+	{
+		title: "Outreach",
+		href: "/outreach",
+		icon: Task,
+		match: "prefix",
+		related: [
+			"/operations",
+			"/players",
+			"/football-agents",
+			"/agencies",
+			"/clubs",
+			"/representations",
+			"/football-tasks",
+			"/duplicates",
+			"/allocation",
+			"/archived",
+		],
+	},
 	{ title: "Settings", href: "/settings", icon: Settings, match: "prefix" },
 ];
 
@@ -135,7 +155,7 @@ function MobileRailLink({
 				aria-current={active ? "page" : undefined}
 				onClick={onNavigate}
 				transitionTypes={[
-					item.title === "Chat" ? "nav-forward" : "nav-lateral",
+					item.title === "Atlas" ? "nav-forward" : "nav-lateral",
 				]}
 			>
 				<Icon icon={item.icon} />
@@ -208,7 +228,7 @@ export function AppIconRailFallback() {
 export function AppIconRail() {
 	const pathname = usePathname();
 	const workspaceUrl = useWorkspaceUrl();
-	const { open, setOpen } = useMobileNav();
+	const { open, setOpen, triggerRef } = useMobileNav();
 	const prefetchSection = usePrefetchSection();
 
 	const items = useMemo(
@@ -222,7 +242,7 @@ export function AppIconRail() {
 		[workspaceUrl],
 	);
 	const inChat = items.some(
-		(item) => item.title === "Chat" && isActive(item, pathname),
+		(item) => item.title === "Atlas" && isActive(item, pathname),
 	);
 
 	return (
@@ -247,6 +267,10 @@ export function AppIconRail() {
 						side="left"
 						showCloseButton={false}
 						className="w-5/6 max-w-sm flex-row gap-0 p-0"
+						onCloseAutoFocus={(event) => {
+							event.preventDefault();
+							triggerRef.current?.focus();
+						}}
 					>
 						<SheetHeader className="sr-only">
 							<SheetTitle>Navigation and agent chats</SheetTitle>
@@ -280,7 +304,14 @@ export function AppIconRail() {
 						/>
 					</SheetContent>
 				) : (
-					<SheetContent side="left" className="w-64 gap-0 p-0">
+					<SheetContent
+						side="left"
+						className="w-64 gap-0 p-0"
+						onCloseAutoFocus={(event) => {
+							event.preventDefault();
+							triggerRef.current?.focus();
+						}}
+					>
 						<SheetHeader>
 							<SheetTitle>Navigation</SheetTitle>
 						</SheetHeader>

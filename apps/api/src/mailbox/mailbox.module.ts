@@ -1,26 +1,29 @@
 import { Module } from "@nestjs/common";
 import { AgentModule } from "../agent/agent.module";
 import { CompaniesModule } from "../companies/companies.module";
+import { TrpcModule } from "../trpc/trpc.module";
+import { MailboxRouter } from "./mailbox.router";
 import { MailboxApiClient } from "./mailbox-api.client";
+import { MailboxConversationService } from "./mailbox-conversation.service";
+import { MailboxFoundationService } from "./mailbox-foundation.service";
 import { MailboxMatchService } from "./mailbox-match.service";
-import { MailboxTokenService } from "./mailbox-token.service";
-import { SyncStateService } from "./sync-state.service";
 import { ThreadWriterService } from "./thread-writer.service";
 
 @Module({
-	imports: [AgentModule, CompaniesModule],
+	imports: [AgentModule, CompaniesModule, TrpcModule],
 	providers: [
 		MailboxApiClient,
-		MailboxTokenService,
+		MailboxConversationService,
+		MailboxFoundationService,
 		MailboxMatchService,
-		SyncStateService,
+		MailboxRouter,
 		ThreadWriterService,
 	],
 	exports: [
 		MailboxApiClient,
-		MailboxTokenService,
+		MailboxConversationService,
+		MailboxFoundationService,
 		MailboxMatchService,
-		SyncStateService,
 		ThreadWriterService,
 	],
 })

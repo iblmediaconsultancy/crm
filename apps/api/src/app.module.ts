@@ -17,17 +17,22 @@ import { DashboardModule } from "./dashboard/dashboard.module";
 import { DatabaseModule } from "./database/database.module";
 import { DealsModule } from "./deals/deals.module";
 import { FieldsModule } from "./fields/fields.module";
-import { GoogleModule } from "./google/google.module";
+import { FinanceModule } from "./finance/finance.module";
 import { HealthModule } from "./health/health.module";
+import { LinkedInModule } from "./linkedin/linkedin.module";
 import { LoggingModule } from "./logging/logging.module";
 import { logAuthRoute } from "./logging/request-logger.middleware";
 import { MailboxModule } from "./mailbox/mailbox.module";
-import { MicrosoftModule } from "./microsoft/microsoft.module";
+import { MeetingsModule } from "./meetings/meetings.module";
+import { MetricsModule } from "./metrics/metrics.module";
+import { OnboardingModule } from "./onboarding/onboarding.module";
+import { OperationsModule } from "./operations/operations.module";
+import { ProfileModule } from "./profile/profile.module";
+import { ProviderCapabilitiesModule } from "./provider-capabilities/provider-capabilities.module";
+import { ProvidersModule } from "./providers/providers.module";
 import { SearchModule } from "./search/search.module";
 import { SettingsModule } from "./settings/settings.module";
 import { SsoModule } from "./sso/sso.module";
-import { SyncModule } from "./sync/sync.module";
-import { TelemetryModule } from "./telemetry/telemetry.module";
 import { TrpcModule } from "./trpc/trpc.module";
 import { UsersModule } from "./users/users.module";
 import { WorkspaceModule } from "./workspace/workspace.module";
@@ -54,19 +59,24 @@ import { WorkspaceModule } from "./workspace/workspace.module";
 		CurrencyModule,
 		DealsModule,
 		FieldsModule,
+		FinanceModule,
+		ProfileModule,
+		ProviderCapabilitiesModule,
+		ProvidersModule,
 		ActivitiesModule,
 		AgentModule,
 		DashboardModule,
 		SearchModule,
 		MailboxModule,
-		GoogleModule,
-		MicrosoftModule,
-		SyncModule,
+		MetricsModule,
+		MeetingsModule,
+		LinkedInModule,
+		OnboardingModule,
+		OperationsModule,
 		SettingsModule,
-		WorkspaceModule,
 		SsoModule,
+		WorkspaceModule,
 		BackfillModule,
-		TelemetryModule,
 	],
 })
 export class AppModule {}

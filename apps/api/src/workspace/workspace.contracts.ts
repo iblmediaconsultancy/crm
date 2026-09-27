@@ -26,5 +26,20 @@ export const setMemberRoleInput = z.object({
 	role: z.enum(WORKSPACE_ROLES),
 });
 
+export const setMemberStatusInput = z.object({
+	memberId: z.string().min(1),
+	status: z.enum(["ACTIVE", "SUSPENDED"]),
+});
+
 export type UpdateWorkspaceInput = z.infer<typeof updateWorkspaceInput>;
 export type SetMemberRoleInput = z.infer<typeof setMemberRoleInput>;
+export type SetMemberStatusInput = z.infer<typeof setMemberStatusInput>;
+
+export const removeMemberInput = z.object({
+	memberId: z.string().min(1),
+});
+
+export const transferAdminInput = z.object({
+	replacementMemberId: z.string().min(1),
+	previousMemberId: z.string().min(1),
+});

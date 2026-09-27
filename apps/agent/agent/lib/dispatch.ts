@@ -1,4 +1,8 @@
-import { EnrichmentStatus } from "@crm/db";
+import {
+	COMMERCIAL_ENRICHMENT_MAX_ATTEMPTS,
+	db,
+	EnrichmentStatus,
+} from "@crm/db";
 import { APP_AUTH, type AppAuth } from "./app-auth";
 import { brandOutcome, runBrand } from "./brand";
 import { markRunning, settle } from "./enrichment";
@@ -31,6 +35,21 @@ export async function retireAbandoned(): Promise<void> {
 	}
 
 	for (const task of abandoned) {
+		if (task.kind === "atlas-commercial-enrichment" && task.leadId) {
+			await db.lead.updateMany({
+				where: {
+					id: task.leadId,
+					commercialEnrichmentAttempts: {
+						gte: COMMERCIAL_ENRICHMENT_MAX_ATTEMPTS,
+					},
+					commercialEnrichmentStatus: "QUEUED",
+				},
+				data: {
+					commercialEnrichmentStatus: "EXHAUSTED",
+					commercialEnrichmentNextAttemptAt: null,
+				},
+			});
+		}
 		await settle(
 			task,
 			EnrichmentStatus.FAILED,
@@ -121,8 +140,16 @@ export function taskAuth(task: LeasedTask, base: AppAuth = APP_AUTH): AppAuth {
 		...base,
 		attributes: {
 			taskKind: task.kind,
+			...(task.kind === "atlas-outreach" ? { purpose: "atlas-outreach" } : {}),
+			...(task.kind === "atlas-daily-report"
+				? { purpose: "atlas-daily-report" }
+				: {}),
+			...(task.kind === "atlas-commercial-enrichment"
+				? { purpose: "atlas-commercial-enrichment" }
+				: {}),
 			reason: task.reason,
 			budget: String(task.budget),
+			...(task.leadId ? { leadId: task.leadId } : {}),
 			...(task.contactId ? { contactId: task.contactId } : {}),
 			...(task.companyId ? { companyId: task.companyId } : {}),
 		},
@@ -154,6 +181,12 @@ function work(kind: string, reason: string): string {
 			return "Bring this contact's record up to date: their background, their current role, and anything that has changed since we last looked.";
 		case "meeting-prep":
 			return "There is a meeting with this person soon. Make sure whoever is taking it opens the record knowing who they are dealing with.";
+		case "atlas-outreach":
+			return "Run one safe Atlas outreach cycle. Review the eligible lead queue, send no more than one approved-by-policy email, and stop when a safety gate blocks the action.";
+		case "atlas-daily-report":
+			return "Write the weekday Atlas operating report as a separate CRM snapshot. Do not send email or change outreach state.";
+		case "atlas-commercial-enrichment":
+			return "Research the blocked Atlas commercial opportunity using cited public evidence, then record only evidence-backed enrichment and reevaluate the quality gate. Do not send email or change outreach state.";
 		case "company-profile":
 			return "This company's brand, industry, location and links are filled in separately and may already be there. Read the account, fill anything still missing, and write a brief if there is something worth saying.";
 		case "workspace-profile":

@@ -82,12 +82,8 @@ beforeAll(async () => {
 		update: {},
 	});
 
-	const company = await db.company.upsert({
-		where: { domain },
-		create: { name: `Money Co ${suffix}`, domain },
-		update: {},
-		select: { id: true },
-	});
+	const company = (await db.company.findFirst({ where: { domain }, select: { id: true } })) ??
+		(await db.company.create({ data: { name: `Money Co ${suffix}`, domain }, select: { id: true } }));
 	companyId = company.id;
 
 	await rate("EUR", "1.10", RateSource.FETCHED);
@@ -226,6 +222,7 @@ describe("the deals list", () => {
 			pageSize: 25,
 			sort: "amount",
 			dir: "desc",
+			lifecycle: "ACTIVE",
 			status: "open",
 			owner: userId,
 			stage: "all",

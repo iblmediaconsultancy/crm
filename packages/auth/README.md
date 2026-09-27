@@ -45,7 +45,7 @@ export const POST = auth.handler;
 ```ts
 import { signIn, signOut, useSession } from "@crm/auth/client";
 
-await signIn.social({ provider: "google", callbackURL: "/" });
+await signIn.email({ email, password, callbackURL: "/" });
 ```
 
 `NEXT_PUBLIC_API_URL` decides which origin the client talks to. It must point at
@@ -70,13 +70,7 @@ whatever `process.env` its host process has, and `src/env.ts` imports
 CLI loads `auth.ts` directly. See
 [`docs/environment.md`](../../docs/environment.md).
 
-Create an OAuth client in the Google Cloud console and add
-`<API_URL>/api/auth/callback/google` — `http://localhost:3001/api/auth/callback/google`
-in development — as an authorised redirect URI.
-
-`ALLOWED_SIGN_IN` decides who may sign in, and an empty value admits nobody. It
-is the whole authorisation model: there are no roles and no organizations, so
-`src/workspace.ts` is worth reading before you change anything here.
+Public signup and Google/Microsoft social authentication are disabled. Accounts are created through a validated invitation or the one-time Admin bootstrap. `ALLOWED_SIGN_IN`, active membership status, the Admin/Team/Contributor permission matrix, service guards, and forced PostgreSQL RLS all participate in authorization.
 
 ## Changing the schema
 

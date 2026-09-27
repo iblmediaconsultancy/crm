@@ -25,7 +25,6 @@ async function ChatHome() {
 		queryClient.prefetchQuery(
 			trpc.conversations.builderResources.queryOptions({ q: "" }),
 		),
-		queryClient.prefetchQuery(trpc.google.status.queryOptions()),
 	]);
 
 	return (

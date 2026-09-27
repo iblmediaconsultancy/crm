@@ -15,11 +15,13 @@ type SettingsNavItem = {
 const ROOT = "/settings";
 
 const ITEMS: SettingsNavItem[] = [
-	{ title: "General", href: ROOT },
+	{ title: "Profile", href: ROOT },
+	{ title: "Team", href: `${ROOT}/members` },
+	{ title: "Mailbox", href: `${ROOT}/mailbox` },
 	{ title: "Connections", href: `${ROOT}/connections` },
-	{ title: "Currencies", href: `${ROOT}/currencies` },
-	{ title: "Members", href: `${ROOT}/members` },
-	{ title: "SSO", href: `${ROOT}/sso` },
+	{ title: "Provider Status", href: `${ROOT}/providers` },
+	{ title: "Protected players", href: `${ROOT}/protected-players` },
+	{ title: "Financials", href: `${ROOT}/finance` },
 ];
 
 function isActive(href: string, root: string, pathname: string): boolean {

@@ -1,4 +1,5 @@
 import { defineDynamic, defineInstructions } from "eve/instructions";
+import { ATLAS_RUNTIME_INSTRUCTIONS } from "../lib/atlas-playbook";
 import { focusOn, setBudget } from "../lib/focus";
 import { sessionPreamble } from "../lib/preamble";
 import { RESEARCH_INSTRUCTIONS } from "../lib/research-instructions";
@@ -15,6 +16,32 @@ export default defineDynamic({
 			if (purpose === "team-agent") {
 				return defineInstructions({
 					markdown: `This is one background run of a deployed team agent. Call agent_runner exactly once and pass the run id from your user message. Do not call research tools or perform work yourself. Relay the specialist's structured factual completion summary. Never claim an external action that the specialist did not log.`,
+				});
+			}
+
+			if (purpose === "atlas-outreach") {
+				return defineInstructions({
+					markdown: `${ATLAS_RUNTIME_INSTRUCTIONS}\n\nThis is an authenticated Atlas outreach run. Call list_atlas_outreach_queue before deciding. If and only if every safety gate is satisfied, compose one concise, personalized email in English, Dutch, or Turkish and call send_atlas_email exactly once. Never include pricing, quote a fee, contact a lead through LinkedIn, Instagram, WhatsApp, or phone, or send to a lead with NEEDS_IHSAN, WITH_IHSAN, PARKED, SUPPRESSED, PROTECTED, or DO_NOT_CONTACT state.`,
+				});
+			}
+
+			if (purpose === "atlas-daily-report") {
+				return defineInstructions({
+					markdown:
+						"This is the weekday Atlas operating-report run. Call write_atlas_daily_report exactly once. Do not send email, contact anyone, or mutate leads, drafts, follow-ups, or calendar state.",
+				});
+			}
+
+			if (purpose === "atlas-commercial-enrichment") {
+				return defineInstructions({
+					markdown:
+						"This is a background Atlas commercial-quality enrichment run. Research only the lead named by the task. Use cited public evidence and never invent a current club, why-now event, language, or rating. Call enrich_atlas_commercial_quality once with the evidence you actually observed. Do not send email, create drafts, contact anyone, or change outreach state.",
+				});
+			}
+
+			if (attribute(ctx, "researchRequestId")) {
+				return defineInstructions({
+					markdown: `${RESEARCH_INSTRUCTIONS}\n\nThis is an authenticated IBL research request. Begin with inspect_ibl_research. Work only inside the returned identity envelope and CRM target. Every finding must cite a record_ibl_evidence result. You may create only DRAFT artifacts and submit findings for human review. You cannot approve, queue, or send outreach. Finish with submit_ibl_research_review.`,
 				});
 			}
 

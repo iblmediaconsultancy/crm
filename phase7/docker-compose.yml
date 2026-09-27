@@ -1,0 +1,249 @@
+name: ibl-command-center-v2-production
+
+x-runtime-environment: &runtime-environment
+  NODE_ENV: production
+  API_URL: ${API_URL:?Set the public HTTPS API URL}
+  APP_URL: ${APP_URL:?Set the public HTTPS app URL}
+  BETTER_AUTH_URL: ${API_URL:?Set the public HTTPS API URL}
+  ALLOWED_SIGN_IN: ${ALLOWED_SIGN_IN:?Set the invited email or domain}
+  AUTH_COOKIE_DOMAIN: ${AUTH_COOKIE_DOMAIN:-}
+  AGENT_URL: http://agent:2000
+  API_RATE_LIMIT_MAX: ${API_RATE_LIMIT_MAX:-300}
+  API_RATE_LIMIT_WINDOW_MS: ${API_RATE_LIMIT_WINDOW_MS:-60000}
+  CRM_TELEMETRY_DISABLED: ${CRM_TELEMETRY_DISABLED:-1}
+  NEXT_TELEMETRY_DISABLED: "1"
+
+services:
+  postgres:
+    image: ${POSTGRES_17_IMAGE:?Set a digest-pinned PostgreSQL 17 image}
+    environment:
+      POSTGRES_USER: ibl_v2_root
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_superuser_password
+    secrets:
+      - postgres_superuser_password
+      - migration_db_password
+      - api_db_password
+      - worker_db_password
+      - agent_db_password
+      - app_db_password
+      - backup_db_password
+    volumes:
+      - ./docker/postgres-init.sh:/docker-entrypoint-initdb.d/00-roles.sh:ro
+      - postgres-data:/var/lib/postgresql/data
+      - backup-data:/backups
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ibl_v2_root -d postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    stop_grace_period: 60s
+    networks: [private]
+    restart: unless-stopped
+
+  clamd:
+    image: ${CLAMAV_IMAGE:?Set a digest-pinned ClamAV image}
+    healthcheck:
+      test: ["CMD-SHELL", "printf 'PING\n' | nc 127.0.0.1 3310 | grep -q PONG"]
+      interval: 15s
+      timeout: 5s
+      retries: 40
+    volumes:
+      - clamav-data:/var/lib/clamav
+    networks: [private]
+    restart: unless-stopped
+
+  migrate:
+    image: ${IBL_MIGRATE_IMAGE:?Set a digest-pinned migrate image}
+    entrypoint: ["sh", "/workspace/phase7/docker/run-with-secrets.sh"]
+    command: ["bun", "packages/db/node_modules/prisma/build/index.js", "migrate", "deploy", "--config", "packages/db/prisma.config.ts"]
+    environment:
+      IBL_DATABASE_IDENTITY: migration
+    secrets: [migration_db_password]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [private]
+    restart: "no"
+
+  api:
+    image: ${IBL_API_IMAGE:?Set a digest-pinned api image}
+    entrypoint: ["sh", "/workspace/phase7/docker/run-with-secrets.sh"]
+    environment:
+      <<: *runtime-environment
+      IBL_DATABASE_IDENTITY: api
+    secrets:
+      - api_db_password
+      - better_auth_secret
+      - cron_secret
+      - resend_webhook_secret
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports: ["${BIND_ADDRESS:-127.0.0.1}:${API_PORT:-3301}:3001"]
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:3001/health/ready').then(r=>{if(!r.ok)process.exit(1)})"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+    stop_grace_period: 30s
+    networks: [private, edge]
+    restart: unless-stopped
+
+  worker:
+    image: ${IBL_WORKER_IMAGE:?Set a digest-pinned worker image}
+    entrypoint: ["sh", "/workspace/phase7/docker/run-with-secrets.sh"]
+    environment:
+      <<: *runtime-environment
+      IBL_DATABASE_IDENTITY: worker
+      WORKER_INTERVAL_MS: ${WORKER_INTERVAL_MS:-5000}
+      MIAB_IMAP_HOST: ${MIAB_IMAP_HOST:?Set the MIAB IMAP host}
+      MIAB_IMAP_PORT: ${MIAB_IMAP_PORT:-993}
+      RESEND_SYSTEM_FROM_EMAIL: ${RESEND_SYSTEM_FROM_EMAIL:?Set the system sender}
+      RESEND_SYSTEM_FROM_NAME: ${RESEND_SYSTEM_FROM_NAME:-IBL Command Center}
+      RESEND_OUTREACH_FROM_EMAIL: ${RESEND_OUTREACH_FROM_EMAIL:?Set the outreach sender}
+      RESEND_OUTREACH_FROM_NAME: ${RESEND_OUTREACH_FROM_NAME:-IBL Media Consultancy}
+      OBJECT_STORAGE_ENDPOINT: ${OBJECT_STORAGE_ENDPOINT:?Set private S3-compatible storage}
+      OBJECT_STORAGE_REGION: ${OBJECT_STORAGE_REGION:?Set object storage region}
+      OBJECT_STORAGE_BUCKET: ${OBJECT_STORAGE_BUCKET:?Set private attachment bucket}
+      OBJECT_STORAGE_FORCE_PATH_STYLE: ${OBJECT_STORAGE_FORCE_PATH_STYLE:-0}
+      CLAMAV_HOST: clamd
+      CLAMAV_PORT: "3310"
+    secrets:
+      - worker_db_password
+      - miab_mailbox_credentials_json
+      - resend_api_key
+      - object_storage_access_key
+      - object_storage_secret_key
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      clamd:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/worker-ready"]
+      interval: 10s
+      timeout: 2s
+      retries: 30
+    stop_grace_period: 90s
+    networks: [private, edge]
+    restart: unless-stopped
+
+  agent:
+    image: ${IBL_AGENT_IMAGE:?Set a digest-pinned agent image}
+    entrypoint: ["sh", "/workspace/phase7/docker/run-with-secrets.sh"]
+    environment:
+      <<: *runtime-environment
+      IBL_DATABASE_IDENTITY: agent
+    secrets:
+      - agent_db_password
+      - agent_bridge_secret
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:2000/').then(r=>{if(!r.ok)process.exit(1)})"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+    stop_grace_period: 90s
+    networks: [private, edge]
+    restart: unless-stopped
+
+  app:
+    image: ${IBL_APP_IMAGE:?Set a digest-pinned app image}
+    entrypoint: ["sh", "/workspace/phase7/docker/run-with-secrets.sh"]
+    environment:
+      <<: *runtime-environment
+      IBL_DATABASE_IDENTITY: app
+    secrets: [app_db_password]
+    depends_on:
+      api:
+        condition: service_healthy
+    ports: ["${BIND_ADDRESS:-127.0.0.1}:${APP_PORT:-3300}:3000"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r=>{if(r.status>=500)process.exit(1)})"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+    stop_grace_period: 30s
+    networks: [private, edge]
+    restart: unless-stopped
+
+  backup:
+    image: ${POSTGRES_17_IMAGE:?Set a digest-pinned PostgreSQL 17 image}
+    entrypoint: ["/ops/backup.sh"]
+    environment:
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      BACKUP_DATABASE_USER: ibl_v2_backup
+    secrets: [backup_db_password]
+    volumes:
+      - ./ops/backup.sh:/ops/backup.sh:ro
+      - backup-data:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [private]
+    profiles: [ops]
+    restart: "no"
+
+  prometheus:
+    image: ${PROMETHEUS_IMAGE:?Set a digest-pinned Prometheus image}
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${METRICS_RETENTION:-30d}
+    secrets: [cron_secret]
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      api:
+        condition: service_healthy
+    ports: ["${BIND_ADDRESS:-127.0.0.1}:${PROMETHEUS_PORT:-9090}:9090"]
+    networks: [private, edge]
+    restart: unless-stopped
+
+networks:
+  private:
+    internal: true
+  edge:
+
+volumes:
+  postgres-data:
+  backup-data:
+  prometheus-data:
+  clamav-data:
+
+secrets:
+  postgres_superuser_password:
+    file: ${POSTGRES_SUPERUSER_PASSWORD_FILE:?Set a secret file path}
+  migration_db_password:
+    file: ${MIGRATION_DB_PASSWORD_FILE:?Set a secret file path}
+  api_db_password:
+    file: ${API_DB_PASSWORD_FILE:?Set a secret file path}
+  worker_db_password:
+    file: ${WORKER_DB_PASSWORD_FILE:?Set a secret file path}
+  agent_db_password:
+    file: ${AGENT_DB_PASSWORD_FILE:?Set a secret file path}
+  app_db_password:
+    file: ${APP_DB_PASSWORD_FILE:?Set a secret file path}
+  backup_db_password:
+    file: ${BACKUP_DB_PASSWORD_FILE:?Set a secret file path}
+  better_auth_secret:
+    file: ${BETTER_AUTH_SECRET_FILE:?Set a secret file path}
+  cron_secret:
+    file: ${CRON_SECRET_FILE:?Set a secret file path}
+  agent_bridge_secret:
+    file: ${AGENT_BRIDGE_SECRET_FILE:?Set a secret file path}
+  miab_mailbox_credentials_json:
+    file: ${MIAB_MAILBOX_CREDENTIALS_FILE:?Set a MIAB credentials secret file}
+  resend_api_key:
+    file: ${RESEND_API_KEY_FILE:?Set a Resend key secret file}
+  resend_webhook_secret:
+    file: ${RESEND_WEBHOOK_SECRET_FILE:?Set a Resend webhook signing-secret file}
+  object_storage_access_key:
+    file: ${OBJECT_STORAGE_ACCESS_KEY_FILE:?Set an object-storage access-key file}
+  object_storage_secret_key:
+    file: ${OBJECT_STORAGE_SECRET_KEY_FILE:?Set an object-storage secret-key file}

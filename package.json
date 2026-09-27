@@ -4,7 +4,7 @@
 	"license": "MIT",
 	"version": "1.5.1",
 	"scripts": {
-		"prepare": "git rev-parse --git-dir >/dev/null 2>&1 && git config core.hooksPath .githooks || true",
+		"prepare": "git rev-parse --git-dir \u003e/dev/null 2\u003e\u00261 \u0026\u0026 git config core.hooksPath .githooks || true",
 		"build": "turbo run build",
 		"dev": "turbo run dev",
 		"lint": "turbo run lint",
@@ -18,15 +18,25 @@
 		"db:push": "turbo run db:push",
 		"db:reset": "turbo run db:reset",
 		"db:seed": "turbo run db:seed",
-		"db:studio": "turbo run db:studio"
+		"db:studio": "turbo run db:studio",
+		"migration:v1:inventory": "bun phase6/src/cli.ts inventory",
+		"migration:v1:export": "bun phase6/src/cli.ts export",
+		"migration:v1:plan": "bun phase6/src/cli.ts plan",
+		"migration:v1:apply": "bun phase6/src/cli.ts apply",
+		"migration:v1:reconcile": "bun phase6/src/cli.ts reconcile",
+		"migration:v1:rollback": "bun phase6/src/cli.ts rollback",
+		"migration:v1:classify": "bun phase6/src/cli.ts classify"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.4.10",
+		"@types/bun": "^1.3.14",
+		"@types/pg": "^8.20.0",
+		"pg": "^8.22.0",
 		"turbo": "^2.10.8",
 		"typescript": "5.9.2"
 	},
 	"engines": {
-		"node": ">=22"
+		"node": "\u003e=22"
 	},
 	"packageManager": "bun@1.3.12",
 	"devEngines": {
@@ -38,5 +48,17 @@
 	"workspaces": [
 		"apps/*",
 		"packages/*"
-	]
+	],
+	"overrides": {
+		"better-auth": "1.6.25",
+		"dompurify": "3.4.13",
+		"drizzle-orm": "0.45.2",
+		"hono": "4.12.34",
+		"js-yaml": "4.3.1",
+		"lodash": "4.18.1",
+		"mermaid": "11.16.1",
+		"nanoid": "3.3.17",
+		"postcss": "8.5.25",
+		"sharp": "0.35.3"
+	}
 }

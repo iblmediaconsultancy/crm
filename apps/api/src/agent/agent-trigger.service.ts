@@ -4,7 +4,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import { InjectDatabase } from "../database/database.constants";
 import { bridge } from "./bridge";
 
-const POKE_TIMEOUT_MS = 2_000;
+const POKE_TIMEOUT_MS = 5_000;
 
 @Injectable()
 export class AgentTriggerService {
@@ -136,6 +136,10 @@ export class AgentTriggerService {
 
 	deployedAgentRunQueued(): void {
 		this.pokeRoute("/internal/crm/agent-dispatch");
+	}
+
+	researchQueued(): void {
+		this.pokeRoute("/internal/crm/research-dispatch");
 	}
 
 	async backfill(input: {

@@ -49,6 +49,8 @@ export class DashboardService {
 
 		const base = await this.conversion.reportingCurrency();
 		const counted = this.conversion.countedWhere(base);
+		const activeDeal = { lifecycleState: "ACTIVE" as const };
+		const activeActivity = { lifecycleState: "ACTIVE" as const };
 
 		const [
 			openByStage,
@@ -62,18 +64,26 @@ export class DashboardService {
 		] = await Promise.all([
 			this.db.deal.groupBy({
 				by: ["stage"],
-				where: { ...owned, stage: { in: [...OPEN_DEAL_STAGES] } },
+				where: {
+					...activeDeal,
+					...owned,
+					stage: { in: [...OPEN_DEAL_STAGES] },
+				},
 				_count: { _all: true },
 			}),
 			this.db.deal.groupBy({
 				by: ["stage"],
 				where: {
-					AND: [{ ...owned, stage: { in: [...OPEN_DEAL_STAGES] } }, counted],
+					AND: [
+						{ ...activeDeal, ...owned, stage: { in: [...OPEN_DEAL_STAGES] } },
+						counted,
+					],
 				},
 				_sum: { baseAmount: true },
 			}),
 			this.db.deal.findMany({
 				where: {
+					...activeDeal,
 					...owned,
 					OR: [
 						{ createdAt: { gte: trendStart } },
@@ -92,6 +102,7 @@ export class DashboardService {
 				where: {
 					AND: [
 						{
+							...activeDeal,
 							...owned,
 							stage: { in: [...OPEN_DEAL_STAGES] },
 							expectedCloseDate: { gte: startOfMonth, lt: startOfNextMonth },
@@ -103,7 +114,11 @@ export class DashboardService {
 				_sum: { baseAmount: true },
 			}),
 			this.db.deal.findMany({
-				where: { ...owned, stage: { in: [...OPEN_DEAL_STAGES] } },
+				where: {
+					...activeDeal,
+					...owned,
+					stage: { in: [...OPEN_DEAL_STAGES] },
+				},
 				orderBy: [
 					{ baseAmount: { sort: "desc", nulls: "last" } },
 					{ expectedCloseDate: "asc" },
@@ -133,6 +148,7 @@ export class DashboardService {
 			}),
 			this.db.activity.findMany({
 				where: {
+					...activeActivity,
 					type: ActivityType.TASK,
 					completedAt: null,
 					dueAt: { lt: now },
@@ -149,7 +165,10 @@ export class DashboardService {
 				},
 			}),
 			this.db.activity.findMany({
-				where: mine ? { createdById: actingUserId } : {},
+				where: {
+					...activeActivity,
+					...(mine ? { createdById: actingUserId } : {}),
+				},
 				orderBy: [{ createdAt: "desc" }],
 				take: 12,
 				select: {
@@ -164,7 +183,7 @@ export class DashboardService {
 					deal: { select: { id: true, name: true } },
 				},
 			}),
-			this.conversion.unconverted(owned),
+			this.conversion.unconverted({ ...activeDeal, ...owned }),
 		]);
 
 		const stages = OPEN_DEAL_STAGES.map((stage) => {

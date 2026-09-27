@@ -7,11 +7,13 @@
 		".": "./src/index.ts",
 		"./client": "./src/client.ts",
 		"./cookies": "./src/cookies.ts",
+		"./permissions": "./src/permissions.ts",
 		"./scopes": "./src/scopes.ts",
 		"./workspace": "./src/workspace.ts"
 	},
 	"scripts": {
 		"auth:generate": "better-auth generate --config src/auth.ts --output ../db/prisma/schema.prisma --y",
+		"bootstrap:admin": "bun scripts/bootstrap-admin.ts",
 		"check-types": "tsc --noEmit",
 		"lint": "biome check .",
 		"test": "bun test",
