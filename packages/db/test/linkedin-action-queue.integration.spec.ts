@@ -35,7 +35,7 @@ if (!testDatabaseUrl) {
 	const service = new LinkedInActionQueueService(db, channelService);
 
 	describe("LinkedIn action queue handoff", () => {
-		it("auto-approves idempotent routine messages and does not enforce 20", async () => {
+		it("inherits account quota, enforces limits, and accounts for release and send", async () => {
 			await db.user.create({
 				data: {
 					id: actorId,
@@ -79,7 +79,7 @@ if (!testDatabaseUrl) {
 					contactId,
 					identityKey: profileIdentifier,
 					profileUrl,
-					normalizedProfileUrl: profileIdentifier,
+					normalizedProfileUrl: profileUrl,
 					connectionState: "CONNECTED",
 					classification: "ACTION_REQUIRED",
 					consent: "ALLOWED",
@@ -100,6 +100,17 @@ if (!testDatabaseUrl) {
 					type: "LINKEDIN",
 					value: connectionProfileUrl,
 					normalizedValue: connectionProfileIdentifier,
+				},
+			});
+			const previousQuotaDay = new Date();
+			previousQuotaDay.setUTCHours(0, 0, 0, 0);
+			previousQuotaDay.setUTCDate(previousQuotaDay.getUTCDate() - 1);
+			await db.linkedInQuota.create({
+				data: {
+					day: previousQuotaDay,
+					accountKey,
+					messageLimit: 3,
+					connectionLimit: 5,
 				},
 			});
 
@@ -155,7 +166,7 @@ if (!testDatabaseUrl) {
 					orderBy: { createdAt: "desc" },
 					select: { messageReserved: true, messageLimit: true },
 				}),
-			).toMatchObject({ messageReserved: 1, messageLimit: 0 });
+			).toMatchObject({ messageReserved: 1, messageLimit: 3 });
 			const connection = await service.queueRoutineAction({
 				action: "CONNECTION_REQUEST",
 				contactId: connectionContactId,

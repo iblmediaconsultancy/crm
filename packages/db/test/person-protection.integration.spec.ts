@@ -322,6 +322,7 @@ if (!testDatabaseUrl) {
 				body: "Coworker relationship remains available.",
 				idempotencyKey: `${coworkerConversationId}:message`,
 				approvedAt: new Date(),
+				messageLimit: 1,
 			});
 			expect(coworkerJob.status).toBe("PENDING");
 

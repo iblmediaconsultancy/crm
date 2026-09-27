@@ -306,8 +306,49 @@ async function recoverUnsentMessage(): Promise<void> {
 		const result = await new LinkedInChannelService(db).recoverUnsentMessage(
 			jobId,
 			option("--error-code", "MESSAGE_EDITOR_UNAVAILABLE"),
-			{ restoreRoutineState: process.argv.includes("--restore-routine-state") },
+			{
+				restoreRoutineState: process.argv.includes("--restore-routine-state"),
+				reconcileRoutineState: process.argv.includes(
+					"--reconcile-routine-state",
+				),
+			},
 		);
+		console.log(JSON.stringify(result));
+	} finally {
+		await db.$disconnect();
+	}
+}
+
+async function reconcileDeletedMessage(): Promise<void> {
+	requireRecoveryDatabase();
+	const jobId = option("--job-id", "");
+	const classification = option("--conversation-classification", "");
+	if (!jobId) throw new Error("JOB_ID_REQUIRED");
+	if (!classification) throw new Error("CONVERSATION_CLASSIFICATION_REQUIRED");
+	const { db } = await import("@crm/db");
+	const { LinkedInChannelService } = await import("./linkedin-channel.service");
+	const parseDate = (name: string): Date | null | undefined => {
+		const value = option(name, "");
+		if (!value) return undefined;
+		const date = new Date(value);
+		if (Number.isNaN(date.getTime()))
+			throw new Error(`${name.toUpperCase()}_INVALID`);
+		return date;
+	};
+	try {
+		const result = await new LinkedInChannelService(
+			db,
+		).reconcileDeletedOutboundMessage({
+			jobId,
+			conversationClassification: classification as Parameters<
+				LinkedInChannelService["reconcileDeletedOutboundMessage"]
+			>[0]["conversationClassification"],
+			lastInboundAt: parseDate("--last-inbound-at"),
+			lastOutboundAt: parseDate("--last-outbound-at"),
+			lastMessageAt: parseDate("--last-message-at"),
+			nextActionTitle: option("--next-action-title", "WAIT_FOR_PROSPECT"),
+			reason: option("--reason", "EXTERNAL_MESSAGE_DELETED"),
+		});
 		console.log(JSON.stringify(result));
 	} finally {
 		await db.$disconnect();
@@ -473,6 +514,7 @@ async function main(): Promise<void> {
 	if (command === "health") return health();
 	if (command === "run-once") return runOnce();
 	if (command === "recover-unsent-message") return recoverUnsentMessage();
+	if (command === "reconcile-deleted-message") return reconcileDeletedMessage();
 	if (command === "queue-routine") return queueRoutineAction();
 	if (command === "worker") {
 		const subcommand = process.argv[3] ?? "status";
@@ -483,7 +525,7 @@ async function main(): Promise<void> {
 	}
 	if (command === "worker-run") return runWorker();
 	throw new Error(
-		"COMMAND_MUST_BE_START_STOP_HEALTH_RUN_ONCE_RECOVER_UNSENT_MESSAGE_QUEUE_ROUTINE_OR_WORKER",
+		"COMMAND_MUST_BE_START_STOP_HEALTH_RUN_ONCE_RECOVER_UNSENT_MESSAGE_RECONCILE_DELETED_MESSAGE_QUEUE_ROUTINE_OR_WORKER",
 	);
 }
 

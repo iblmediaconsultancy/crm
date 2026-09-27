@@ -3,7 +3,7 @@ import {
 	coldOutreachBlockReason,
 	type Db,
 	isPersonProtected,
-	linkedInProfileIdentityMatches,
+	linkedInProfileRecordsMatch,
 	Prisma,
 } from "@crm/db";
 import { withPrincipal } from "@crm/db/security";
@@ -14,6 +14,7 @@ import {
 } from "@nestjs/common";
 import { InjectDatabase } from "../database/database.constants";
 import { canReuseConsumedLinkedInConnectionClaim } from "./linkedin-first-touch";
+import { hasSubstantiveLinkedInHistory } from "./linkedin-history";
 
 const ATLAS_OPERATOR_ID = "atlas-operator";
 const LINKEDIN_CHANNEL = "LINKEDIN" as const;
@@ -123,6 +124,7 @@ type QueueInput = {
 	coldOutreach?: boolean;
 	firstMessage?: boolean;
 	accountKey?: string;
+	messageLimit?: number;
 	connectionLimit?: number;
 };
 
@@ -136,6 +138,7 @@ type ConnectionRequestQueueInput = {
 	approvedAt: Date;
 	coldOutreach?: boolean;
 	accountKey?: string;
+	messageLimit?: number;
 	connectionLimit?: number;
 };
 
@@ -202,6 +205,47 @@ function utcDay(value: Date): Date {
 	);
 }
 
+function quotaLimit(
+	value: number | undefined,
+	fallback: number,
+	minimum: number,
+): number {
+	return typeof value === "number" &&
+		Number.isInteger(value) &&
+		value >= minimum
+		? value
+		: fallback;
+}
+
+async function ensureLinkedInQuota(
+	tx: Prisma.TransactionClient,
+	quotaDay: Date,
+	accountKey: string,
+	input: { messageLimit?: number; connectionLimit?: number },
+) {
+	const previous = await tx.linkedInQuota.findFirst({
+		where: { accountKey, day: { lt: quotaDay } },
+		orderBy: { day: "desc" },
+		select: { messageLimit: true, connectionLimit: true },
+	});
+	const messageLimit = quotaLimit(
+		input.messageLimit,
+		previous?.messageLimit ?? 0,
+		0,
+	);
+	const connectionLimit = quotaLimit(
+		input.connectionLimit,
+		previous?.connectionLimit ?? DEFAULT_LINKEDIN_CONNECTION_LIMIT,
+		1,
+	);
+	return tx.linkedInQuota.upsert({
+		where: { day_accountKey: { day: quotaDay, accountKey } },
+		create: { day: quotaDay, accountKey, messageLimit, connectionLimit },
+		update: {},
+		select: { id: true },
+	});
+}
+
 export function channelStatusForClassification(
 	classification: InboundInput["classification"],
 ):
@@ -231,6 +275,70 @@ function conversationStatusForChannelStatus(
 ): "ACTIVE" | "WAITING_ON_PROSPECT" | "PARKED" | "CLOSED" | "NEEDS_IHSAN" {
 	if (status === "ACTIVE_HUMAN_CONVERSATION") return "ACTIVE";
 	return status;
+}
+
+type TechnicalRecoveryMessage = {
+	direction: "INBOUND" | "OUTBOUND";
+	status: string;
+	occurredAt: Date | null;
+};
+
+export type LinkedInTechnicalRecoveryState = {
+	conversationStatus:
+		| "ACTIVE"
+		| "WAITING_ON_PROSPECT"
+		| "PARKED"
+		| "CLOSED"
+		| "NEEDS_IHSAN";
+	conversationClassification: InboundInput["classification"];
+	channelStatus:
+		| "COLD_ELIGIBLE"
+		| "ACTIVE_HUMAN_CONVERSATION"
+		| "WAITING_ON_PROSPECT"
+		| "PARKED"
+		| "CLOSED"
+		| "SUPPRESSED"
+		| "NEEDS_IHSAN";
+	reasonSuffix:
+		| "NO_CONFIRMED_MESSAGE"
+		| "REAL_INBOUND_HISTORY"
+		| "REAL_OUTBOUND_HISTORY";
+};
+
+export function technicalRecoveryState(
+	messages: readonly TechnicalRecoveryMessage[],
+): LinkedInTechnicalRecoveryState {
+	const confirmedMessages = messages
+		.filter(
+			(message) =>
+				message.occurredAt !== null &&
+				["HISTORICAL", "RECEIVED", "SENT"].includes(message.status),
+		)
+		.toSorted(
+			(left, right) =>
+				(left.occurredAt?.getTime() ?? 0) - (right.occurredAt?.getTime() ?? 0),
+		);
+	const latest = confirmedMessages.at(-1);
+	if (!latest)
+		return {
+			conversationStatus: "ACTIVE",
+			conversationClassification: "ACTION_REQUIRED",
+			channelStatus: "COLD_ELIGIBLE",
+			reasonSuffix: "NO_CONFIRMED_MESSAGE",
+		};
+	if (latest.direction === "INBOUND")
+		return {
+			conversationStatus: "ACTIVE",
+			conversationClassification: "ACTION_REQUIRED",
+			channelStatus: "ACTIVE_HUMAN_CONVERSATION",
+			reasonSuffix: "REAL_INBOUND_HISTORY",
+		};
+	return {
+		conversationStatus: "WAITING_ON_PROSPECT",
+		conversationClassification: "WAITING_ON_PROSPECT",
+		channelStatus: "WAITING_ON_PROSPECT",
+		reasonSuffix: "REAL_OUTBOUND_HISTORY",
+	};
 }
 
 function isHistorical(provenance: InboundInput["provenance"]): boolean {
@@ -620,20 +728,14 @@ export class LinkedInChannelService {
 					1,
 					input.connectionLimit ?? DEFAULT_LINKEDIN_CONNECTION_LIMIT,
 				);
-				await tx.linkedInQuota.upsert({
-					where: { day_accountKey: { day: quotaDay, accountKey } },
-					create: {
-						day: quotaDay,
-						accountKey,
-						messageLimit: 0,
-						connectionLimit,
-					},
-					update: {},
+				await ensureLinkedInQuota(tx, quotaDay, accountKey, {
+					messageLimit: input.messageLimit,
+					connectionLimit,
 				});
 				const quotaRows =
 					input.action === "MESSAGE"
 						? await tx.$queryRaw<{ id: string }[]>(
-								Prisma.sql`UPDATE "linkedinQuota" SET "messageReserved" = "messageReserved" + 1, "updatedAt" = NOW() WHERE "day" = ${quotaDay} AND "accountKey" = ${accountKey} RETURNING "id"`,
+								Prisma.sql`UPDATE "linkedinQuota" SET "messageReserved" = "messageReserved" + 1, "updatedAt" = NOW() WHERE "day" = ${quotaDay} AND "accountKey" = ${accountKey} AND "messageReserved" + "messageSent" < "messageLimit" RETURNING "id"`,
 							)
 						: await tx.$queryRaw<{ id: string }[]>(
 								Prisma.sql`UPDATE "linkedinQuota" SET "connectionReserved" = "connectionReserved" + 1, "updatedAt" = NOW() WHERE "day" = ${quotaDay} AND "accountKey" = ${accountKey} AND "connectionReserved" + "connectionSent" < "connectionLimit" RETURNING "id"`,
@@ -778,8 +880,16 @@ export class LinkedInChannelService {
 						"The LinkedIn route is not active and owned by this contact.",
 					);
 				if (
-					route.value !== input.profileUrl ||
-					route.normalizedValue !== input.profileIdentifier
+					!linkedInProfileRecordsMatch(
+						{
+							profileUrl: route.value,
+							profileIdentifier: route.normalizedValue,
+						},
+						{
+							profileUrl: input.profileUrl,
+							profileIdentifier: input.profileIdentifier,
+						},
+					)
 				)
 					throw new ConflictException(
 						"The LinkedIn route identity does not match the requested profile.",
@@ -949,15 +1059,9 @@ export class LinkedInChannelService {
 					1,
 					input.connectionLimit ?? DEFAULT_LINKEDIN_CONNECTION_LIMIT,
 				);
-				await tx.linkedInQuota.upsert({
-					where: { day_accountKey: { day: quotaDay, accountKey } },
-					create: {
-						day: quotaDay,
-						accountKey,
-						messageLimit: 0,
-						connectionLimit,
-					},
-					update: {},
+				await ensureLinkedInQuota(tx, quotaDay, accountKey, {
+					messageLimit: input.messageLimit,
+					connectionLimit,
 				});
 				const quotaRows = await tx.$queryRaw<{ id: string }[]>(
 					Prisma.sql`UPDATE "linkedinQuota" SET "connectionReserved" = "connectionReserved" + 1, "updatedAt" = NOW() WHERE "day" = ${quotaDay} AND "accountKey" = ${accountKey} AND "connectionReserved" + "connectionSent" < "connectionLimit" RETURNING "id"`,
@@ -1076,8 +1180,16 @@ export class LinkedInChannelService {
 				if (!contact) blockedReason = "CONTACT_NOT_FOUND";
 				else if (!route) blockedReason = "LINKEDIN_ROUTE_NOT_ACTIVE";
 				else if (
-					route.value !== job.profileUrl ||
-					route.normalizedValue !== job.profileIdentifier
+					!linkedInProfileRecordsMatch(
+						{
+							profileUrl: route.value,
+							profileIdentifier: route.normalizedValue,
+						},
+						{
+							profileUrl: job.profileUrl,
+							profileIdentifier: job.profileIdentifier,
+						},
+					)
 				)
 					blockedReason = "LINKEDIN_ROUTE_IDENTITY_CHANGED";
 				else if (personProtected) blockedReason = "PERSON_OWNER_PROTECTED";
@@ -1223,7 +1335,7 @@ export class LinkedInChannelService {
 						!input.verifiedProfileIdentifier ||
 						canonicalLinkedInProfileUrl(input.verifiedProfileUrl) !==
 							canonicalLinkedInProfileUrl(job.profileUrl) ||
-						!linkedInProfileIdentityMatches(
+						!linkedInProfileRecordsMatch(
 							{
 								profileUrl: job.profileUrl,
 								profileIdentifier: job.profileIdentifier,
@@ -1292,6 +1404,13 @@ export class LinkedInChannelService {
 						create: {
 							type: "NOTE",
 							subject: "LinkedIn connection request",
+							body:
+								job.actionPayload &&
+								typeof job.actionPayload === "object" &&
+								!Array.isArray(job.actionPayload) &&
+								typeof job.actionPayload.note === "string"
+									? job.actionPayload.note.trim() || null
+									: null,
 							occurredAt: completedAt,
 							contactId: job.contactId,
 							companyId: job.contact.companyId,
@@ -1300,6 +1419,19 @@ export class LinkedInChannelService {
 							meta: {
 								channel: LINKEDIN_CHANNEL,
 								action: "CONNECTION_REQUEST",
+								noNote:
+									!job.actionPayload ||
+									typeof job.actionPayload !== "object" ||
+									Array.isArray(job.actionPayload) ||
+									typeof job.actionPayload.note !== "string" ||
+									!job.actionPayload.note.trim(),
+								note:
+									job.actionPayload &&
+									typeof job.actionPayload === "object" &&
+									!Array.isArray(job.actionPayload) &&
+									typeof job.actionPayload.note === "string"
+										? job.actionPayload.note.trim() || null
+										: null,
 								provenance: "BROWSER_CONFIRMED",
 								externalRequestKey: input.externalRequestKey,
 								browserProof: input.browserProof,
@@ -1308,10 +1440,30 @@ export class LinkedInChannelService {
 							},
 						},
 						update: {
+							body:
+								job.actionPayload &&
+								typeof job.actionPayload === "object" &&
+								!Array.isArray(job.actionPayload) &&
+								typeof job.actionPayload.note === "string"
+									? job.actionPayload.note.trim() || null
+									: null,
 							occurredAt: completedAt,
 							meta: {
 								channel: LINKEDIN_CHANNEL,
 								action: "CONNECTION_REQUEST",
+								noNote:
+									!job.actionPayload ||
+									typeof job.actionPayload !== "object" ||
+									Array.isArray(job.actionPayload) ||
+									typeof job.actionPayload.note !== "string" ||
+									!job.actionPayload.note.trim(),
+								note:
+									job.actionPayload &&
+									typeof job.actionPayload === "object" &&
+									!Array.isArray(job.actionPayload) &&
+									typeof job.actionPayload.note === "string"
+										? job.actionPayload.note.trim() || null
+										: null,
 								provenance: "BROWSER_CONFIRMED",
 								externalRequestKey: input.externalRequestKey,
 								browserProof: input.browserProof,
@@ -1396,6 +1548,7 @@ export class LinkedInChannelService {
 						accountKey: true,
 						quotaDay: true,
 						idempotencyKey: true,
+						actionPayload: true,
 						conversationId: true,
 						conversation: {
 							select: {
@@ -1455,6 +1608,7 @@ export class LinkedInChannelService {
 					organizationProtection,
 					claim,
 					lead,
+					historicalActivities,
 				] = await Promise.all([
 					tx.channelEngagementState.findUnique({
 						where: {
@@ -1513,13 +1667,38 @@ export class LinkedInChannelService {
 								select: { attentionState: true },
 							})
 						: Promise.resolve(null),
+					contact
+						? tx.activity.findMany({
+								where: {
+									contactId: contact.id,
+									type: "NOTE",
+									body: { not: null },
+								},
+								select: { subject: true, body: true, meta: true },
+							})
+						: Promise.resolve([]),
 				]);
+				const firstMessageAction = Boolean(
+					job.actionPayload &&
+						typeof job.actionPayload === "object" &&
+						!Array.isArray(job.actionPayload) &&
+						(job.actionPayload as { atlasActionType?: unknown })
+							.atlasActionType === "FIRST_MESSAGE_TO_CONNECTED_PERSON",
+				);
 				let blockedReason: string | null = null;
 				if (!conversation || !contact) blockedReason = "CONTACT_NOT_FOUND";
 				else if (!route) blockedReason = "LINKEDIN_ROUTE_NOT_ACTIVE";
 				else if (
-					route.value !== conversation.profileUrl ||
-					route.normalizedValue !== conversation.normalizedProfileUrl
+					!linkedInProfileRecordsMatch(
+						{
+							profileUrl: route.value,
+							profileIdentifier: route.normalizedValue,
+						},
+						{
+							profileUrl: conversation.profileUrl,
+							profileIdentifier: conversation.normalizedProfileUrl,
+						},
+					)
 				)
 					blockedReason = "LINKEDIN_ROUTE_IDENTITY_CHANGED";
 				else if (conversation.consent === "DO_NOT_CONTACT")
@@ -1535,6 +1714,11 @@ export class LinkedInChannelService {
 					blockedReason = "CHANNEL_NEEDS_IHSAN";
 				else if (suppressions.length > 0)
 					blockedReason = "LINKEDIN_SUPPRESSION";
+				else if (
+					firstMessageAction &&
+					hasSubstantiveLinkedInHistory(historicalActivities)
+				)
+					blockedReason = "LINKEDIN_HISTORICAL_CONVERSATION_DETECTED";
 				else if (job.coldOutreach && contact.outreachState !== "ALLOWED")
 					blockedReason = "CONTACT_OUTREACH_BLOCKED";
 				if (!blockedReason && job.coldOutreach) {
@@ -1608,6 +1792,7 @@ export class LinkedInChannelService {
 								.filter(Boolean)
 								.join(" "),
 							externalConversationKey: conversation.externalConversationKey,
+							expectNoExistingConversation: firstMessageAction,
 						},
 					},
 				};
@@ -1668,7 +1853,7 @@ export class LinkedInChannelService {
 						!input.verifiedProfileUrl ||
 						!input.verifiedProfileIdentifier ||
 						!route ||
-						!linkedInProfileIdentityMatches(
+						!linkedInProfileRecordsMatch(
 							{
 								profileUrl: route.value,
 								profileIdentifier: route.normalizedValue,
@@ -1679,19 +1864,18 @@ export class LinkedInChannelService {
 							},
 						) ||
 						(job.conversation.profileUrl &&
-							(job.conversation.normalizedProfileUrl
-								? !linkedInProfileIdentityMatches(
-										{
-											profileUrl: job.conversation.profileUrl,
-											profileIdentifier: job.conversation.normalizedProfileUrl,
-										},
-										{
-											profileUrl: input.verifiedProfileUrl,
-											profileIdentifier: input.verifiedProfileIdentifier,
-										},
-									)
-								: canonicalLinkedInProfileUrl(job.conversation.profileUrl) !==
-									canonicalLinkedInProfileUrl(input.verifiedProfileUrl))) ||
+							!linkedInProfileRecordsMatch(
+								{
+									profileUrl: job.conversation.profileUrl,
+									profileIdentifier:
+										job.conversation.normalizedProfileUrl ??
+										input.verifiedProfileIdentifier,
+								},
+								{
+									profileUrl: input.verifiedProfileUrl,
+									profileIdentifier: input.verifiedProfileIdentifier,
+								},
+							)) ||
 						(job.conversation.externalConversationKey &&
 							job.conversation.externalConversationKey !==
 								input.externalConversationKey)
@@ -1898,7 +2082,10 @@ export class LinkedInChannelService {
 	async recoverUnsentMessage(
 		jobId: string,
 		errorCode = "MESSAGE_EDITOR_UNAVAILABLE",
-		options: { restoreRoutineState?: boolean } = {},
+		options: {
+			restoreRoutineState?: boolean;
+			reconcileRoutineState?: boolean;
+		} = {},
 	) {
 		return withPrincipal(
 			this.db,
@@ -1941,8 +2128,10 @@ export class LinkedInChannelService {
 							select: { status: true, idempotencyKey: true },
 						})
 					: null;
+				const restoreRoutineState =
+					options.restoreRoutineState || options.reconcileRoutineState;
 				if (
-					!options.restoreRoutineState &&
+					!restoreRoutineState &&
 					job.status === "FAILED" &&
 					job.retryAt === null &&
 					claim?.status !== "CLAIMED"
@@ -1967,7 +2156,7 @@ export class LinkedInChannelService {
 						retryAt: null,
 					},
 				);
-				if (options.restoreRoutineState) {
+				if (restoreRoutineState) {
 					if (errorCode !== "WRONG_CONVERSATION")
 						throw new ConflictException(
 							"Routine-state restoration requires a confirmed technical conversation resolver failure.",
@@ -1985,20 +2174,30 @@ export class LinkedInChannelService {
 						},
 						select: { status: true, reason: true },
 					});
-					if (
-						conversation?.status !== "NEEDS_IHSAN" ||
-						conversation.classification !== "AMBIGUOUS_OR_NEEDS_IHSAN" ||
-						channelState?.status !== "NEEDS_IHSAN" ||
-						channelState.reason !== errorCode
-					)
+					const technicalReviewState =
+						conversation?.status === "NEEDS_IHSAN" &&
+						conversation.classification === "AMBIGUOUS_OR_NEEDS_IHSAN" &&
+						channelState?.status === "NEEDS_IHSAN" &&
+						channelState.reason === errorCode;
+					const technicalRestoredState =
+						conversation?.status === "ACTIVE" &&
+						conversation.classification === "ACTION_REQUIRED" &&
+						channelState?.status === "ACTIVE_HUMAN_CONVERSATION" &&
+						channelState.reason === `TECHNICAL_REVIEW_CLEARED:${errorCode}`;
+					if (!technicalReviewState && !technicalRestoredState)
 						throw new ConflictException(
-							"Routine-state restoration requires an unchanged technical review state.",
+							"Routine-state restoration requires an unchanged technical recovery state.",
 						);
+					const messages = await tx.linkedInMessage.findMany({
+						where: { conversationId: job.conversationId },
+						select: { direction: true, status: true, occurredAt: true },
+					});
+					const restored = technicalRecoveryState(messages);
 					await tx.linkedInConversation.update({
 						where: { id: job.conversationId },
 						data: {
-							status: "ACTIVE",
-							classification: "ACTION_REQUIRED",
+							status: restored.conversationStatus,
+							classification: restored.conversationClassification,
 							version: { increment: 1 },
 						},
 					});
@@ -2010,8 +2209,8 @@ export class LinkedInChannelService {
 							},
 						},
 						data: {
-							status: "ACTIVE_HUMAN_CONVERSATION",
-							reason: `TECHNICAL_REVIEW_CLEARED:${errorCode}`,
+							status: restored.channelStatus,
+							reason: `TECHNICAL_REVIEW_CLEARED:${errorCode}:${restored.reasonSuffix}`,
 							version: { increment: 1 },
 						},
 					});
@@ -2021,6 +2220,150 @@ export class LinkedInChannelService {
 					};
 				}
 				return { status: "RECOVERED" as const };
+			},
+		);
+	}
+
+	async reconcileDeletedOutboundMessage(input: {
+		jobId: string;
+		conversationClassification: InboundInput["classification"];
+		lastInboundAt?: Date | null;
+		lastOutboundAt?: Date | null;
+		lastMessageAt?: Date | null;
+		nextActionTitle?: string | null;
+		reason?: string;
+	}) {
+		return withPrincipal(
+			this.db,
+			{ userId: null, kind: "worker" },
+			async (tx) => {
+				const job = await tx.linkedInSendJob.findUnique({
+					where: { id: input.jobId },
+					include: {
+						message: true,
+						conversation: {
+							select: { id: true, contactId: true, leadId: true },
+						},
+					},
+				});
+				if (!job)
+					throw new NotFoundException("LinkedIn message job not found.");
+				if (job.action !== "MESSAGE" || !job.message)
+					throw new ConflictException(
+						"Only a persisted LinkedIn message can be reconciled as externally deleted.",
+					);
+				const activity = await tx.activity.findUnique({
+					where: { linkedinMessageId: job.message.id },
+					select: { id: true, lifecycleState: true, meta: true },
+				});
+				const existingMeta =
+					activity?.meta &&
+					typeof activity.meta === "object" &&
+					!Array.isArray(activity.meta)
+						? (activity.meta as Record<string, unknown>)
+						: {};
+				const alreadyReconciled =
+					job.message.status === "CANCELLED" &&
+					activity?.lifecycleState === "ARCHIVED" &&
+					existingMeta.reconciliation === "EXTERNAL_MESSAGE_DELETED";
+				if (alreadyReconciled) return { status: "ALREADY_RECONCILED" as const };
+				if (job.status !== "SUCCEEDED" || job.message.status !== "SENT")
+					throw new ConflictException(
+						"Only a confirmed sent LinkedIn message can be reconciled as externally deleted.",
+					);
+				const channelStatus = channelStatusForClassification(
+					input.conversationClassification,
+				);
+				const conversationStatus =
+					conversationStatusForChannelStatus(channelStatus);
+				const reconciledAt = new Date();
+				const reason = input.reason ?? "EXTERNAL_MESSAGE_DELETED";
+				await tx.linkedInMessage.update({
+					where: { id: job.message.id },
+					data: {
+						status: "CANCELLED",
+						countsTowardAtlasMetrics: false,
+						attributedToAtlas: false,
+					},
+				});
+				if (activity) {
+					await tx.activity.update({
+						where: { id: activity.id },
+						data: {
+							lifecycleState: "ARCHIVED",
+							archivedAt: reconciledAt,
+							archivedByUserId: "ihsan-human",
+							archiveReason: reason,
+							meta: {
+								...existingMeta,
+								reconciliation: "EXTERNAL_MESSAGE_DELETED",
+								reconciledAt: reconciledAt.toISOString(),
+								reconciliationReason: reason,
+								countsTowardAtlasMetrics: false,
+								attributedToAtlas: false,
+							},
+						},
+					});
+				}
+				await tx.linkedInConversation.update({
+					where: { id: job.conversationId },
+					data: {
+						status: conversationStatus,
+						classification: input.conversationClassification,
+						lastInboundAt: input.lastInboundAt ?? null,
+						lastOutboundAt: input.lastOutboundAt ?? null,
+						lastMessageAt: input.lastMessageAt ?? null,
+						nextActionAt: null,
+						nextActionTitle: input.nextActionTitle ?? "WAIT_FOR_PROSPECT",
+						version: { increment: 1 },
+					},
+				});
+				await tx.channelEngagementState.upsert({
+					where: {
+						contactId_channel: {
+							contactId: job.conversation.contactId,
+							channel: LINKEDIN_CHANNEL,
+						},
+					},
+					create: {
+						contactId: job.conversation.contactId,
+						channel: LINKEDIN_CHANNEL,
+						status: channelStatus,
+						lastInboundAt: input.lastInboundAt ?? null,
+						lastOutboundAt: input.lastOutboundAt ?? null,
+						reason: `EXTERNAL_MESSAGE_DELETED:${reason}`,
+					},
+					update: {
+						status: channelStatus,
+						lastInboundAt: input.lastInboundAt ?? null,
+						lastOutboundAt: input.lastOutboundAt ?? null,
+						reason: `EXTERNAL_MESSAGE_DELETED:${reason}`,
+						version: { increment: 1 },
+					},
+				});
+				await tx.linkedInSendJob.update({
+					where: { id: job.id },
+					data: {
+						actionPayload: {
+							...(job.actionPayload &&
+							typeof job.actionPayload === "object" &&
+							!Array.isArray(job.actionPayload)
+								? job.actionPayload
+								: {}),
+							reconciliation: {
+								kind: "EXTERNAL_MESSAGE_DELETED",
+								reconciledAt: reconciledAt.toISOString(),
+								reason,
+							},
+						},
+					},
+				});
+				return {
+					status: "RECONCILED" as const,
+					conversationStatus,
+					conversationClassification: input.conversationClassification,
+					channelStatus,
+				};
 			},
 		);
 	}

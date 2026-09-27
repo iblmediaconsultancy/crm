@@ -2,7 +2,7 @@ import {
 	coldOutreachBlockReason,
 	type Db,
 	isPersonProtected,
-	linkedInProfileIdentityMatches,
+	linkedInProfileRecordsMatch,
 	Prisma,
 } from "@crm/db";
 import { withPrincipal } from "@crm/db/security";
@@ -17,6 +17,7 @@ import {
 } from "./linkedin-action-policy";
 import { LinkedInChannelService } from "./linkedin-channel.service";
 import { canReuseConsumedLinkedInConnectionClaim } from "./linkedin-first-touch";
+import { hasSubstantiveLinkedInHistory } from "./linkedin-history";
 
 const LINKEDIN_CHANNEL = "LINKEDIN" as const;
 
@@ -37,6 +38,7 @@ type CommonInput = {
 	context?: LinkedInActionContext;
 	accountKey?: string;
 	coldOutreach?: boolean;
+	messageLimit?: number;
 	connectionLimit?: number;
 };
 
@@ -104,6 +106,16 @@ function policyPayload(
 			classification,
 		},
 	};
+}
+
+function hasRoutineReason(input: LinkedInRoutineActionInput): boolean {
+	if (!input.actionPayload || typeof input.actionPayload !== "object")
+		return false;
+	if (Array.isArray(input.actionPayload)) return false;
+	const payload = input.actionPayload as Record<string, unknown>;
+	return ["researchReason", "revivalReason", "legitimateReason"].some(
+		(key) => typeof payload[key] === "string" && payload[key].trim().length > 0,
+	);
 }
 
 function result(
@@ -178,6 +190,7 @@ export class LinkedInActionQueueService {
 						approvedAt,
 						coldOutreach,
 						accountKey: input.accountKey,
+						messageLimit: input.messageLimit,
 						connectionLimit: input.connectionLimit,
 					})
 				: await this.channel.queueAction({
@@ -190,6 +203,7 @@ export class LinkedInActionQueueService {
 						coldOutreach,
 						firstMessage: input.action === "FIRST_MESSAGE_TO_CONNECTED_PERSON",
 						accountKey: input.accountKey,
+						messageLimit: input.messageLimit,
 						connectionLimit: input.connectionLimit,
 					});
 		return result(input, "ROUTINE_AUTONOMOUS", null, job.id, approvedAt);
@@ -242,8 +256,16 @@ export class LinkedInActionQueueService {
 				reason: "LINKEDIN_ROUTE_NOT_ACTIVE",
 			};
 		if (
-			route.value !== input.profileUrl ||
-			route.normalizedValue !== input.profileIdentifier
+			!linkedInProfileRecordsMatch(
+				{
+					profileUrl: route.value,
+					profileIdentifier: route.normalizedValue,
+				},
+				{
+					profileUrl: input.profileUrl,
+					profileIdentifier: input.profileIdentifier,
+				},
+			)
 		)
 			return {
 				classification: "AMBIGUOUS_REVIEW_REQUIRED",
@@ -374,7 +396,7 @@ export class LinkedInActionQueueService {
 				reason: "LINKEDIN_ROUTE_NOT_ACTIVE",
 			};
 		if (
-			!linkedInProfileIdentityMatches(
+			!linkedInProfileRecordsMatch(
 				{
 					profileUrl: route.value,
 					profileIdentifier: route.normalizedValue,
@@ -421,6 +443,7 @@ export class LinkedInActionQueueService {
 			otherState,
 			claim,
 			lead,
+			historicalActivities,
 		] = await Promise.all([
 			tx.linkedInConversation.findUnique({
 				where: { identityKey: route.normalizedValue },
@@ -499,6 +522,14 @@ export class LinkedInActionQueueService {
 				select: { attentionState: true },
 				orderBy: { updatedAt: "desc" },
 			}),
+			tx.activity.findMany({
+				where: {
+					contactId: input.contactId,
+					type: "NOTE",
+					body: { not: null },
+				},
+				select: { subject: true, body: true, meta: true },
+			}),
 		]);
 		const [connectionRequest, messageJob] =
 			claim?.status === "CONSUMED"
@@ -527,8 +558,7 @@ export class LinkedInActionQueueService {
 		if (
 			conversation &&
 			(!conversation.profileUrl ||
-				!conversation.normalizedProfileUrl ||
-				!linkedInProfileIdentityMatches(
+				!linkedInProfileRecordsMatch(
 					{
 						profileUrl: route.value,
 						profileIdentifier: route.normalizedValue,
@@ -559,6 +589,32 @@ export class LinkedInActionQueueService {
 			return {
 				classification: "BLOCKED",
 				reason: "LINKEDIN_FIRST_MESSAGE_ALREADY_SENT",
+			};
+		if (hasSubstantiveLinkedInHistory(historicalActivities))
+			return {
+				classification: "AMBIGUOUS_REVIEW_REQUIRED",
+				reason: "LINKEDIN_HISTORY_REQUIRES_RECONCILIATION",
+			};
+		if (
+			conversation?.status === "PARKED" ||
+			conversation?.classification === "PARKED_NO_CURRENT_NEED"
+		)
+			return {
+				classification: "BLOCKED",
+				reason: "LINKEDIN_CONVERSATION_PARKED",
+			};
+		if (
+			conversation?.status === "CLOSED" ||
+			conversation?.classification === "CLOSED_OR_DO_NOT_PUSH"
+		)
+			return {
+				classification: "BLOCKED",
+				reason: "LINKEDIN_CONVERSATION_CLOSED",
+			};
+		if (conversation?.status === "WAITING_ON_PROSPECT")
+			return {
+				classification: "BLOCKED",
+				reason: "LINKEDIN_CONVERSATION_WAITING_ON_PROSPECT",
 			};
 		if (conversation?.consent === "DO_NOT_CONTACT")
 			return {
@@ -641,6 +697,8 @@ export class LinkedInActionQueueService {
 				consent: true,
 				status: true,
 				classification: true,
+				lastInboundAt: true,
+				lastOutboundAt: true,
 			},
 		});
 		if (!conversation)
@@ -743,15 +801,44 @@ export class LinkedInActionQueueService {
 				classification: "AMBIGUOUS_REVIEW_REQUIRED",
 				reason: "CONVERSATION_AMBIGUOUS",
 			};
+		if (
+			conversation.status === "PARKED" ||
+			conversation.classification === "PARKED_NO_CURRENT_NEED"
+		)
+			return {
+				classification: "BLOCKED",
+				reason: "LINKEDIN_CONVERSATION_PARKED",
+			};
+		if (
+			conversation.status === "CLOSED" ||
+			conversation.classification === "CLOSED_OR_DO_NOT_PUSH"
+		)
+			return {
+				classification: "BLOCKED",
+				reason: "LINKEDIN_CONVERSATION_CLOSED",
+			};
+		if (conversation.status === "WAITING_ON_PROSPECT")
+			return {
+				classification: "BLOCKED",
+				reason: "LINKEDIN_CONVERSATION_WAITING_ON_PROSPECT",
+			};
 		if (!route)
 			return {
 				classification: "AMBIGUOUS_REVIEW_REQUIRED",
 				reason: "LINKEDIN_ROUTE_NOT_ACTIVE",
 			};
 		if (
-			(conversation.profileUrl && conversation.profileUrl !== route.value) ||
-			(conversation.normalizedProfileUrl &&
-				conversation.normalizedProfileUrl !== route.normalizedValue)
+			conversation.profileUrl &&
+			!linkedInProfileRecordsMatch(
+				{
+					profileUrl: route.value,
+					profileIdentifier: route.normalizedValue,
+				},
+				{
+					profileUrl: conversation.profileUrl,
+					profileIdentifier: conversation.normalizedProfileUrl,
+				},
+			)
 		)
 			return {
 				classification: "AMBIGUOUS_REVIEW_REQUIRED",
@@ -780,6 +867,17 @@ export class LinkedInActionQueueService {
 			return {
 				classification: "WITH_IHSAN",
 				reason: "OTHER_CHANNEL_NEEDS_IHSAN",
+			};
+		if (
+			input.action === "EXISTING_CONVERSATION_MESSAGE" &&
+			conversation.lastOutboundAt &&
+			(!conversation.lastInboundAt ||
+				conversation.lastInboundAt <= conversation.lastOutboundAt) &&
+			!hasRoutineReason(input)
+		)
+			return {
+				classification: "BLOCKED",
+				reason: "CONVERSATION_REQUIRES_NEW_REASON",
 			};
 		const coldOutreach =
 			input.coldOutreach ?? routineColdOutreach(input.action);

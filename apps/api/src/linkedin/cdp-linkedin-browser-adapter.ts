@@ -1,4 +1,5 @@
 import {
+	firstMessageBrowserStateAllowsSend,
 	type LinkedInBrowserAction,
 	type LinkedInBrowserAdapter,
 	type LinkedInBrowserIdentityEvidence,
@@ -38,6 +39,12 @@ type PageElement = {
 type PageDocument = {
 	body?: { innerText?: string };
 	title: string;
+	createRange(): { selectNodeContents(element: PageElement): void };
+	getSelection(): {
+		removeAllRanges(): void;
+		addRange(range: { selectNodeContents(element: PageElement): void }): void;
+	} | null;
+	execCommand(command: string, showUI: boolean, value?: string): boolean;
 	querySelectorAll(selector: string): PageElement[];
 	querySelector(selector: string): PageElement | null;
 };
@@ -809,64 +816,90 @@ class CdpPage {
 		if (expectedRecipientIdentifier || expectedExternalConversationKey) {
 			const collect = collectLinkedInMessageComposerSnapshot.toString();
 			const resolve = resolveLinkedInMessageComposer.toString();
-			return this.evaluate<boolean | "AMBIGUOUS">(`(() => {
-				const value = ${JSON.stringify(body)};
+			const focusReady = await this.evaluate<boolean>(`(() => {
 				const collectSnapshot = ${collect};
 				const resolveComposer = ${resolve};
-				const sendControlReady = ${linkedInMessageComposerControlReady.toString()};
 				const isVisible = (element) => {
 					const rect = element.getBoundingClientRect();
 					const style = getComputedStyle(element);
 					return Boolean(element.isConnected && rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0" && element.getAttribute("aria-hidden") !== "true");
 				};
-				const surfaceElements = Array.from(document.querySelectorAll(".msg-compose-container, .msg-thread, [role=dialog], .msg-overlay-conversation-bubble, .msg-s-message-list-container")).filter((element) => {
+				const surfaces = Array.from(document.querySelectorAll(".msg-compose-container, .msg-thread, [role=dialog], .msg-overlay-conversation-bubble, .msg-s-message-list-container")).filter((element) => {
 					if (!isVisible(element)) return false;
 					const classes = element.getAttribute("class") || "";
 					if (classes.includes("msg-compose-container")) return true;
 					return !element.closest(".msg-compose-container");
 				});
-				const resolveSnapshot = () => resolveComposer(collectSnapshot(), {
+				const resolution = resolveComposer(collectSnapshot(), {
 					expectedRecipientIdentifier: ${JSON.stringify(expectedRecipientIdentifier)},
 					expectedExternalConversationKey: ${JSON.stringify(expectedExternalConversationKey)},
 				});
-				const initial = resolveSnapshot();
-				if (initial.status === "AMBIGUOUS") return "AMBIGUOUS";
-				if (initial.status !== "FOUND") return false;
-				const surface = surfaceElements[initial.surfaceIndex];
-				const editorElements = surface ? Array.from(surface.querySelectorAll("textarea, [contenteditable=true], [role=textbox]")) : [];
-				const sendElements = surface ? Array.from(surface.querySelectorAll("button, [role=button]")) : [];
-				const editor = editorElements[initial.editorIndex];
-				const send = sendElements[initial.sendControlIndex];
-				const normalized = (element) => (element.textContent || "").trim().replace(/\\s+/g, " ");
-				const sendLabel = (element) => normalized(element).toLocaleLowerCase() === "send" || (element.getAttribute("aria-label") || "").trim().toLocaleLowerCase() === "send";
-				if (!surface || !editor || !send || !editor.isConnected || !send.isConnected || !isVisible(editor) || !isVisible(send) || !sendLabel(send)) return false;
+				if (resolution.status !== "FOUND") return false;
+				const surface = surfaces[resolution.surfaceIndex];
+				const editors = surface ? Array.from(surface.querySelectorAll("textarea, [contenteditable=true], [role=textbox]")) : [];
+				const editor = editors[resolution.editorIndex];
+				if (!editor || !editor.isConnected || !isVisible(editor)) return false;
 				editor.focus();
 				if (editor instanceof HTMLTextAreaElement) {
-					const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
-					setter?.call(editor, value);
+					editor.select();
 				} else {
-					editor.textContent = value;
+					const selection = document.getSelection();
+					const range = document.createRange();
+					range.selectNodeContents(editor);
+					selection?.removeAllRanges();
+					selection?.addRange(range);
 				}
-				editor.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: value }));
-				const editorText = editor instanceof HTMLTextAreaElement ? editor.value : editor.textContent || "";
-				if (editorText !== value) return false;
-				const fresh = resolveSnapshot();
-				if (fresh.status === "AMBIGUOUS") return "AMBIGUOUS";
-				if (fresh.status !== "FOUND" || fresh.surfaceIndex !== initial.surfaceIndex || fresh.editorIndex !== initial.editorIndex || fresh.sendControlIndex !== initial.sendControlIndex) return false;
-				const freshSurface = surfaceElements[fresh.surfaceIndex];
-				const freshEditors = freshSurface ? Array.from(freshSurface.querySelectorAll("textarea, [contenteditable=true], [role=textbox]")) : [];
-				const freshSends = freshSurface ? Array.from(freshSurface.querySelectorAll("button, [role=button]")) : [];
-				const freshEditor = freshEditors[fresh.editorIndex];
-				const freshSend = freshSends[fresh.sendControlIndex];
-				const freshSurfaceSnapshot = collectSnapshot().surfaces.find((surface) => surface.index === fresh.surfaceIndex);
-				const freshSendSnapshot = freshSurfaceSnapshot?.sendControls.find((control) => control.index === fresh.sendControlIndex);
-				if (!freshEditor || !freshSend || !freshEditor.isConnected || !freshSend.isConnected || !isVisible(freshEditor) || !isVisible(freshSend) || !sendLabel(freshSend)) return false;
-				if (!freshSendSnapshot || !sendControlReady(freshSendSnapshot)) return false;
-				const freshText = freshEditor instanceof HTMLTextAreaElement ? freshEditor.value : freshEditor.textContent || "";
-				if (freshText !== value) return false;
-				freshSend.click();
 				return true;
 			})()`);
+			if (!focusReady) return false;
+			await this.connection.send("Input.insertText", { text: body });
+			let lastStatus: LinkedInMessageComposerResolution["status"] = "NONE";
+			for (let attempt = 0; attempt < 20; attempt += 1) {
+				const resolution = await this.inspectMessageComposer(
+					expectedRecipientIdentifier,
+					expectedExternalConversationKey,
+				);
+				lastStatus = resolution.status;
+				if (resolution.status === "FOUND") {
+					const sent = await this.evaluate<boolean>(`(() => {
+						const value = ${JSON.stringify(body)};
+						const collectSnapshot = ${collect};
+						const resolveComposer = ${resolve};
+						const sendControlReady = ${linkedInMessageComposerControlReady.toString()};
+						const isVisible = (element) => {
+							const rect = element.getBoundingClientRect();
+							const style = getComputedStyle(element);
+							return Boolean(element.isConnected && rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0" && element.getAttribute("aria-hidden") !== "true");
+						};
+						const surfaces = Array.from(document.querySelectorAll(".msg-compose-container, .msg-thread, [role=dialog], .msg-overlay-conversation-bubble, .msg-s-message-list-container")).filter((element) => {
+							if (!isVisible(element)) return false;
+							const classes = element.getAttribute("class") || "";
+							if (classes.includes("msg-compose-container")) return true;
+							return !element.closest(".msg-compose-container");
+						});
+						const resolution = resolveComposer(collectSnapshot(), {
+							expectedRecipientIdentifier: ${JSON.stringify(expectedRecipientIdentifier)},
+							expectedExternalConversationKey: ${JSON.stringify(expectedExternalConversationKey)},
+						});
+						if (resolution.status !== "FOUND") return false;
+						const surface = surfaces[resolution.surfaceIndex];
+						const editors = surface ? Array.from(surface.querySelectorAll("textarea, [contenteditable=true], [role=textbox]")) : [];
+						const sends = surface ? Array.from(surface.querySelectorAll("button, [role=button]")) : [];
+						const editor = editors[resolution.editorIndex];
+						const send = sends[resolution.sendControlIndex];
+						const snapshot = collectSnapshot().surfaces.find((candidate) => candidate.index === resolution.surfaceIndex);
+						const sendSnapshot = snapshot?.sendControls.find((control) => control.index === resolution.sendControlIndex);
+						const text = editor instanceof HTMLTextAreaElement ? editor?.value : editor?.textContent || "";
+						const label = send && (((send.textContent || "").trim().toLocaleLowerCase() === "send") || ((send.getAttribute("aria-label") || "").trim().toLocaleLowerCase() === "send"));
+						if (!editor || !send || !sendSnapshot || !sendControlReady(sendSnapshot) || !isVisible(editor) || !isVisible(send) || !label || text !== value) return false;
+						send.click();
+						return true;
+					})()`);
+					if (sent) return true;
+				}
+				await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+			}
+			return lastStatus === "AMBIGUOUS" ? "AMBIGUOUS" : false;
 		}
 		return this.evaluate<boolean>(`(() => {
 			const value = ${JSON.stringify(body)};
@@ -933,7 +966,7 @@ async function waitForMessageComposer(
 			expectedRecipientIdentifier,
 			expectedExternalConversationKey,
 		);
-		if (last.status !== "NONE") return last;
+		if (last.status === "FOUND") return last;
 		await new Promise((resolve) => setTimeout(resolve, 150));
 	}
 	return last;
@@ -1148,6 +1181,17 @@ export class CdpLinkedInBrowserAdapter implements LinkedInBrowserAdapter {
 				return {
 					status: "FAILED",
 					errorCode: "MESSAGE_BUTTON_UNAVAILABLE",
+					observedAt: new Date(),
+				};
+			const openedConversation = await page.observe();
+			if (
+				!firstMessageBrowserStateAllowsSend(action.target, {
+					externalMessageKey: openedConversation.externalMessageKey ?? null,
+				})
+			)
+				return {
+					status: "AMBIGUOUS",
+					errorCode: "WRONG_CONVERSATION",
 					observedAt: new Date(),
 				};
 			const composer = await waitForMessageComposer(

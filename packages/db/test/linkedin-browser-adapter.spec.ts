@@ -2,8 +2,10 @@ import { describe, expect, it } from "bun:test";
 import {
 	canonicalLinkedInProfileIdentity,
 	canonicalLinkedInProfileUrl,
+	firstMessageBrowserStateAllowsSend,
 	linkedInConversationIdentityMatches,
 	linkedInDisplayNamesMatch,
+	linkedInProfileRecordsMatch,
 	resolveLinkedInComposeConversationEvidence,
 	verifyFreshLinkedInIdentity,
 } from "../src/linkedin-browser-adapter";
@@ -74,6 +76,36 @@ describe("LinkedIn browser identity canonicalization", () => {
 		).toEqual({ allowed: false, reason: "PROFILE_IDENTIFIER_MISMATCH" });
 	});
 
+	it("matches a historical full profile URL stored as the identifier", () => {
+		expect(
+			linkedInProfileRecordsMatch(
+				{
+					profileUrl:
+						"https://www.linkedin.com/in/gijs-van-der-velden-856a42128/",
+					profileIdentifier: "gijs-van-der-velden-856a42128",
+				},
+				{
+					profileUrl: "https://linkedin.com/in/gijs-van-der-velden-856a42128",
+					profileIdentifier:
+						"https://www.linkedin.com/in/gijs-van-der-velden-856a42128/",
+				},
+			),
+		).toBe(true);
+		expect(
+			linkedInProfileRecordsMatch(
+				{
+					profileUrl:
+						"https://www.linkedin.com/in/gijs-van-der-velden-856a42128/",
+					profileIdentifier: "gijs-van-der-velden-856a42128",
+				},
+				{
+					profileUrl: "https://linkedin.com/in/another-person/",
+					profileIdentifier: "https://www.linkedin.com/in/another-person/",
+				},
+			),
+		).toBe(false);
+	});
+
 	it("rejects a redirected profile and a visible identity mismatch", () => {
 		expect(
 			verifyFreshLinkedInIdentity(
@@ -115,6 +147,42 @@ describe("LinkedIn browser identity canonicalization", () => {
 				},
 			),
 		).toEqual({ allowed: false, reason: "PROFILE_IDENTIFIER_MISMATCH" });
+	});
+
+	it("accepts a vanity redirect when the stable member recipient matches", () => {
+		expect(
+			verifyFreshLinkedInIdentity(
+				target(
+					"https://www.linkedin.com/in/ACoAAE-rbowBiknsv-ybR6thiDdghiJbVo8UApk",
+					"ACoAAE-rbowBiknsv-ybR6thiDdghiJbVo8UApk",
+					"Adam Worth",
+				),
+				{
+					...baseObserved,
+					profileUrl: "https://www.linkedin.com/in/adam-worth-/",
+					profileIdentifier: "adam-worth-",
+					displayName: "Adam Worth",
+					conversationParticipantIdentifier:
+						"ACoAAE-rbowBiknsv-ybR6thiDdghiJbVo8UApk",
+				},
+			),
+		).toEqual({ allowed: true });
+		expect(
+			verifyFreshLinkedInIdentity(
+				target(
+					"https://www.linkedin.com/in/ACoAAE-rbowBiknsv-ybR6thiDdghiJbVo8UApk",
+					"ACoAAE-rbowBiknsv-ybR6thiDdghiJbVo8UApk",
+					"Adam Worth",
+				),
+				{
+					...baseObserved,
+					profileUrl: "https://www.linkedin.com/in/adam-worth-/",
+					profileIdentifier: "adam-worth-",
+					displayName: "Adam Worth",
+					conversationParticipantIdentifier: "ACoDifferentMember",
+				},
+			),
+		).toEqual({ allowed: false, reason: "PROFILE_URL_MISMATCH" });
 	});
 
 	it("fails closed for unresolved or foreign profile URLs", () => {
@@ -243,6 +311,27 @@ describe("LinkedIn browser identity canonicalization", () => {
 				},
 			),
 		).toBe(false);
+	});
+
+	it("blocks a first message when the live browser exposes an existing thread", () => {
+		expect(
+			firstMessageBrowserStateAllowsSend(
+				{ expectNoExistingConversation: true },
+				{ externalMessageKey: "message-1" },
+			),
+		).toBe(false);
+		expect(
+			firstMessageBrowserStateAllowsSend(
+				{ expectNoExistingConversation: true },
+				{ externalMessageKey: null },
+			),
+		).toBe(true);
+		expect(
+			firstMessageBrowserStateAllowsSend(
+				{ expectNoExistingConversation: false },
+				{ externalMessageKey: "message-1" },
+			),
+		).toBe(true);
 	});
 
 	it("accepts deterministic benign display-name variations", () => {
