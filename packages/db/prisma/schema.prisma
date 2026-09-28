@@ -1354,6 +1354,7 @@ model LinkedInConversation {
   identityKey             String                     @unique
   profileUrl              String?
   normalizedProfileUrl    String?
+  linkedinMemberIdentifier String?
   externalConversationKey String?                    @unique
   status                  LinkedInConversationStatus @default(ACTIVE)
   classification          LinkedInClassification     @default(AMBIGUOUS_OR_NEEDS_IHSAN)
@@ -1376,6 +1377,7 @@ model LinkedInConversation {
   @@index([leadId, status])
   @@index([status, nextActionAt])
   @@index([normalizedProfileUrl])
+  @@index([linkedinMemberIdentifier])
   @@map("linkedinConversation")
 }
 
@@ -2498,6 +2500,7 @@ model ContactRoute {
   type                          ContactRouteType
   value                         String
   normalizedValue               String
+  linkedinMemberIdentifier      String?
   label                         String?
   visibility                    ContactRouteVisibility         @default(PRIVATE)
   verifiedAt                    DateTime?
@@ -2514,6 +2517,7 @@ model ContactRoute {
   @@index([companyId])
   @@index([ownerUserId])
   @@index([type, normalizedValue])
+  @@index([type, linkedinMemberIdentifier])
   @@index([lifecycleState, updatedAt])
   @@map("contactRoute")
 }

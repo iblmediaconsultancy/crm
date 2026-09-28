@@ -16,6 +16,7 @@ type ConnectionLease = {
 	routeId: string;
 	profileUrl: string;
 	profileIdentifier: string;
+	stableMemberIdentifier?: string | null;
 };
 
 type MessageLease = {
@@ -57,6 +58,7 @@ export type LocalLinkedInExecutorCore = {
 		externalRequestKey?: string | null;
 		verifiedProfileUrl?: string | null;
 		verifiedProfileIdentifier?: string | null;
+		verifiedProfileMemberIdentifier?: string | null;
 		browserProof?: JsonValue;
 		details?: JsonValue;
 		errorCode?: string | null;
@@ -75,6 +77,7 @@ export type LocalLinkedInExecutorCore = {
 		externalConversationKey?: string | null;
 		verifiedProfileUrl?: string | null;
 		verifiedProfileIdentifier?: string | null;
+		verifiedProfileMemberIdentifier?: string | null;
 		browserProof?: JsonValue;
 		details?: JsonValue;
 		errorCode?: string | null;
@@ -195,6 +198,7 @@ export class LocalLinkedInExecutor {
 				routeId: prepared.job.routeId,
 				profileUrl: prepared.job.profileUrl,
 				profileIdentifier: prepared.job.profileIdentifier,
+				stableMemberIdentifier: prepared.job.stableMemberIdentifier,
 				displayName: prepared.job.displayName,
 			},
 		};
@@ -245,6 +249,8 @@ export class LocalLinkedInExecutor {
 					externalRequestKey: outcome.externalRequestKey,
 					verifiedProfileUrl: outcome.observedIdentity.profileUrl,
 					verifiedProfileIdentifier: outcome.observedIdentity.profileIdentifier,
+					verifiedProfileMemberIdentifier:
+						outcome.observedIdentity.conversationParticipantIdentifier,
 					browserProof: outcome.browserProof as JsonValue,
 					details: proofDetails(outcome),
 				});
@@ -334,6 +340,8 @@ export class LocalLinkedInExecutor {
 						action.target.externalConversationKey,
 					verifiedProfileUrl: outcome.observedIdentity.profileUrl,
 					verifiedProfileIdentifier: outcome.observedIdentity.profileIdentifier,
+					verifiedProfileMemberIdentifier:
+						outcome.observedIdentity.conversationParticipantIdentifier,
 					browserProof: outcome.browserProof as JsonValue,
 					details: proofDetails(outcome),
 				});

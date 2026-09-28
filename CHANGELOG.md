@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.4](https://github.com/iblmediaconsultancy/crm/compare/v1.5.3...v1.5.4) (2026-09-28)
+
+
+### Fixes
+
+* **linkedin:** reconcile profile and member identities ([341c382](https://github.com/iblmediaconsultancy/crm/commit/341c3820a23eb3643c578a1a56bde0ec24441827))
+
 ## [1.5.3](https://github.com/iblmediaconsultancy/crm/compare/v1.5.2...v1.5.3) (2026-09-28)
 
 
