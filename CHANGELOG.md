@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.3](https://github.com/iblmediaconsultancy/crm/compare/v1.5.2...v1.5.3) (2026-09-28)
+
+
+### Fixes
+
+* **linkedin:** stabilize browser recipient resolution ([cec1a68](https://github.com/iblmediaconsultancy/crm/commit/cec1a68d8b6dd9c4078b685ddabb411b56266ba1))
+
 ## [1.5.2](https://github.com/iblmediaconsultancy/crm/compare/v1.5.1...v1.5.2) (2026-09-27)
 
 
