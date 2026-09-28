@@ -16,7 +16,8 @@ import { localProviderDoubleEnabled } from "./local-provider-double";
 
 export { businessDaysAfter } from "./working-hours";
 
-const CLAIM = `UPDATE "followUpStep" SET "status"='LEASED', "leaseOwner"=$1, "leasedUntil"=NOW()+INTERVAL '60 seconds', "attemptCount"="attemptCount"+1, "updatedAt"=NOW() WHERE "id"=(SELECT s."id" FROM "followUpStep" s JOIN "followUpPlan" p ON p."id"=s."planId" WHERE s."status" IN ('PENDING','LEASED') AND p."status"='ACTIVE' AND s."dueAt"<=NOW() AND (s."retryAt" IS NULL OR s."retryAt"<=NOW()) AND (s."leasedUntil" IS NULL OR s."leasedUntil"<=NOW()) AND s."attemptCount"<s."maxAttempts" ORDER BY s."dueAt",s."id" FOR UPDATE OF s SKIP LOCKED LIMIT 1) RETURNING "id","planId","draftId","attemptCount"`;
+export const FOLLOW_UP_UTC_CLOCK = "(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')";
+export const FOLLOW_UP_CLAIM_SQL = `UPDATE "followUpStep" SET "status"='LEASED', "leaseOwner"=$1, "leasedUntil"=${FOLLOW_UP_UTC_CLOCK}+INTERVAL '60 seconds', "attemptCount"="attemptCount"+1, "updatedAt"=${FOLLOW_UP_UTC_CLOCK} WHERE "id"=(SELECT s."id" FROM "followUpStep" s JOIN "followUpPlan" p ON p."id"=s."planId" WHERE s."status" IN ('PENDING','LEASED') AND p."status"='ACTIVE' AND s."dueAt"<=${FOLLOW_UP_UTC_CLOCK} AND (s."retryAt" IS NULL OR s."retryAt"<=${FOLLOW_UP_UTC_CLOCK}) AND (s."leasedUntil" IS NULL OR s."leasedUntil"<=${FOLLOW_UP_UTC_CLOCK}) AND s."attemptCount"<s."maxAttempts" ORDER BY s."dueAt",s."id" FOR UPDATE OF s SKIP LOCKED LIMIT 1) RETURNING "id","planId","draftId","attemptCount"`;
 type Claim = {
 	id: string;
 	planId: string;
@@ -761,7 +762,7 @@ export class OutreachLifecycleService {
 			const rows = await withPrincipal(
 				this.db,
 				{ userId: null, kind: "worker" },
-				(tx) => tx.$queryRawUnsafe<Claim[]>(CLAIM, workerId),
+				(tx) => tx.$queryRawUnsafe<Claim[]>(FOLLOW_UP_CLAIM_SQL, workerId),
 			);
 			const step = rows[0];
 			if (!step) break;
@@ -958,10 +959,17 @@ export class OutreachLifecycleService {
 							select: { atlasLiveOutreachEnabled: true },
 						})
 					: null;
+				const storedAuthorizationValid = Boolean(
+					draft?.authorization &&
+						draft.authorization.scope === "STANDARD_COLD_OUTREACH" &&
+						draft.authorization.status === "ACTIVE" &&
+						(draft.authorization.expiresAt === null ||
+							draft.authorization.expiresAt > new Date()),
+				);
 				const currentAuthorization =
 					draft?.coldOutreach &&
 					draft.status === "DRAFT" &&
-					!draft.authorization
+					!storedAuthorizationValid
 						? await tx.outreachAuthorization.findFirst({
 								where: {
 									scope: "STANDARD_COLD_OUTREACH",
@@ -977,15 +985,16 @@ export class OutreachLifecycleService {
 								},
 							})
 						: null;
-				const authorization = draft?.authorization ?? currentAuthorization;
+				const effectiveAuthorization =
+					currentAuthorization ?? draft?.authorization;
 				const autonomous = Boolean(
 					draft?.coldOutreach &&
 						draft.status === "DRAFT" &&
-						draft.atlasAuthorizedAt &&
-						authorization?.scope === "STANDARD_COLD_OUTREACH" &&
-						authorization.status === "ACTIVE" &&
-						(authorization.expiresAt === null ||
-							authorization.expiresAt > new Date()) &&
+						(draft.atlasAuthorizedAt || currentAuthorization) &&
+						effectiveAuthorization?.scope === "STANDARD_COLD_OUTREACH" &&
+						effectiveAuthorization.status === "ACTIVE" &&
+						(effectiveAuthorization.expiresAt === null ||
+							effectiveAuthorization.expiresAt > new Date()) &&
 						settings?.atlasLiveOutreachEnabled === true &&
 						process.env.ATLAS_LIVE_OUTREACH_ENABLED?.trim().toLowerCase() ===
 							"true" &&
@@ -1042,11 +1051,15 @@ export class OutreachLifecycleService {
 					data: {
 						status: "QUEUED",
 						authorizationId:
-							autonomous && !draft.authorization
-								? currentAuthorization?.id
+							autonomous && currentAuthorization
+								? currentAuthorization.id
 								: undefined,
 						atlasAuthorizedAt:
-							autonomous && !draft.atlasAuthorizedAt ? new Date() : undefined,
+							autonomous &&
+							currentAuthorization &&
+							(!draft.atlasAuthorizedAt || !storedAuthorizationValid)
+								? new Date()
+								: undefined,
 						approvedAt: autonomous ? new Date() : undefined,
 					},
 				});
