@@ -10,6 +10,7 @@ export type LinkedInBrowserTarget = {
 	routeId: string;
 	profileUrl: string;
 	profileIdentifier: string;
+	stableMemberIdentifier?: string | null;
 	displayName?: string | null;
 	conversationId?: string;
 	externalConversationKey?: string | null;
@@ -133,6 +134,12 @@ export function linkedInDisplayNamesMatch(
 export type CanonicalLinkedInProfileIdentity =
 	| { kind: "PROFILE_SLUG"; value: string }
 	| { kind: "OPAQUE"; value: string };
+
+export type LinkedInProfileIdentityRecord = {
+	profileUrl: string | null;
+	profileIdentifier?: string | null;
+	stableMemberIdentifier?: string | null;
+};
 
 function canonicalProfileSlug(value: string): string | null {
 	const trimmed = value.trim();
@@ -367,36 +374,10 @@ export function linkedInConversationIdentityMatches(
 }
 
 export function linkedInProfileIdentityMatches(
-	target: { profileUrl: string; profileIdentifier: string | null },
-	observed: { profileUrl: string | null; profileIdentifier: string | null },
+	target: LinkedInProfileIdentityRecord,
+	observed: LinkedInProfileIdentityRecord,
 ): boolean {
-	if (!observed.profileUrl || !observed.profileIdentifier) return false;
-	const targetProfileIdentifier = target.profileIdentifier;
-	if (!targetProfileIdentifier) return false;
-	const targetUrlSlug = profileSlugFromUrl(target.profileUrl);
-	const observedUrlSlug = profileSlugFromUrl(observed.profileUrl);
-	if (!targetUrlSlug || !observedUrlSlug || targetUrlSlug !== observedUrlSlug)
-		return false;
-	const targetIdentity = canonicalLinkedInProfileIdentity(
-		targetProfileIdentifier,
-	);
-	if (!targetIdentity) return false;
-	const observedIdentity = canonicalLinkedInProfileIdentity(
-		observed.profileIdentifier,
-	);
-	if (!observedIdentity) return false;
-	if (targetIdentity.kind === "OPAQUE")
-		return (
-			observedIdentity.kind === "OPAQUE" &&
-			observedIdentity.value === targetIdentity.value
-		);
-	if (targetIdentity.value !== targetUrlSlug) return false;
-	if (observedIdentity.kind === "PROFILE_SLUG")
-		return observedIdentity.value === observedUrlSlug;
-	return (
-		canonicalProfileSlug(observedIdentity.value) === observedUrlSlug &&
-		observedUrlSlug === targetUrlSlug
-	);
+	return linkedInProfileRecordsMatch(target, observed);
 }
 
 export function firstMessageBrowserStateAllowsSend(
@@ -407,17 +388,71 @@ export function firstMessageBrowserStateAllowsSend(
 }
 
 export function linkedInProfileRecordsMatch(
-	target: { profileUrl: string; profileIdentifier: string },
-	observed: { profileUrl: string | null; profileIdentifier: string | null },
+	target: LinkedInProfileIdentityRecord,
+	observed: LinkedInProfileIdentityRecord,
 ): boolean {
-	if (!observed.profileUrl) return false;
+	const targetUrlSlug = target.profileUrl
+		? profileSlugFromUrl(target.profileUrl)
+		: null;
+	const observedUrlSlug = observed.profileUrl
+		? profileSlugFromUrl(observed.profileUrl)
+		: null;
+	if (!targetUrlSlug || !observedUrlSlug) return false;
+	const targetIdentity = target.profileIdentifier
+		? canonicalLinkedInProfileIdentity(target.profileIdentifier)
+		: null;
+	const observedIdentity = observed.profileIdentifier
+		? canonicalLinkedInProfileIdentity(observed.profileIdentifier)
+		: null;
+	if (!targetIdentity || !observedIdentity) return false;
+	const targetStable = stableMemberIdentifierFromRecord(target);
+	const observedStable = stableMemberIdentifierFromRecord(observed);
+	if (targetStable === false || observedStable === false) return false;
+	if (targetStable && observedStable && targetStable !== observedStable)
+		return false;
+	if (targetStable && observedStable && targetStable === observedStable)
+		return true;
+	if (targetUrlSlug !== observedUrlSlug) return false;
+	if (targetStable || observedStable) {
+		if (
+			(targetStable && !target.stableMemberIdentifier) ||
+			(observedStable && !observed.stableMemberIdentifier)
+		)
+			return false;
+		const profileIdentity = targetStable ? observedIdentity : targetIdentity;
+		return (
+			profileIdentity.kind === "PROFILE_SLUG" &&
+			profileIdentity.value === targetUrlSlug
+		);
+	}
+	return (
+		targetIdentity.kind === "PROFILE_SLUG" &&
+		observedIdentity.kind === "PROFILE_SLUG" &&
+		targetIdentity.value === targetUrlSlug &&
+		observedIdentity.value === observedUrlSlug
+	);
+}
+
+function stableMemberIdentifierFromRecord(
+	record: LinkedInProfileIdentityRecord,
+): string | null | false {
+	const candidates = [
+		record.stableMemberIdentifier?.trim() || null,
+		record.profileIdentifier &&
+		isOpaqueStableIdentifier(record.profileIdentifier)
+			? record.profileIdentifier.trim()
+			: null,
+		record.profileUrl
+			? opaqueProfileIdentifierFromUrl(record.profileUrl)
+			: null,
+	].filter((value): value is string => Boolean(value));
 	if (
-		canonicalLinkedInProfileUrl(target.profileUrl) !==
-		canonicalLinkedInProfileUrl(observed.profileUrl)
+		record.stableMemberIdentifier &&
+		!isOpaqueStableIdentifier(record.stableMemberIdentifier)
 	)
 		return false;
-	if (!observed.profileIdentifier) return true;
-	return linkedInProfileIdentityMatches(target, observed);
+	const distinct = new Set(candidates);
+	return distinct.size > 1 ? false : ([...distinct][0] ?? null);
 }
 
 export function verifyFreshLinkedInIdentity(
@@ -426,39 +461,26 @@ export function verifyFreshLinkedInIdentity(
 ): { allowed: true } | { allowed: false; reason: string } {
 	if (observed.resolution !== "RESOLVED")
 		return { allowed: false, reason: "BROWSER_STATE_AMBIGUOUS" };
-	const targetProfileIdentity = canonicalLinkedInProfileIdentity(
-		target.profileIdentifier,
-	);
-	const targetStableIdentifier =
-		opaqueProfileIdentifierFromUrl(target.profileUrl) ??
-		opaqueProfileIdentifierFromUrl(target.profileIdentifier) ??
-		(targetProfileIdentity?.kind === "OPAQUE"
-			? targetProfileIdentity.value
-			: null);
-	const observedProfileUrl = observed.profileUrl
-		? canonicalLinkedInProfileUrl(observed.profileUrl)
-		: null;
-	if (
-		targetStableIdentifier &&
-		observed.conversationParticipantIdentifier === targetStableIdentifier &&
-		observedProfileUrl?.startsWith("https://linkedin.com/in/")
-	) {
-		if (
-			target.displayName &&
-			(!observed.displayName ||
-				!linkedInDisplayNamesMatch(target.displayName, observed.displayName))
-		)
-			return { allowed: false, reason: "DISPLAY_NAME_MISMATCH" };
-		return { allowed: true };
-	}
-	if (
-		!observed.profileUrl ||
-		canonicalLinkedInProfileUrl(observed.profileUrl) !==
-			canonicalLinkedInProfileUrl(target.profileUrl)
-	)
+	const targetRecord: LinkedInProfileIdentityRecord = {
+		profileUrl: target.profileUrl,
+		profileIdentifier: target.profileIdentifier,
+		stableMemberIdentifier: target.stableMemberIdentifier,
+	};
+	const observedRecord: LinkedInProfileIdentityRecord = {
+		profileUrl: observed.profileUrl,
+		profileIdentifier: observed.profileIdentifier,
+		stableMemberIdentifier: observed.conversationParticipantIdentifier,
+	};
+	if (!observed.profileUrl)
 		return { allowed: false, reason: "PROFILE_URL_MISMATCH" };
-	if (!linkedInProfileIdentityMatches(target, observed))
+	if (!linkedInProfileRecordsMatch(targetRecord, observedRecord)) {
+		if (
+			canonicalLinkedInProfileUrl(observed.profileUrl) !==
+			canonicalLinkedInProfileUrl(target.profileUrl)
+		)
+			return { allowed: false, reason: "PROFILE_URL_MISMATCH" };
 		return { allowed: false, reason: "PROFILE_IDENTIFIER_MISMATCH" };
+	}
 	if (
 		target.displayName &&
 		(!observed.displayName ||

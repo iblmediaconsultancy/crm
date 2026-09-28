@@ -1,5 +1,5 @@
 import {
-	canonicalLinkedInProfileUrl,
+	canonicalLinkedInProfileIdentity,
 	coldOutreachBlockReason,
 	type Db,
 	isPersonProtected,
@@ -88,6 +88,7 @@ type ConversationInput = {
 	identityKey: string;
 	profileUrl?: string | null;
 	normalizedProfileUrl?: string | null;
+	linkedinMemberIdentifier?: string | null;
 	externalConversationKey?: string | null;
 	connectionState?:
 		| "UNKNOWN"
@@ -175,6 +176,7 @@ type AttemptOutcome = {
 	externalConversationKey?: string | null;
 	verifiedProfileUrl?: string | null;
 	verifiedProfileIdentifier?: string | null;
+	verifiedProfileMemberIdentifier?: string | null;
 	browserProof?: JsonValue;
 	errorCode?: string | null;
 	details?: JsonValue;
@@ -189,6 +191,7 @@ type ConnectionRequestAttemptOutcome = {
 	externalRequestKey?: string | null;
 	verifiedProfileUrl?: string | null;
 	verifiedProfileIdentifier?: string | null;
+	verifiedProfileMemberIdentifier?: string | null;
 	browserProof?: JsonValue;
 	details?: JsonValue;
 	errorCode?: string | null;
@@ -484,6 +487,7 @@ export class LinkedInChannelService {
 						identityKey: input.identityKey,
 						profileUrl: input.profileUrl ?? null,
 						normalizedProfileUrl: input.normalizedProfileUrl ?? null,
+						linkedinMemberIdentifier: input.linkedinMemberIdentifier ?? null,
 						externalConversationKey: input.externalConversationKey ?? null,
 						connectionState: input.connectionState ?? undefined,
 						status: input.status ?? undefined,
@@ -494,6 +498,8 @@ export class LinkedInChannelService {
 						leadId: input.leadId ?? undefined,
 						profileUrl: input.profileUrl ?? undefined,
 						normalizedProfileUrl: input.normalizedProfileUrl ?? undefined,
+						linkedinMemberIdentifier:
+							input.linkedinMemberIdentifier ?? undefined,
 						externalConversationKey: input.externalConversationKey ?? undefined,
 						connectionState: input.connectionState ?? undefined,
 					},
@@ -887,7 +893,12 @@ export class LinkedInChannelService {
 							type: "LINKEDIN",
 							lifecycleState: "ACTIVE",
 						},
-						select: { id: true, value: true, normalizedValue: true },
+						select: {
+							id: true,
+							value: true,
+							normalizedValue: true,
+							linkedinMemberIdentifier: true,
+						},
 					}),
 					isPersonProtected(tx, input.contactId),
 				]);
@@ -902,6 +913,7 @@ export class LinkedInChannelService {
 						{
 							profileUrl: route.value,
 							profileIdentifier: route.normalizedValue,
+							stableMemberIdentifier: route.linkedinMemberIdentifier,
 						},
 						{
 							profileUrl: input.profileUrl,
@@ -1177,7 +1189,11 @@ export class LinkedInChannelService {
 								type: "LINKEDIN",
 								lifecycleState: "ACTIVE",
 							},
-							select: { value: true, normalizedValue: true },
+							select: {
+								value: true,
+								normalizedValue: true,
+								linkedinMemberIdentifier: true,
+							},
 						}),
 						isPersonProtected(tx, job.contactId),
 						tx.linkedInConversation.findFirst({
@@ -1202,6 +1218,7 @@ export class LinkedInChannelService {
 						{
 							profileUrl: route.value,
 							profileIdentifier: route.normalizedValue,
+							stableMemberIdentifier: route.linkedinMemberIdentifier,
 						},
 						{
 							profileUrl: job.profileUrl,
@@ -1313,6 +1330,7 @@ export class LinkedInChannelService {
 						routeId: job.routeId,
 						profileUrl: job.profileUrl,
 						profileIdentifier: job.profileIdentifier,
+						stableMemberIdentifier: route?.linkedinMemberIdentifier ?? null,
 						displayName: [contact?.firstName, contact?.lastName]
 							.filter(Boolean)
 							.join(" "),
@@ -1346,27 +1364,49 @@ export class LinkedInChannelService {
 						"Invalid LinkedIn connection request action.",
 					);
 				const completedAt = input.completedAt ?? new Date();
+				const route =
+					input.status === "SUCCEEDED"
+						? await tx.contactRoute.findFirst({
+								where: {
+									id: job.routeId,
+									contactId: job.contactId,
+									type: "LINKEDIN",
+									lifecycleState: "ACTIVE",
+								},
+								select: { id: true, linkedinMemberIdentifier: true },
+							})
+						: null;
 				if (input.status === "SUCCEEDED") {
 					if (
 						!input.browserProof ||
 						!input.verifiedProfileUrl ||
 						!input.verifiedProfileIdentifier ||
-						canonicalLinkedInProfileUrl(input.verifiedProfileUrl) !==
-							canonicalLinkedInProfileUrl(job.profileUrl) ||
 						!linkedInProfileRecordsMatch(
 							{
 								profileUrl: job.profileUrl,
 								profileIdentifier: job.profileIdentifier,
+								stableMemberIdentifier: route?.linkedinMemberIdentifier,
 							},
 							{
 								profileUrl: input.verifiedProfileUrl,
 								profileIdentifier: input.verifiedProfileIdentifier,
+								stableMemberIdentifier: input.verifiedProfileMemberIdentifier,
 							},
 						)
 					)
 						throw new ConflictException(
 							"A confirmed LinkedIn connection request requires matching fresh browser identity proof.",
 						);
+					const stableIdentity = input.verifiedProfileMemberIdentifier
+						? canonicalLinkedInProfileIdentity(
+								input.verifiedProfileMemberIdentifier,
+							)
+						: null;
+					if (route && stableIdentity?.kind === "OPAQUE")
+						await tx.contactRoute.update({
+							where: { id: route.id },
+							data: { linkedinMemberIdentifier: stableIdentity.value },
+						});
 				}
 				await tx.linkedInConnectionRequestAttempt.update({
 					where: {
@@ -1573,6 +1613,7 @@ export class LinkedInChannelService {
 								id: true,
 								profileUrl: true,
 								normalizedProfileUrl: true,
+								linkedinMemberIdentifier: true,
 								externalConversationKey: true,
 								connectionState: true,
 								consent: true,
@@ -1596,6 +1637,7 @@ export class LinkedInChannelService {
 												id: true,
 												value: true,
 												normalizedValue: true,
+												linkedinMemberIdentifier: true,
 											},
 										},
 									},
@@ -1731,10 +1773,12 @@ export class LinkedInChannelService {
 						{
 							profileUrl: route.value,
 							profileIdentifier: route.normalizedValue,
+							stableMemberIdentifier: route.linkedinMemberIdentifier,
 						},
 						{
 							profileUrl: conversation.profileUrl,
 							profileIdentifier: conversation.normalizedProfileUrl,
+							stableMemberIdentifier: conversation.linkedinMemberIdentifier,
 						},
 					)
 				)
@@ -1827,6 +1871,7 @@ export class LinkedInChannelService {
 							routeId: route.id,
 							profileUrl: route.value,
 							profileIdentifier: route.normalizedValue,
+							stableMemberIdentifier: route.linkedinMemberIdentifier,
 							displayName: [contact.firstName, contact.lastName]
 								.filter(Boolean)
 								.join(" "),
@@ -1863,6 +1908,7 @@ export class LinkedInChannelService {
 								leadId: true,
 								profileUrl: true,
 								normalizedProfileUrl: true,
+								linkedinMemberIdentifier: true,
 								externalConversationKey: true,
 								connectionState: true,
 							},
@@ -1885,7 +1931,12 @@ export class LinkedInChannelService {
 							type: "LINKEDIN",
 							lifecycleState: "ACTIVE",
 						},
-						select: { value: true, normalizedValue: true },
+						select: {
+							id: true,
+							value: true,
+							normalizedValue: true,
+							linkedinMemberIdentifier: true,
+						},
 					});
 					if (
 						!input.browserProof ||
@@ -1896,10 +1947,12 @@ export class LinkedInChannelService {
 							{
 								profileUrl: route.value,
 								profileIdentifier: route.normalizedValue,
+								stableMemberIdentifier: route.linkedinMemberIdentifier,
 							},
 							{
 								profileUrl: input.verifiedProfileUrl,
 								profileIdentifier: input.verifiedProfileIdentifier,
+								stableMemberIdentifier: input.verifiedProfileMemberIdentifier,
 							},
 						) ||
 						(job.conversation.profileUrl &&
@@ -1909,10 +1962,13 @@ export class LinkedInChannelService {
 									profileIdentifier:
 										job.conversation.normalizedProfileUrl ??
 										input.verifiedProfileIdentifier,
+									stableMemberIdentifier:
+										job.conversation.linkedinMemberIdentifier,
 								},
 								{
 									profileUrl: input.verifiedProfileUrl,
 									profileIdentifier: input.verifiedProfileIdentifier,
+									stableMemberIdentifier: input.verifiedProfileMemberIdentifier,
 								},
 							)) ||
 						(job.conversation.externalConversationKey &&
@@ -1922,6 +1978,16 @@ export class LinkedInChannelService {
 						throw new ConflictException(
 							"A confirmed LinkedIn message requires matching fresh browser identity proof.",
 						);
+					const stableIdentity = input.verifiedProfileMemberIdentifier
+						? canonicalLinkedInProfileIdentity(
+								input.verifiedProfileMemberIdentifier,
+							)
+						: null;
+					if (route && stableIdentity?.kind === "OPAQUE")
+						await tx.contactRoute.update({
+							where: { id: route.id },
+							data: { linkedinMemberIdentifier: stableIdentity.value },
+						});
 				}
 				const completedAt = input.completedAt ?? new Date();
 				await tx.linkedInSendAttempt.update({
