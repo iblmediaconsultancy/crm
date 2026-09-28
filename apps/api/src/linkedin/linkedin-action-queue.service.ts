@@ -547,8 +547,10 @@ export class LinkedInActionQueueService {
 		const canReuseConnectionClaim = canReuseConsumedLinkedInConnectionClaim({
 			claimChannel: claim?.channel,
 			claimStatus: claim?.status,
+			claimIdempotencyKey: claim?.idempotencyKey,
 			connectionRequest,
 			messageJobExists: Boolean(messageJob),
+			historicalConnectionRequestActivities: historicalActivities,
 		});
 		if (conversation && conversation.contactId !== input.contactId)
 			return {
@@ -667,7 +669,14 @@ export class LinkedInActionQueueService {
 				: (claim?.status ?? null),
 			personProtected: false,
 		});
-		if (coldReason && coldReason !== "FIRST_TOUCH_CLAIMED")
+		if (
+			coldReason &&
+			!(
+				canReuseConnectionClaim &&
+				(coldReason === "FIRST_TOUCH_CLAIMED" ||
+					coldReason === "FIRST_TOUCH_CONSUMED")
+			)
+		)
 			return { classification: "BLOCKED", reason: coldReason };
 		return {
 			classification: "ROUTINE_AUTONOMOUS",

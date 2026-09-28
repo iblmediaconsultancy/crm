@@ -570,6 +570,7 @@ export class LinkedInChannelService {
 					suppressions,
 					claim,
 					organizationProtection,
+					historicalActivities,
 				] = await Promise.all([
 					tx.contact.findUnique({
 						where: { id: conversation.contactId },
@@ -637,6 +638,14 @@ export class LinkedInChannelService {
 						},
 						select: { id: true },
 					}),
+					tx.activity.findMany({
+						where: {
+							contactId: conversation.contactId,
+							type: "NOTE",
+							body: { not: null },
+						},
+						select: { subject: true, body: true, meta: true },
+					}),
 				]);
 				const [connectionRequest, messageJob] =
 					input.firstMessage && claim?.status === "CONSUMED"
@@ -659,8 +668,10 @@ export class LinkedInChannelService {
 					{
 						claimChannel: claim?.channel,
 						claimStatus: claim?.status,
+						claimIdempotencyKey: claim?.idempotencyKey,
 						connectionRequest,
 						messageJobExists: Boolean(messageJob),
+						historicalConnectionRequestActivities: historicalActivities,
 					},
 				);
 				if (!contact)
@@ -686,7 +697,14 @@ export class LinkedInChannelService {
 							? null
 							: (claim?.status ?? null),
 					});
-					if (reason && reason !== "FIRST_TOUCH_CLAIMED")
+					if (
+						reason &&
+						!(
+							canReuseConnectionClaim &&
+							(reason === "FIRST_TOUCH_CLAIMED" ||
+								reason === "FIRST_TOUCH_CONSUMED")
+						)
+					)
 						throw new ConflictException(
 							`LinkedIn cold outreach blocked: ${reason}.`,
 						);
@@ -1658,7 +1676,11 @@ export class LinkedInChannelService {
 					contact
 						? tx.relationshipColdTouchClaim.findUnique({
 								where: { contactId: contact.id },
-								select: { status: true, idempotencyKey: true },
+								select: {
+									channel: true,
+									status: true,
+									idempotencyKey: true,
+								},
 							})
 						: Promise.resolve(null),
 					conversation?.leadId
@@ -1678,6 +1700,22 @@ export class LinkedInChannelService {
 							})
 						: Promise.resolve([]),
 				]);
+				const connectionRequest = claim?.idempotencyKey
+					? await tx.linkedInConnectionRequestJob.findUnique({
+							where: { idempotencyKey: claim.idempotencyKey },
+							select: { action: true, status: true, actionPayload: true },
+						})
+					: null;
+				const canReuseConnectionClaim = canReuseConsumedLinkedInConnectionClaim(
+					{
+						claimChannel: claim?.channel,
+						claimStatus: claim?.status,
+						claimIdempotencyKey: claim?.idempotencyKey,
+						connectionRequest,
+						messageJobExists: claim?.idempotencyKey === job.idempotencyKey,
+						historicalConnectionRequestActivities: historicalActivities,
+					},
+				);
 				const firstMessageAction = Boolean(
 					job.actionPayload &&
 						typeof job.actionPayload === "object" &&
@@ -1746,7 +1784,8 @@ export class LinkedInChannelService {
 					else if (
 						claim &&
 						(claim.status !== "CLAIMED" ||
-							claim.idempotencyKey !== job.idempotencyKey)
+							claim.idempotencyKey !== job.idempotencyKey) &&
+						!canReuseConnectionClaim
 					)
 						blockedReason = "FIRST_TOUCH_CLAIMED_BY_OTHER_JOB";
 				}
