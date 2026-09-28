@@ -79,6 +79,7 @@ type PreflightResult = {
 	identityKey?: string;
 	profileUrl?: string;
 	normalizedProfileUrl?: string;
+	linkedinMemberIdentifier?: string | null;
 };
 
 function routineColdOutreach(action: LinkedInRoutineActionType): boolean {
@@ -168,6 +169,7 @@ export class LinkedInActionQueueService {
 				identityKey: preflight.identityKey,
 				profileUrl: preflight.profileUrl,
 				normalizedProfileUrl: preflight.normalizedProfileUrl,
+				linkedinMemberIdentifier: preflight.linkedinMemberIdentifier,
 				connectionState: "CONNECTED",
 				status: "ACTIVE",
 				classification: "ACTION_REQUIRED",
@@ -244,7 +246,11 @@ export class LinkedInActionQueueService {
 					type: "LINKEDIN",
 					lifecycleState: "ACTIVE",
 				},
-				select: { value: true, normalizedValue: true },
+				select: {
+					value: true,
+					normalizedValue: true,
+					linkedinMemberIdentifier: true,
+				},
 			}),
 			isPersonProtected(tx, input.contactId),
 		]);
@@ -260,6 +266,7 @@ export class LinkedInActionQueueService {
 				{
 					profileUrl: route.value,
 					profileIdentifier: route.normalizedValue,
+					stableMemberIdentifier: route.linkedinMemberIdentifier,
 				},
 				{
 					profileUrl: input.profileUrl,
@@ -384,7 +391,11 @@ export class LinkedInActionQueueService {
 					type: "LINKEDIN",
 					lifecycleState: "ACTIVE",
 				},
-				select: { value: true, normalizedValue: true },
+				select: {
+					value: true,
+					normalizedValue: true,
+					linkedinMemberIdentifier: true,
+				},
 			}),
 			isPersonProtected(tx, input.contactId),
 		]);
@@ -400,6 +411,7 @@ export class LinkedInActionQueueService {
 				{
 					profileUrl: route.value,
 					profileIdentifier: route.normalizedValue,
+					stableMemberIdentifier: route.linkedinMemberIdentifier,
 				},
 				{
 					profileUrl: input.profileUrl,
@@ -452,6 +464,7 @@ export class LinkedInActionQueueService {
 					contactId: true,
 					profileUrl: true,
 					normalizedProfileUrl: true,
+					linkedinMemberIdentifier: true,
 					connectionState: true,
 					consent: true,
 					status: true,
@@ -564,10 +577,12 @@ export class LinkedInActionQueueService {
 					{
 						profileUrl: route.value,
 						profileIdentifier: route.normalizedValue,
+						stableMemberIdentifier: route.linkedinMemberIdentifier,
 					},
 					{
 						profileUrl: conversation.profileUrl,
 						profileIdentifier: conversation.normalizedProfileUrl,
+						stableMemberIdentifier: conversation.linkedinMemberIdentifier,
 					},
 				))
 		)
@@ -685,6 +700,7 @@ export class LinkedInActionQueueService {
 			identityKey: route.normalizedValue,
 			profileUrl: route.value,
 			normalizedProfileUrl: route.normalizedValue,
+			linkedinMemberIdentifier: route.linkedinMemberIdentifier,
 		};
 	}
 
@@ -702,6 +718,7 @@ export class LinkedInActionQueueService {
 				companyId: true,
 				profileUrl: true,
 				normalizedProfileUrl: true,
+				linkedinMemberIdentifier: true,
 				connectionState: true,
 				consent: true,
 				status: true,
@@ -736,7 +753,11 @@ export class LinkedInActionQueueService {
 					type: "LINKEDIN",
 					lifecycleState: "ACTIVE",
 				},
-				select: { value: true, normalizedValue: true },
+				select: {
+					value: true,
+					normalizedValue: true,
+					linkedinMemberIdentifier: true,
+				},
 			}),
 			isPersonProtected(tx, conversation.contactId),
 			tx.organizationProtection.findFirst({
@@ -842,10 +863,12 @@ export class LinkedInActionQueueService {
 				{
 					profileUrl: route.value,
 					profileIdentifier: route.normalizedValue,
+					stableMemberIdentifier: route.linkedinMemberIdentifier,
 				},
 				{
 					profileUrl: conversation.profileUrl,
 					profileIdentifier: conversation.normalizedProfileUrl,
+					stableMemberIdentifier: conversation.linkedinMemberIdentifier,
 				},
 			)
 		)

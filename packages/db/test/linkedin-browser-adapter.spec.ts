@@ -106,6 +106,145 @@ describe("LinkedIn browser identity canonicalization", () => {
 		).toBe(false);
 	});
 
+	it("proves a CRM slug and opaque member identifier are the same route", () => {
+		expect(
+			linkedInProfileRecordsMatch(
+				{
+					profileUrl: "https://www.linkedin.com/in/adis-doksanaltic-02138a272/",
+					profileIdentifier: "adis-doksanaltic-02138a272",
+					stableMemberIdentifier: "ACoAdisMember",
+				},
+				{
+					profileUrl: "https://linkedin.com/in/adis-doksanaltic-02138a272",
+					profileIdentifier: "ACoAdisMember",
+					stableMemberIdentifier: "ACoAdisMember",
+				},
+			),
+		).toBe(true);
+	});
+
+	it("proves a CRM member identifier and matching slug are the same route", () => {
+		expect(
+			linkedInProfileRecordsMatch(
+				{
+					profileUrl: "https://linkedin.com/in/adis-doksanaltic-02138a272",
+					profileIdentifier: "ACoAdisMember",
+					stableMemberIdentifier: "ACoAdisMember",
+				},
+				{
+					profileUrl: "https://www.linkedin.com/in/adis-doksanaltic-02138a272/",
+					profileIdentifier: "adis-doksanaltic-02138a272",
+				},
+			),
+		).toBe(true);
+	});
+
+	it("accepts a vanity redirect only with matching stable member evidence", () => {
+		expect(
+			linkedInProfileRecordsMatch(
+				{
+					profileUrl: "https://linkedin.com/in/old-adis-slug",
+					profileIdentifier: "old-adis-slug",
+					stableMemberIdentifier: "ACoAdisMember",
+				},
+				{
+					profileUrl: "https://linkedin.com/in/new-adis-slug",
+					profileIdentifier: "new-adis-slug",
+					stableMemberIdentifier: "ACoAdisMember",
+				},
+			),
+		).toBe(true);
+	});
+
+	it("rejects conflicting member identifiers, slugs, and missing evidence", () => {
+		expect(
+			linkedInProfileRecordsMatch(
+				{
+					profileUrl: "https://linkedin.com/in/adis-doksanaltic-02138a272",
+					profileIdentifier: "adis-doksanaltic-02138a272",
+					stableMemberIdentifier: "ACoAdisMember",
+				},
+				{
+					profileUrl: "https://linkedin.com/in/adis-doksanaltic-02138a272",
+					profileIdentifier: "ACoOtherMember",
+				},
+			),
+		).toBe(false);
+		expect(
+			linkedInProfileRecordsMatch(
+				{
+					profileUrl: "https://linkedin.com/in/adis-doksanaltic-02138a272",
+					profileIdentifier: "adis-doksanaltic-02138a272",
+				},
+				{
+					profileUrl: "https://linkedin.com/in/another-person",
+					profileIdentifier: "another-person",
+				},
+			),
+		).toBe(false);
+		expect(
+			linkedInProfileRecordsMatch(
+				{
+					profileUrl: "https://linkedin.com/in/adis-doksanaltic-02138a272",
+					profileIdentifier: "adis-doksanaltic-02138a272",
+				},
+				{
+					profileUrl: "https://linkedin.com/in/adis-doksanaltic-02138a272",
+					profileIdentifier: null,
+				},
+			),
+		).toBe(false);
+	});
+
+	it("fails closed when the stable identifier changes between queue and execution", () => {
+		expect(
+			linkedInProfileRecordsMatch(
+				{
+					profileUrl: "https://linkedin.com/in/adis-doksanaltic-02138a272",
+					profileIdentifier: "adis-doksanaltic-02138a272",
+					stableMemberIdentifier: "ACoAdisMember",
+				},
+				{
+					profileUrl: "https://linkedin.com/in/adis-doksanaltic-02138a272",
+					profileIdentifier: "adis-doksanaltic-02138a272",
+					stableMemberIdentifier: "ACoChangedMember",
+				},
+			),
+		).toBe(false);
+	});
+
+	it("requires final browser recipient re-resolution to match the stored member", () => {
+		const storedTarget = target(
+			"https://linkedin.com/in/old-adis-slug",
+			"old-adis-slug",
+			"Adis Doksanltic",
+		);
+		expect(
+			verifyFreshLinkedInIdentity(
+				{ ...storedTarget, stableMemberIdentifier: "ACoAdisMember" },
+				{
+					...baseObserved,
+					profileUrl: "https://linkedin.com/in/new-adis-slug",
+					profileIdentifier: "new-adis-slug",
+					displayName: "Adis Doksanltic",
+					conversationParticipantIdentifier: "ACoAdisMember",
+				},
+			),
+		).toEqual({ allowed: true });
+		expect(
+			verifyFreshLinkedInIdentity(
+				{ ...storedTarget, stableMemberIdentifier: "ACoAdisMember" },
+				{
+					...baseObserved,
+					profileUrl: "https://linkedin.com/in/new-adis-slug",
+					profileIdentifier: "new-adis-slug",
+					displayName: "Adis Doksanltic",
+					conversationParticipantIdentifier: "ACoOtherMember",
+				},
+			),
+		).toEqual({ allowed: false, reason: "PROFILE_URL_MISMATCH" });
+	});
+
 	it("rejects a redirected profile and a visible identity mismatch", () => {
 		expect(
 			verifyFreshLinkedInIdentity(
