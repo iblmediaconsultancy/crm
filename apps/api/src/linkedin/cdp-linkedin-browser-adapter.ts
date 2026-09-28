@@ -379,13 +379,23 @@ function collectLinkedInRelationshipControls(includeElements = false) {
 		!/sign in to linkedin/.test(body.toLowerCase());
 	const conversationMatch = href.match(/\/messaging\/thread\/([^/?#]+)/i);
 	const messageKey =
-		document
-			.querySelector("[data-message-urn], [data-message-id]")
-			?.getAttribute("data-message-urn") ||
-		document
-			.querySelector("[data-message-id]")
-			?.getAttribute("data-message-id") ||
-		null;
+		Array.from(
+			document.querySelectorAll(
+				".msg-thread, .msg-s-message-list-container, .msg-overlay-conversation-bubble, [role=dialog]",
+			),
+		)
+			.filter(isVisible)
+			.flatMap((surface) =>
+				Array.from(
+					surface.querySelectorAll("[data-message-urn], [data-message-id]"),
+				),
+			)
+			.map(
+				(element) =>
+					element.getAttribute("data-message-urn") ||
+					element.getAttribute("data-message-id"),
+			)
+			.find((value): value is string => Boolean(value)) || null;
 	return {
 		resolution: profileMatch ? "RESOLVED" : "AMBIGUOUS",
 		profileUrl: profileMatch
@@ -961,12 +971,27 @@ async function waitForMessageComposer(
 	expectedExternalConversationKey: string | null,
 ): Promise<MessageComposerInspection> {
 	let last: MessageComposerInspection = { status: "NONE" };
+	let stable: Extract<MessageComposerInspection, { status: "FOUND" }> | null =
+		null;
 	for (let attempt = 0; attempt < 20; attempt += 1) {
 		last = await page.inspectMessageComposer(
 			expectedRecipientIdentifier,
 			expectedExternalConversationKey,
 		);
-		if (last.status === "FOUND") return last;
+		if (last.status === "FOUND") {
+			if (
+				stable &&
+				stable.surfaceIndex === last.surfaceIndex &&
+				stable.editorIndex === last.editorIndex &&
+				stable.sendControlIndex === last.sendControlIndex &&
+				stable.recipientIdentifier === last.recipientIdentifier &&
+				stable.externalConversationKey === last.externalConversationKey
+			)
+				return last;
+			stable = last;
+		} else {
+			stable = null;
+		}
 		await new Promise((resolve) => setTimeout(resolve, 150));
 	}
 	return last;
@@ -1183,17 +1208,6 @@ export class CdpLinkedInBrowserAdapter implements LinkedInBrowserAdapter {
 					errorCode: "MESSAGE_BUTTON_UNAVAILABLE",
 					observedAt: new Date(),
 				};
-			const openedConversation = await page.observe();
-			if (
-				!firstMessageBrowserStateAllowsSend(action.target, {
-					externalMessageKey: openedConversation.externalMessageKey ?? null,
-				})
-			)
-				return {
-					status: "AMBIGUOUS",
-					errorCode: "WRONG_CONVERSATION",
-					observedAt: new Date(),
-				};
 			const composer = await waitForMessageComposer(
 				page,
 				messageControl.recipientIdentifier,
@@ -1211,6 +1225,17 @@ export class CdpLinkedInBrowserAdapter implements LinkedInBrowserAdapter {
 				return {
 					status: "FAILED",
 					errorCode: "MESSAGE_EDITOR_UNAVAILABLE",
+					observedAt: new Date(),
+				};
+			const openedConversation = await page.observe();
+			if (
+				!firstMessageBrowserStateAllowsSend(action.target, {
+					externalMessageKey: openedConversation.externalMessageKey ?? null,
+				})
+			)
+				return {
+					status: "AMBIGUOUS",
+					errorCode: "WRONG_CONVERSATION",
 					observedAt: new Date(),
 				};
 			writeStarted = true;

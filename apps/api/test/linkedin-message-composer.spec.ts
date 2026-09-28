@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { firstMessageBrowserStateAllowsSend } from "@crm/db/linkedin-browser-adapter";
 import {
 	type LinkedInMessageComposerSnapshot,
 	type LinkedInMessageComposerSurface,
@@ -91,12 +92,65 @@ describe("LinkedIn message composer resolver", () => {
 		expect(result.status).toBe("FOUND");
 	});
 
+	it("keeps exact existing threads bound to their stored conversation", () => {
+		expect(
+			resolveLinkedInMessageComposer(
+				snapshot({
+					kind: "THREAD",
+					recipientIdentifier: null,
+					externalConversationKey: "thread-current",
+				}),
+				{ expectedExternalConversationKey: "thread-current" },
+			).status,
+		).toBe("FOUND");
+		expect(
+			resolveLinkedInMessageComposer(
+				snapshot({
+					kind: "THREAD",
+					recipientIdentifier: null,
+					externalConversationKey: "thread-other",
+				}),
+				{ expectedExternalConversationKey: "thread-current" },
+			).status,
+		).toBe("NONE");
+	});
+
 	it("resolves a compose overlay with exact recipient evidence", () => {
 		const result = resolveLinkedInMessageComposer(
 			snapshot({ kind: "COMPOSE_OVERLAY" }),
 			{ expectedRecipientIdentifier: recipient },
 		);
 		expect(result.status).toBe("FOUND");
+	});
+
+	it("keeps an empty no-note compose eligible for a first real message", () => {
+		const result = resolveLinkedInMessageComposer(snapshot(), {
+			expectedRecipientIdentifier: recipient,
+		});
+		expect(result.status).toBe("FOUND");
+		expect(
+			firstMessageBrowserStateAllowsSend(
+				{ expectNoExistingConversation: true },
+				{ externalMessageKey: null },
+			),
+		).toBe(true);
+	});
+
+	it("blocks a first message when a substantive thread is present", () => {
+		const result = resolveLinkedInMessageComposer(
+			snapshot({
+				kind: "COMPOSE_OVERLAY",
+				externalConversationKey: "thread-42",
+			}),
+			{ expectedRecipientIdentifier: recipient },
+		);
+		expect(result.status).toBe("FOUND");
+		expect(
+			firstMessageBrowserStateAllowsSend(
+				{ expectNoExistingConversation: true },
+				{ externalMessageKey: "message-42" },
+			),
+		).toBe(false);
 	});
 
 	it("resolves the Gijs profile composer before Send is enabled", () => {
@@ -117,6 +171,18 @@ describe("LinkedIn message composer resolver", () => {
 				expectedRecipientIdentifier: otherRecipient,
 			}),
 		).toEqual({ status: "NONE" });
+	});
+
+	it("fails closed when recipient identity changes before send", () => {
+		const initial = resolveLinkedInMessageComposer(snapshot(), {
+			expectedRecipientIdentifier: recipient,
+		});
+		const final = resolveLinkedInMessageComposer(
+			snapshot({ recipientIdentifier: otherRecipient }),
+			{ expectedRecipientIdentifier: recipient },
+		);
+		expect(initial.status).toBe("FOUND");
+		expect(final.status).toBe("NONE");
 	});
 
 	it("requires one visible editor and ignores hidden duplicates", () => {
