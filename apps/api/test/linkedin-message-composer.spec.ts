@@ -52,6 +52,7 @@ function snapshot(
 		kind: "PROFILE_COMPOSE",
 		recipientIdentifier: recipient,
 		externalConversationKey: null,
+		externalMessageKey: null,
 		recipientCount: 1,
 		visible: true,
 		connected: true,
@@ -77,6 +78,7 @@ describe("LinkedIn message composer resolver", () => {
 			sendControlIndex: 0,
 			recipientIdentifier: recipient,
 			externalConversationKey: null,
+			externalMessageKey: null,
 		});
 	});
 
@@ -121,6 +123,50 @@ describe("LinkedIn message composer resolver", () => {
 			{ expectedRecipientIdentifier: recipient },
 		);
 		expect(result.status).toBe("FOUND");
+	});
+
+	it("ignores a stale background thread when the target composer is empty", () => {
+		const target = snapshot();
+		const staleThread = snapshot({
+			index: 1,
+			kind: "THREAD",
+			recipientIdentifier: null,
+			externalConversationKey: "stale-thread",
+			externalMessageKey: "stale-message",
+		});
+		const result = resolveLinkedInMessageComposer(
+			{ ...target, surfaces: [target.surfaces[0]!, staleThread.surfaces[0]!] },
+			{ expectedRecipientIdentifier: recipient },
+		);
+		expect(result).toMatchObject({
+			status: "FOUND",
+			externalMessageKey: null,
+		});
+		if (result.status !== "FOUND") throw new Error("COMPOSER_NOT_FOUND");
+		expect(
+			firstMessageBrowserStateAllowsSend(
+				{ expectNoExistingConversation: true },
+				{ externalMessageKey: result.externalMessageKey },
+			),
+		).toBe(true);
+	});
+
+	it("exposes substantive history from the resolved target surface", () => {
+		const result = resolveLinkedInMessageComposer(
+			snapshot({ externalMessageKey: "target-message" }),
+			{ expectedRecipientIdentifier: recipient },
+		);
+		expect(result).toMatchObject({
+			status: "FOUND",
+			externalMessageKey: "target-message",
+		});
+		if (result.status !== "FOUND") throw new Error("COMPOSER_NOT_FOUND");
+		expect(
+			firstMessageBrowserStateAllowsSend(
+				{ expectNoExistingConversation: true },
+				{ externalMessageKey: result.externalMessageKey },
+			),
+		).toBe(false);
 	});
 
 	it("keeps an empty no-note compose eligible for a first real message", () => {

@@ -202,11 +202,22 @@ function collectLinkedInMessageComposerSnapshot(): LinkedInMessageComposerSnapsh
 			const text = control.text.toLocaleLowerCase();
 			return (text === "send" || label === "send") && !label.includes("option");
 		});
+		const externalMessageKey =
+			Array.from(
+				surface.querySelectorAll("[data-message-urn], [data-message-id]"),
+			)
+				.map(
+					(element) =>
+						element.getAttribute("data-message-urn") ||
+						element.getAttribute("data-message-id"),
+				)
+				.find((value): value is string => Boolean(value)) || null;
 		return {
 			index,
 			kind,
 			recipientIdentifier: participantIdentifier,
 			externalConversationKey: threadKey,
+			externalMessageKey,
 			recipientCount,
 			visible: isVisible(surface),
 			connected: surface.isConnected,
@@ -1219,6 +1230,14 @@ export class CdpLinkedInBrowserAdapter implements LinkedInBrowserAdapter {
 				return {
 					status: "AMBIGUOUS",
 					errorCode: "WRONG_CONVERSATION",
+					browserProof: {
+						phase: "composer-resolution",
+						expectedRecipientIdentifier: messageControl.recipientIdentifier,
+						expectedExternalConversationKey:
+							messageControl.externalConversationKey ??
+							action.target.externalConversationKey ??
+							null,
+					},
 					observedAt: new Date(),
 				};
 			if (composer.status !== "FOUND")
@@ -1227,15 +1246,20 @@ export class CdpLinkedInBrowserAdapter implements LinkedInBrowserAdapter {
 					errorCode: "MESSAGE_EDITOR_UNAVAILABLE",
 					observedAt: new Date(),
 				};
-			const openedConversation = await page.observe();
 			if (
 				!firstMessageBrowserStateAllowsSend(action.target, {
-					externalMessageKey: openedConversation.externalMessageKey ?? null,
+					externalMessageKey: composer.externalMessageKey,
 				})
 			)
 				return {
 					status: "AMBIGUOUS",
 					errorCode: "WRONG_CONVERSATION",
+					browserProof: {
+						phase: "target-surface-history",
+						externalMessageKey: composer.externalMessageKey,
+						externalConversationKey: composer.externalConversationKey,
+						recipientIdentifier: composer.recipientIdentifier,
+					},
 					observedAt: new Date(),
 				};
 			writeStarted = true;
@@ -1252,6 +1276,14 @@ export class CdpLinkedInBrowserAdapter implements LinkedInBrowserAdapter {
 				return {
 					status: "AMBIGUOUS",
 					errorCode: "WRONG_CONVERSATION",
+					browserProof: {
+						phase: "final-compose-resolution",
+						expectedRecipientIdentifier: composer.recipientIdentifier,
+						expectedExternalConversationKey:
+							composer.externalConversationKey ??
+							action.target.externalConversationKey ??
+							null,
+					},
 					observedAt: new Date(),
 				};
 			if (!filled)
