@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.6](https://github.com/iblmediaconsultancy/crm/compare/v1.5.5...v1.5.6) (2026-09-30)
+
+
+### Fixes
+
+* **api:** wait for stable LinkedIn composer hydration ([ac3ffcc](https://github.com/iblmediaconsultancy/crm/commit/ac3ffcc8e2e94dc91f238dc2bc0711737a8ca69c))
+
 ## [1.5.5](https://github.com/iblmediaconsultancy/crm/compare/v1.5.4...v1.5.5) (2026-09-30)
 
 

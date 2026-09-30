@@ -19,6 +19,7 @@ import {
 	type LinkedInMessageComposerSurface,
 	linkedInMessageComposerControlReady,
 	resolveLinkedInMessageComposer,
+	waitForStableLinkedInMessageComposer,
 } from "./message-composer-resolver";
 import {
 	type LinkedInRelationshipControl,
@@ -86,6 +87,22 @@ type PageObservation = LinkedInBrowserIdentityEvidence & {
 type MessageComposerInspection = LinkedInMessageComposerResolution;
 
 function collectLinkedInMessageComposerSnapshot(): LinkedInMessageComposerSnapshot {
+	const state = globalThis as unknown as {
+		atlasComposerNodes?: {
+			identities: WeakMap<PageElement, number>;
+			next: number;
+		};
+	};
+	if (!state.atlasComposerNodes)
+		state.atlasComposerNodes = { identities: new WeakMap(), next: 1 };
+	const nodes = state.atlasComposerNodes;
+	const nodeIdentity = (element: PageElement): number => {
+		const existing = nodes.identities.get(element);
+		if (existing !== undefined) return existing;
+		const identity = nodes.next++;
+		nodes.identities.set(element, identity);
+		return identity;
+	};
 	const isVisible = (element: PageElement): boolean => {
 		const rect = element.getBoundingClientRect();
 		const style = getComputedStyle(element);
@@ -154,19 +171,18 @@ function collectLinkedInMessageComposerSnapshot(): LinkedInMessageComposerSnapsh
 		const recipientCount =
 			kind === "THREAD"
 				? 1
-				: composeRecipient
-					? 1
-					: Array.from(
-							surface.querySelectorAll(
-								".msg-connections-typeahead__added-recipients .artdeco-pill__text",
-							),
-						).filter(isVisible).length;
+				: Array.from(
+						surface.querySelectorAll(
+							".msg-connections-typeahead__added-recipients .artdeco-pill__text",
+						),
+					).filter(isVisible).length;
 		const editors = Array.from(
 			surface.querySelectorAll(
 				"textarea, [contenteditable=true], [role=textbox]",
 			),
 		).map((element, elementIndex) => ({
 			index: elementIndex,
+			nodeIdentity: nodeIdentity(element),
 			tagName: element.tagName,
 			role: element.getAttribute("role"),
 			ariaLabel: element.getAttribute("aria-label"),
@@ -981,31 +997,12 @@ async function waitForMessageComposer(
 	expectedRecipientIdentifier: string | null,
 	expectedExternalConversationKey: string | null,
 ): Promise<MessageComposerInspection> {
-	let last: MessageComposerInspection = { status: "NONE" };
-	let stable: Extract<MessageComposerInspection, { status: "FOUND" }> | null =
-		null;
-	for (let attempt = 0; attempt < 20; attempt += 1) {
-		last = await page.inspectMessageComposer(
+	return waitForStableLinkedInMessageComposer(() =>
+		page.inspectMessageComposer(
 			expectedRecipientIdentifier,
 			expectedExternalConversationKey,
-		);
-		if (last.status === "FOUND") {
-			if (
-				stable &&
-				stable.surfaceIndex === last.surfaceIndex &&
-				stable.editorIndex === last.editorIndex &&
-				stable.sendControlIndex === last.sendControlIndex &&
-				stable.recipientIdentifier === last.recipientIdentifier &&
-				stable.externalConversationKey === last.externalConversationKey
-			)
-				return last;
-			stable = last;
-		} else {
-			stable = null;
-		}
-		await new Promise((resolve) => setTimeout(resolve, 150));
-	}
-	return last;
+		),
+	);
 }
 
 function proofFor(
@@ -1029,6 +1026,36 @@ function proofFor(
 
 export class CdpLinkedInBrowserAdapter implements LinkedInBrowserAdapter {
 	constructor(private readonly port = 9222) {}
+
+	async inspectComposerReadiness(
+		url: string,
+		expectedRecipientIdentifier: string,
+	): Promise<MessageComposerInspection> {
+		const destination = new URL(url);
+		if (
+			destination.origin !== "https://www.linkedin.com" ||
+			destination.pathname !== "/messaging/compose/" ||
+			destination.searchParams.get("recipient") !==
+				expectedRecipientIdentifier ||
+			destination.searchParams.get("profileUrn") !==
+				`urn:li:fsd_profile:${expectedRecipientIdentifier}`
+		)
+			throw new Error("INVALID_COMPOSER_PROBE_TARGET");
+		const page = await pageForPort(this.port);
+		try {
+			const before = await page.observe();
+			if (before.challenge || !before.authenticated)
+				throw new Error(before.challenge ?? "LINKEDIN_LOGIN_REQUIRED");
+			await page.navigate(destination.href);
+			return await waitForMessageComposer(
+				page,
+				expectedRecipientIdentifier,
+				null,
+			);
+		} finally {
+			await page.close();
+		}
+	}
 
 	async health(): Promise<LinkedInBrowserHealth> {
 		let page: CdpPage;
@@ -1244,6 +1271,11 @@ export class CdpLinkedInBrowserAdapter implements LinkedInBrowserAdapter {
 				return {
 					status: "FAILED",
 					errorCode: "MESSAGE_EDITOR_UNAVAILABLE",
+					browserProof: {
+						phase: "pre-send-composer-availability",
+						composer,
+						expectedRecipientIdentifier: messageControl.recipientIdentifier,
+					},
 					observedAt: new Date(),
 				};
 			if (
@@ -1288,8 +1320,12 @@ export class CdpLinkedInBrowserAdapter implements LinkedInBrowserAdapter {
 				};
 			if (!filled)
 				return {
-					status: "FAILED",
+					status: "AMBIGUOUS",
 					errorCode: "MESSAGE_EDITOR_UNAVAILABLE",
+					browserProof: {
+						phase: "post-resolution-editor-or-send-control",
+						recipientIdentifier: composer.recipientIdentifier,
+					},
 					observedAt: new Date(),
 				};
 			await new Promise((resolve) => setTimeout(resolve, 700));

@@ -1,5 +1,6 @@
 export type LinkedInMessageComposerElement = {
 	index: number;
+	nodeIdentity?: number;
 	tagName: string;
 	role: string | null;
 	ariaLabel: string | null;
@@ -32,6 +33,7 @@ export type LinkedInMessageComposerSnapshot = {
 
 export type LinkedInMessageComposerResolution =
 	| { status: "NONE" }
+	| { status: "LOADING" }
 	| { status: "AMBIGUOUS" }
 	| {
 			status: "FOUND";
@@ -41,6 +43,7 @@ export type LinkedInMessageComposerResolution =
 			recipientIdentifier: string | null;
 			externalConversationKey: string | null;
 			externalMessageKey: string | null;
+			editorIdentity?: number;
 	  };
 
 export function linkedInMessageComposerControlReady(
@@ -125,6 +128,7 @@ export function resolveLinkedInMessageComposer(
 	if (candidates.length === 0) return { status: "NONE" };
 	if (candidates.length !== 1) return { status: "AMBIGUOUS" };
 	const surface = candidates[0];
+	if (surface?.recipientCount === 0) return { status: "LOADING" };
 	if (surface?.recipientCount !== 1) return { status: "AMBIGUOUS" };
 	const editors = surface.editors.filter(
 		(editor) =>
@@ -138,8 +142,10 @@ export function resolveLinkedInMessageComposer(
 	const sendControls = surface.sendControls.filter(
 		(control) => control.visible && control.connected,
 	);
-	if (editors.length !== 1 || sendControls.length !== 1)
+	if (editors.length > 1 || sendControls.length > 1)
 		return { status: "AMBIGUOUS" };
+	if (editors.length === 0 || sendControls.length === 0)
+		return { status: "LOADING" };
 	return {
 		status: "FOUND",
 		surfaceIndex: surface.index,
@@ -148,5 +154,53 @@ export function resolveLinkedInMessageComposer(
 		recipientIdentifier: surface.recipientIdentifier,
 		externalConversationKey: surface.externalConversationKey,
 		externalMessageKey: surface.externalMessageKey,
+		...(editors[0]?.nodeIdentity === undefined
+			? {}
+			: { editorIdentity: editors[0].nodeIdentity }),
+	};
+}
+
+export async function waitForStableLinkedInMessageComposer(
+	inspect: () => Promise<LinkedInMessageComposerResolution>,
+	options: {
+		timeoutMs?: number;
+		intervalMs?: number;
+		now?: () => number;
+		wait?: (milliseconds: number) => Promise<void>;
+	} = {},
+): Promise<
+	LinkedInMessageComposerResolution & {
+		observations: number;
+		elapsedMs: number;
+	}
+> {
+	const now = options.now ?? Date.now;
+	const wait =
+		options.wait ??
+		((milliseconds) =>
+			new Promise((resolve) => setTimeout(resolve, milliseconds)));
+	const startedAt = now();
+	let observations = 0;
+	let stable: Extract<
+		LinkedInMessageComposerResolution,
+		{ status: "FOUND" }
+	> | null = null;
+	let last: LinkedInMessageComposerResolution = { status: "NONE" };
+	while (now() - startedAt < (options.timeoutMs ?? 15000)) {
+		last = await inspect();
+		observations += 1;
+		if (last.status === "AMBIGUOUS")
+			return { ...last, observations, elapsedMs: now() - startedAt };
+		if (last.status === "FOUND") {
+			if (stable && JSON.stringify(stable) === JSON.stringify(last))
+				return { ...last, observations, elapsedMs: now() - startedAt };
+			stable = last;
+		} else stable = null;
+		await wait(options.intervalMs ?? 250);
+	}
+	return {
+		status: last.status === "FOUND" ? "LOADING" : last.status,
+		observations,
+		elapsedMs: now() - startedAt,
 	};
 }

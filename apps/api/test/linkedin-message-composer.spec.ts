@@ -7,6 +7,7 @@ import {
 	linkedInMessageControlConversationKey,
 	linkedInMessageControlRecipientIdentifier,
 	resolveLinkedInMessageComposer,
+	waitForStableLinkedInMessageComposer,
 } from "../src/linkedin/message-composer-resolver";
 
 const recipient = "ACoAAGijsVerified";
@@ -66,6 +67,155 @@ function snapshot(
 }
 
 describe("LinkedIn message composer resolver", () => {
+	it("waits beyond the old three-second window for editor hydration", async () => {
+		let time = 0;
+		const result = await waitForStableLinkedInMessageComposer(
+			async () =>
+				time < 5000
+					? { status: "NONE" }
+					: resolveLinkedInMessageComposer(snapshot(), {
+							expectedRecipientIdentifier: recipient,
+						}),
+			{
+				now: () => time,
+				wait: async (milliseconds) => {
+					time += milliseconds;
+				},
+			},
+		);
+		expect(result.status).toBe("FOUND");
+		expect(result.elapsedMs).toBe(5250);
+	});
+
+	it("treats a target editor that is still loading as unavailable without approving it", () => {
+		for (const editors of [
+			[],
+			[{ ...editor(), disabled: true }],
+			[editor(0, false)],
+		]) {
+			expect(
+				resolveLinkedInMessageComposer(snapshot({ editors }), {
+					expectedRecipientIdentifier: recipient,
+				}),
+			).toEqual({ status: "LOADING" });
+		}
+	});
+
+	it("waits for the disabled editor to become usable", async () => {
+		let time = 0;
+		const result = await waitForStableLinkedInMessageComposer(
+			async () =>
+				resolveLinkedInMessageComposer(
+					snapshot({ editors: [{ ...editor(), disabled: time < 2000 }] }),
+					{ expectedRecipientIdentifier: recipient },
+				),
+			{
+				now: () => time,
+				wait: async (milliseconds) => {
+					time += milliseconds;
+				},
+			},
+		);
+		expect(result.status).toBe("FOUND");
+		expect(result.elapsedMs).toBe(2250);
+	});
+
+	it("never accepts a single ready observation at the deadline", async () => {
+		let time = 0;
+		const result = await waitForStableLinkedInMessageComposer(
+			async () =>
+				time === 750
+					? resolveLinkedInMessageComposer(snapshot(), {
+							expectedRecipientIdentifier: recipient,
+						})
+					: { status: "NONE" },
+			{
+				timeoutMs: 1000,
+				now: () => time,
+				wait: async (milliseconds) => {
+					time += milliseconds;
+				},
+			},
+		);
+		expect(result.status).toBe("LOADING");
+	});
+
+	it("resets stability when the editor re-renders", async () => {
+		let time = 0;
+		const result = await waitForStableLinkedInMessageComposer(
+			async () =>
+				resolveLinkedInMessageComposer(
+					snapshot({ editors: [editor(time === 0 ? 0 : 1)] }),
+					{ expectedRecipientIdentifier: recipient },
+				),
+			{
+				now: () => time,
+				wait: async (milliseconds) => {
+					time += milliseconds;
+				},
+			},
+		);
+		expect(result.status).toBe("FOUND");
+		expect(result.elapsedMs).toBe(500);
+	});
+
+	it("detects replacement of an editor even when its UI index is unchanged", async () => {
+		let time = 0;
+		const result = await waitForStableLinkedInMessageComposer(
+			async () =>
+				resolveLinkedInMessageComposer(
+					snapshot({
+						editors: [{ ...editor(), nodeIdentity: time === 0 ? 1 : 2 }],
+					}),
+					{ expectedRecipientIdentifier: recipient },
+				),
+			{
+				now: () => time,
+				wait: async (milliseconds) => {
+					time += milliseconds;
+				},
+			},
+		);
+		expect(result.status).toBe("FOUND");
+		expect(result.elapsedMs).toBe(500);
+	});
+
+	it("times out without accepting an unavailable or wrong recipient", async () => {
+		for (const value of [
+			snapshot({ editors: [] }),
+			snapshot({ recipientIdentifier: otherRecipient }),
+		]) {
+			let time = 0;
+			const result = await waitForStableLinkedInMessageComposer(
+				async () =>
+					resolveLinkedInMessageComposer(value, {
+						expectedRecipientIdentifier: recipient,
+					}),
+				{
+					timeoutMs: 1000,
+					now: () => time,
+					wait: async (milliseconds) => {
+						time += milliseconds;
+					},
+				},
+			);
+			expect(result.status).not.toBe("FOUND");
+		}
+	});
+
+	it("fails closed immediately on multiple target surfaces", async () => {
+		const value = snapshot();
+		const surface = value.surfaces[0];
+		if (!surface) throw new Error("Missing fixture surface");
+		value.surfaces.push({ ...surface, index: 1 });
+		const result = await waitForStableLinkedInMessageComposer(async () =>
+			resolveLinkedInMessageComposer(value, {
+				expectedRecipientIdentifier: recipient,
+			}),
+		);
+		expect(result.status).toBe("AMBIGUOUS");
+		expect(result.observations).toBe(1);
+	});
 	it("resolves the current profile-triggered compose surface", () => {
 		expect(
 			resolveLinkedInMessageComposer(snapshot(), {
@@ -271,7 +421,7 @@ describe("LinkedIn message composer resolver", () => {
 			}),
 			{ expectedRecipientIdentifier: recipient },
 		);
-		expect(result.status).toBe("AMBIGUOUS");
+		expect(result.status).toBe("LOADING");
 	});
 
 	it("supports a delayed mount without broadening the target", () => {
