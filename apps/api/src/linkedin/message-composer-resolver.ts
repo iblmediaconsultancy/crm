@@ -17,6 +17,7 @@ export type LinkedInMessageComposerSurface = {
 	kind: "THREAD" | "COMPOSE_OVERLAY" | "PROFILE_COMPOSE" | "DIALOG";
 	recipientIdentifier: string | null;
 	externalConversationKey: string | null;
+	externalMessageKey: string | null;
 	recipientCount: number;
 	visible: boolean;
 	connected: boolean;
@@ -39,6 +40,7 @@ export type LinkedInMessageComposerResolution =
 			sendControlIndex: number;
 			recipientIdentifier: string | null;
 			externalConversationKey: string | null;
+			externalMessageKey: string | null;
 	  };
 
 export function linkedInMessageComposerControlReady(
@@ -145,5 +147,6 @@ export function resolveLinkedInMessageComposer(
 		sendControlIndex: sendControls[0]?.index ?? -1,
 		recipientIdentifier: surface.recipientIdentifier,
 		externalConversationKey: surface.externalConversationKey,
+		externalMessageKey: surface.externalMessageKey,
 	};
 }
