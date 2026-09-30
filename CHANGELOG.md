@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.5](https://github.com/iblmediaconsultancy/crm/compare/v1.5.4...v1.5.5) (2026-09-30)
+
+
+### Fixes
+
+* **api:** scope LinkedIn history to resolved composer ([dca90ac](https://github.com/iblmediaconsultancy/crm/commit/dca90ac0a58c90e4b71859ede7f3e4fb353cc373))
+
 ## [1.5.4](https://github.com/iblmediaconsultancy/crm/compare/v1.5.3...v1.5.4) (2026-09-28)
 
 
