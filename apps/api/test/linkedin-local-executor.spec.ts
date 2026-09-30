@@ -418,6 +418,48 @@ describe("local LinkedIn executor", () => {
 		expect(deterministic.records[0]?.status).toBe("FAILED");
 	});
 
+	it("persists pre-typing composer diagnostics without recording a send", async () => {
+		const state = fakeCore({ message: messagePrepared() });
+		const proof = {
+			phase: "pre-send-composer-availability",
+			composer: { status: "LOADING", observations: 60 },
+		};
+		const browser = fakeBrowser({
+			status: "FAILED",
+			errorCode: "MESSAGE_EDITOR_UNAVAILABLE",
+			browserProof: proof,
+			observedAt: new Date(),
+		});
+		await new LocalLinkedInExecutor(
+			state.core,
+			browser.browser,
+			"worker-1",
+		).runOnce();
+		expect(state.records).toHaveLength(1);
+		expect(state.records[0]).toMatchObject({
+			status: "FAILED",
+			browserProof: proof,
+			details: { browserProof: proof },
+		});
+	});
+
+	it("retains review state when the editor or send control changes after typing may have begun", async () => {
+		const state = fakeCore({ message: messagePrepared() });
+		const browser = fakeBrowser({
+			status: "AMBIGUOUS",
+			errorCode: "MESSAGE_EDITOR_UNAVAILABLE",
+			browserProof: { phase: "post-resolution-editor-or-send-control" },
+			observedAt: new Date(),
+		});
+		const result = await new LocalLinkedInExecutor(
+			state.core,
+			browser.browser,
+			"worker-1",
+		).runOnce();
+		expect(result.status).toBe("NEEDS_IHSAN");
+		expect(state.records[0]?.status).toBe("AMBIGUOUS");
+	});
+
 	it("stops on CAPTCHA, security challenges, and ambiguous post-click results", async () => {
 		for (const errorCode of [
 			"CAPTCHA",

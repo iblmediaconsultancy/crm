@@ -61,6 +61,7 @@ export type LinkedInBrowserOutcome =
 				| "SEND_STATE_UNCLEAR"
 				| "IDENTITY_UNCLEAR"
 				| "BROWSER_STATE_AMBIGUOUS"
+				| "MESSAGE_EDITOR_UNAVAILABLE"
 				| "WRONG_CONVERSATION";
 			browserProof?: Record<string, unknown>;
 			observedIdentity?: LinkedInBrowserIdentityEvidence;
@@ -69,6 +70,7 @@ export type LinkedInBrowserOutcome =
 	| {
 			status: "FAILED";
 			errorCode: string;
+			browserProof?: Record<string, unknown>;
 			observedAt: Date;
 	  };
 

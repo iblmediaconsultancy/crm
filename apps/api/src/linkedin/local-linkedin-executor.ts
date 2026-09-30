@@ -387,6 +387,10 @@ export class LocalLinkedInExecutor {
 				attemptNumber: attempt.attemptNumber,
 				status: "FAILED",
 				errorCode: outcome.errorCode,
+				browserProof: outcome.browserProof as JsonValue | undefined,
+				details: outcome.browserProof
+					? ({ browserProof: outcome.browserProof } as JsonValue)
+					: undefined,
 			});
 			return {
 				status: "NEEDS_IHSAN",
@@ -401,6 +405,10 @@ export class LocalLinkedInExecutor {
 			attemptNumber: attempt.attemptNumber,
 			status: "FAILED",
 			errorCode: outcome.errorCode,
+			browserProof: outcome.browserProof as JsonValue | undefined,
+			details: outcome.browserProof
+				? ({ browserProof: outcome.browserProof } as JsonValue)
+				: undefined,
 		});
 		return {
 			status: "FAILED",
