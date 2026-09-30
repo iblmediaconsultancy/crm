@@ -290,20 +290,51 @@ export function detectLinkedInRelationshipState(input: {
 	return { relationshipState: "AMBIGUOUS", pendingInvitationState: "UNKNOWN" };
 }
 
-function collectLinkedInRelationshipControls(includeElements = false) {
+export function resolveLinkedInProfileDisplayName(
+	headings: Array<{ text: string; visible: boolean; excluded: boolean }>,
+): string | null {
+	return (
+		headings.find(
+			(heading) =>
+				heading.visible &&
+				!heading.excluded &&
+				Boolean(heading.text.trim()) &&
+				!/^\d+\s+notifications?(?:\s+total)?$/i.test(
+					heading.text.trim().replace(/\s+/g, " "),
+				),
+		)?.text ?? null
+	);
+}
+
+function collectLinkedInRelationshipControls(
+	includeElements = false,
+	resolveDisplayName: typeof resolveLinkedInProfileDisplayName,
+) {
 	const body = document.body?.innerText || "";
 	const href = location.href;
 	const title = document.title || "";
 	const profileMatch = href.match(
 		/https?:\/\/(?:www\.)?linkedin\.com\/in\/([^/?#]+)/i,
 	);
-	const displayName =
-		Array.from(document.querySelectorAll("h1, h2"))
-			.filter(
-				(element) => !element.closest("[data-testid=toasts-title], dialog"),
-			)
-			.map((element) => (element.textContent || "").trim())
-			.find(Boolean) || null;
+	const displayName = resolveDisplayName(
+		Array.from(document.querySelectorAll("h1, h2")).map((element) => {
+			const rect = element.getBoundingClientRect();
+			const style = getComputedStyle(element);
+			return {
+				text: (element.textContent || "").trim().replace(/\s+/g, " "),
+				visible: Boolean(
+					rect.width > 0 &&
+						rect.height > 0 &&
+						style.display !== "none" &&
+						style.visibility !== "hidden" &&
+						style.opacity !== "0",
+				),
+				excluded: Boolean(
+					element.closest("[data-testid=toasts-title], dialog"),
+				),
+			};
+		}),
+	);
 	const profileSection = Array.from(document.querySelectorAll("section")).find(
 		(element) => displayName && (element.innerText || "").includes(displayName),
 	);
@@ -657,10 +688,11 @@ class CdpPage {
 
 	async observe(): Promise<PageObservation> {
 		const collect = collectLinkedInRelationshipControls.toString();
+		const resolveDisplayName = resolveLinkedInProfileDisplayName.toString();
 		const resolveCompose =
 			resolveLinkedInComposeConversationEvidence.toString();
 		const observation = await this.evaluate<PageObservation>(
-			`(() => { const resolveLinkedInComposeConversationEvidence = ${resolveCompose}; const collectControls = ${collect}; return collectControls(); })()`,
+			`(() => { const resolveLinkedInComposeConversationEvidence = ${resolveCompose}; const resolveProfileDisplayName = ${resolveDisplayName}; const collectControls = ${collect}; return collectControls(false, resolveProfileDisplayName); })()`,
 		);
 		return {
 			...observation,
@@ -681,6 +713,7 @@ class CdpPage {
 		externalConversationKey: string | null;
 	}> {
 		const collect = collectLinkedInRelationshipControls.toString();
+		const resolveDisplayName = resolveLinkedInProfileDisplayName.toString();
 		const resolveCompose =
 			resolveLinkedInComposeConversationEvidence.toString();
 		const resolve = resolveLinkedInRelationshipControl.toString();
@@ -690,6 +723,7 @@ class CdpPage {
 			externalConversationKey: string | null;
 		}>(`(() => {
 			const resolveLinkedInComposeConversationEvidence = ${resolveCompose};
+			const resolveProfileDisplayName = ${resolveDisplayName};
 			const collectControls = ${collect};
 			const resolveControl = ${resolve};
 			const recipientFromHref = (href) => {
@@ -710,7 +744,7 @@ class CdpPage {
 					return url.pathname.match(/^\\/messaging\\/thread\\/([^/?#]+)\\/?$/i)?.[1] || null;
 				} catch { return null; }
 			};
-			const snapshot = collectControls(true);
+			const snapshot = collectControls(true, resolveProfileDisplayName);
 			const resolution = resolveControl({
 				action: ${JSON.stringify(action)},
 				profileIdentifier: ${JSON.stringify(observation.profileIdentifier)},
@@ -733,6 +767,7 @@ class CdpPage {
 		observation: PageObservation,
 	): Promise<{ clicked: boolean; inviteHref: string | null }> {
 		const collect = collectLinkedInRelationshipControls.toString();
+		const resolveDisplayName = resolveLinkedInProfileDisplayName.toString();
 		const resolveCompose =
 			resolveLinkedInComposeConversationEvidence.toString();
 		const resolve = resolveLinkedInRelationshipControl.toString();
@@ -741,9 +776,10 @@ class CdpPage {
 			inviteHref: string | null;
 		}>(`(() => {
 			const resolveLinkedInComposeConversationEvidence = ${resolveCompose};
+			const resolveProfileDisplayName = ${resolveDisplayName};
 			const collectControls = ${collect};
 			const resolveControl = ${resolve};
-			const snapshot = collectControls(true);
+			const snapshot = collectControls(true, resolveProfileDisplayName);
 			const resolution = resolveControl({
 				action: "CONNECT",
 				profileIdentifier: ${JSON.stringify(observation.profileIdentifier)},
