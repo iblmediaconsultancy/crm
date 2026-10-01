@@ -57,6 +57,24 @@ describe("LinkedIn relationship control detection", () => {
 		).toBeNull();
 	});
 
+	it("ignores LinkedIn's premium recommendation heading beside the profile name", () => {
+		expect(
+			resolveLinkedInProfileDisplayName([
+				{ text: "0 notifications", visible: true, excluded: false },
+				{ text: "Ster Hassan", visible: true, excluded: false },
+				{ text: "Explore Premium profiles", visible: true, excluded: false },
+			]),
+		).toBe("Ster Hassan");
+	});
+
+	it("does not treat the premium recommendation heading as a profile identity", () => {
+		expect(
+			resolveLinkedInProfileDisplayName([
+				{ text: "Explore Premium profiles", visible: true, excluded: false },
+			]),
+		).toBeNull();
+	});
+
 	it("fails closed when multiple visible headings could identify the profile", () => {
 		expect(
 			resolveLinkedInProfileDisplayName([
