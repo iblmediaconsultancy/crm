@@ -287,6 +287,21 @@ describe("LinkedIn message composer resolver", () => {
 		).toBe("AMBIGUOUS");
 	});
 
+	it("matches percent-encoded thread keys to their canonical key", () => {
+		const result = resolveLinkedInMessageComposer(
+			snapshot({
+				kind: "THREAD",
+				recipientIdentifier: recipient,
+				externalConversationKey: "thread-42==",
+			}),
+			{
+				expectedRecipientIdentifier: recipient,
+				expectedExternalConversationKey: "thread-42%3D%3D",
+			},
+		);
+		expect(result.status).toBe("FOUND");
+	});
+
 	it("navigates existing-conversation replies to the stored thread", () => {
 		expect(
 			linkedinMessageExecutionUrl(

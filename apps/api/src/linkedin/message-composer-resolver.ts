@@ -142,7 +142,11 @@ export function resolveLinkedInMessageComposer(
 			const match = url.pathname.match(/^\/messaging\/thread\/([^/?#]+)\/?$/i);
 			if (match?.[1]) return decodeURIComponent(match[1]);
 		} catch {}
-		return trimmed;
+		try {
+			return decodeURIComponent(trimmed);
+		} catch {
+			return trimmed;
+		}
 	};
 	const expectedRecipient = input.expectedRecipientIdentifier?.trim() || null;
 	const expectedConversation = normalizeKey(
