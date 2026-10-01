@@ -57,6 +57,15 @@ describe("LinkedIn relationship control detection", () => {
 		).toBeNull();
 	});
 
+	it("fails closed when multiple visible headings could identify the profile", () => {
+		expect(
+			resolveLinkedInProfileDisplayName([
+				{ text: "Yasin Özpinar", visible: true, excluded: false },
+				{ text: "Alex Veremeev", visible: true, excluded: false },
+			]),
+		).toBeNull();
+	});
+
 	it("detects Gijs's Dutch ordinary-anchor Connect control", () => {
 		expect(
 			detectLinkedInRelationshipState({

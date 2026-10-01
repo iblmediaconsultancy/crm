@@ -7,6 +7,7 @@ import {
 	linkedInMessageControlConversationKey,
 	linkedInMessageControlRecipientIdentifier,
 	resolveLinkedInMessageComposer,
+	summarizeLinkedInMessageComposerSnapshot,
 	waitForStableLinkedInMessageComposer,
 } from "../src/linkedin/message-composer-resolver";
 
@@ -267,6 +268,44 @@ describe("LinkedIn message composer resolver", () => {
 		).toBe("NONE");
 	});
 
+	it("waits when the exact recipient surface has not hydrated the expected thread key", () => {
+		expect(
+			resolveLinkedInMessageComposer(snapshot(), {
+				expectedRecipientIdentifier: recipient,
+				expectedExternalConversationKey: "thread-42",
+			}),
+		).toEqual({ status: "LOADING" });
+	});
+
+	it("rejects an exact-recipient surface showing a conflicting thread key", () => {
+		expect(
+			resolveLinkedInMessageComposer(
+				snapshot({ externalConversationKey: "thread-other" }),
+				{
+					expectedRecipientIdentifier: recipient,
+					expectedExternalConversationKey: "thread-42",
+				},
+			),
+		).toEqual({ status: "AMBIGUOUS" });
+	});
+
+	it("summarizes composer proof without including draft text", () => {
+		const diagnostics = summarizeLinkedInMessageComposerSnapshot(
+			snapshot({ editors: [{ ...editor(), text: "private draft text" }] }),
+		);
+		expect(diagnostics).toMatchObject({
+			candidateSurfaceCount: 1,
+			surfaces: [
+				{
+					kind: "PROFILE_COMPOSE",
+					recipientIdentifier: recipient,
+					recipientCount: 1,
+				},
+			],
+		});
+		expect(JSON.stringify(diagnostics)).not.toContain("private draft text");
+	});
+
 	it("resolves a compose overlay with exact recipient evidence", () => {
 		const result = resolveLinkedInMessageComposer(
 			snapshot({ kind: "COMPOSE_OVERLAY" }),
@@ -284,8 +323,12 @@ describe("LinkedIn message composer resolver", () => {
 			externalConversationKey: "stale-thread",
 			externalMessageKey: "stale-message",
 		});
+		const targetSurface = target.surfaces[0];
+		const staleThreadSurface = staleThread.surfaces[0];
+		if (!targetSurface || !staleThreadSurface)
+			throw new Error("COMPOSER_SURFACE_MISSING");
 		const result = resolveLinkedInMessageComposer(
-			{ ...target, surfaces: [target.surfaces[0]!, staleThread.surfaces[0]!] },
+			{ ...target, surfaces: [targetSurface, staleThreadSurface] },
 			{ expectedRecipientIdentifier: recipient },
 		);
 		expect(result).toMatchObject({

@@ -5,6 +5,7 @@ import {
 	type LinkedInBrowserIdentityEvidence,
 	type LinkedInBrowserOutcome,
 	type LinkedInRelationshipState,
+	linkedInConversationIdentityMatches,
 	resolveLinkedInComposeConversationEvidence,
 	verifyLinkedInActionState,
 } from "@crm/db/linkedin-browser-adapter";
@@ -19,6 +20,7 @@ import {
 	type LinkedInMessageComposerSurface,
 	linkedInMessageComposerControlReady,
 	resolveLinkedInMessageComposer,
+	summarizeLinkedInMessageComposerSnapshot,
 	waitForStableLinkedInMessageComposer,
 } from "./message-composer-resolver";
 import {
@@ -81,6 +83,11 @@ type PageObservation = LinkedInBrowserIdentityEvidence & {
 	challenge: string | null;
 	authenticated: boolean;
 	externalMessageKey: string | null;
+	profileHeadingCandidates: Array<{
+		text: string;
+		visible: boolean;
+		excluded: boolean;
+	}>;
 	controls: LinkedInRelationshipControl[];
 };
 
@@ -293,17 +300,23 @@ export function detectLinkedInRelationshipState(input: {
 export function resolveLinkedInProfileDisplayName(
 	headings: Array<{ text: string; visible: boolean; excluded: boolean }>,
 ): string | null {
-	return (
-		headings.find(
-			(heading) =>
+	const candidates = headings
+		.filter((heading) => {
+			const text = heading.text.trim().replace(/\s+/g, " ");
+			return (
 				heading.visible &&
 				!heading.excluded &&
-				Boolean(heading.text.trim()) &&
-				!/^\d+\s+notifications?(?:\s+total)?$/i.test(
-					heading.text.trim().replace(/\s+/g, " "),
-				),
-		)?.text ?? null
+				Boolean(text) &&
+				!/^\d+\s+notifications?(?:\s+total)?$/i.test(text)
+			);
+		})
+		.map((heading) => heading.text.trim().replace(/\s+/g, " "));
+	const distinctCandidates = new Map(
+		candidates.map((candidate) => [candidate.toLocaleLowerCase(), candidate]),
 	);
+	return distinctCandidates.size === 1
+		? ([...distinctCandidates.values()][0] ?? null)
+		: null;
 }
 
 function collectLinkedInRelationshipControls(
@@ -316,12 +329,18 @@ function collectLinkedInRelationshipControls(
 	const profileMatch = href.match(
 		/https?:\/\/(?:www\.)?linkedin\.com\/in\/([^/?#]+)/i,
 	);
-	const displayName = resolveDisplayName(
-		Array.from(document.querySelectorAll("h1, h2")).map((element) => {
+	const profileHeadingCandidates = Array.from(
+		document.querySelectorAll("h1, h2"),
+	)
+		.slice(0, 20)
+		.map((element) => {
 			const rect = element.getBoundingClientRect();
 			const style = getComputedStyle(element);
 			return {
-				text: (element.textContent || "").trim().replace(/\s+/g, " "),
+				text: (element.textContent || "")
+					.trim()
+					.replace(/\s+/g, " ")
+					.slice(0, 160),
 				visible: Boolean(
 					rect.width > 0 &&
 						rect.height > 0 &&
@@ -333,8 +352,8 @@ function collectLinkedInRelationshipControls(
 					element.closest("[data-testid=toasts-title], dialog"),
 				),
 			};
-		}),
-	);
+		});
+	const displayName = resolveDisplayName(profileHeadingCandidates);
 	const profileSection = Array.from(document.querySelectorAll("section")).find(
 		(element) => displayName && (element.innerText || "").includes(displayName),
 	);
@@ -475,6 +494,7 @@ function collectLinkedInRelationshipControls(
 		challenge,
 		authenticated,
 		externalMessageKey: messageKey,
+		profileHeadingCandidates,
 		controls,
 		elements: includeElements ? elements : undefined,
 	};
@@ -881,6 +901,16 @@ class CdpPage {
 		})()`);
 	}
 
+	async inspectMessageComposerDiagnostics() {
+		const collect = collectLinkedInMessageComposerSnapshot.toString();
+		const summarize = summarizeLinkedInMessageComposerSnapshot.toString();
+		return this.evaluate(`(() => {
+			const collectSnapshot = ${collect};
+			const summarizeSnapshot = ${summarize};
+			return summarizeSnapshot(collectSnapshot());
+		})()`);
+	}
+
 	async fillAndSend(
 		body: string,
 		expectedRecipientIdentifier: string | null = null,
@@ -1055,6 +1085,13 @@ function proofFor(
 		externalConversationKey: observation.externalConversationKey,
 		conversationParticipantIdentifier:
 			observation.conversationParticipantIdentifier,
+		profileHeadingCandidateCount: observation.profileHeadingCandidates.length,
+		hiddenProfileHeadingCount: observation.profileHeadingCandidates.filter(
+			(heading) => !heading.visible,
+		).length,
+		profileHeadingCandidates: observation.profileHeadingCandidates
+			.filter((heading) => heading.visible)
+			.slice(0, 12),
 		pageUrl: observation.href,
 		action: action.action,
 	};
@@ -1170,6 +1207,22 @@ export class CdpLinkedInBrowserAdapter implements LinkedInBrowserAdapter {
 				return {
 					status: "FAILED",
 					errorCode: preflight.reason,
+					browserProof: {
+						phase: "profile-preflight",
+						reason: preflight.reason,
+						expected: {
+							contactId: action.target.contactId,
+							routeId: action.target.routeId,
+							profileUrl: action.target.profileUrl,
+							profileIdentifier: action.target.profileIdentifier,
+							stableMemberIdentifier:
+								action.target.stableMemberIdentifier ?? null,
+							displayName: action.target.displayName ?? null,
+							externalConversationKey:
+								action.target.externalConversationKey ?? null,
+						},
+						observed: proofFor(action, before),
+					},
 					observedAt: new Date(),
 				};
 			if (action.action === "CONNECTION_REQUEST") {
@@ -1280,14 +1333,53 @@ export class CdpLinkedInBrowserAdapter implements LinkedInBrowserAdapter {
 				return {
 					status: "FAILED",
 					errorCode: "MESSAGE_BUTTON_UNAVAILABLE",
+					browserProof: {
+						phase: "profile-message-control",
+						expected: {
+							contactId: action.target.contactId,
+							routeId: action.target.routeId,
+							profileUrl: action.target.profileUrl,
+							profileIdentifier: action.target.profileIdentifier,
+							externalConversationKey:
+								action.target.externalConversationKey ?? null,
+						},
+						observed: proofFor(action, before),
+					},
 					observedAt: new Date(),
 				};
+			if (
+				action.target.externalConversationKey &&
+				messageControl.externalConversationKey &&
+				!linkedInConversationIdentityMatches(action.target, {
+					externalConversationKey: messageControl.externalConversationKey,
+					conversationParticipantIdentifier: messageControl.recipientIdentifier,
+				})
+			)
+				return {
+					status: "AMBIGUOUS",
+					errorCode: "WRONG_CONVERSATION",
+					browserProof: {
+						phase: "profile-message-control-conversation-mismatch",
+						expectedContactId: action.target.contactId,
+						expectedRouteId: action.target.routeId,
+						expectedProfileUrl: action.target.profileUrl,
+						expectedExternalConversationKey:
+							action.target.externalConversationKey,
+						observedControlHrefConversationKey:
+							messageControl.externalConversationKey,
+						observedRecipientIdentifier: messageControl.recipientIdentifier,
+						page: proofFor(action, before),
+					},
+					observedAt: new Date(),
+				};
+			const expectedExternalConversationKey =
+				action.target.externalConversationKey ??
+				messageControl.externalConversationKey ??
+				null;
 			const composer = await waitForMessageComposer(
 				page,
 				messageControl.recipientIdentifier,
-				messageControl.externalConversationKey ??
-					action.target.externalConversationKey ??
-					null,
+				expectedExternalConversationKey,
 			);
 			if (composer.status === "AMBIGUOUS")
 				return {
@@ -1295,11 +1387,14 @@ export class CdpLinkedInBrowserAdapter implements LinkedInBrowserAdapter {
 					errorCode: "WRONG_CONVERSATION",
 					browserProof: {
 						phase: "composer-resolution",
+						contactId: action.target.contactId,
+						routeId: action.target.routeId,
 						expectedRecipientIdentifier: messageControl.recipientIdentifier,
-						expectedExternalConversationKey:
-							messageControl.externalConversationKey ??
-							action.target.externalConversationKey ??
-							null,
+						expectedExternalConversationKey,
+						observedControlHrefConversationKey:
+							messageControl.externalConversationKey,
+						composerDiagnostics: await page.inspectMessageComposerDiagnostics(),
+						page: proofFor(action, before),
 					},
 					observedAt: new Date(),
 				};
@@ -1310,7 +1405,14 @@ export class CdpLinkedInBrowserAdapter implements LinkedInBrowserAdapter {
 					browserProof: {
 						phase: "pre-send-composer-availability",
 						composer,
+						contactId: action.target.contactId,
+						routeId: action.target.routeId,
 						expectedRecipientIdentifier: messageControl.recipientIdentifier,
+						expectedExternalConversationKey,
+						observedControlHrefConversationKey:
+							messageControl.externalConversationKey,
+						composerDiagnostics: await page.inspectMessageComposerDiagnostics(),
+						page: proofFor(action, before),
 					},
 					observedAt: new Date(),
 				};
@@ -1324,9 +1426,12 @@ export class CdpLinkedInBrowserAdapter implements LinkedInBrowserAdapter {
 					errorCode: "WRONG_CONVERSATION",
 					browserProof: {
 						phase: "target-surface-history",
+						contactId: action.target.contactId,
+						routeId: action.target.routeId,
 						externalMessageKey: composer.externalMessageKey,
 						externalConversationKey: composer.externalConversationKey,
 						recipientIdentifier: composer.recipientIdentifier,
+						composerDiagnostics: await page.inspectMessageComposerDiagnostics(),
 					},
 					observedAt: new Date(),
 				};
@@ -1335,9 +1440,7 @@ export class CdpLinkedInBrowserAdapter implements LinkedInBrowserAdapter {
 				? await page.fillAndSend(
 						action.body,
 						composer.recipientIdentifier,
-						composer.externalConversationKey ??
-							action.target.externalConversationKey ??
-							null,
+						composer.externalConversationKey ?? expectedExternalConversationKey,
 					)
 				: false;
 			if (filled === "AMBIGUOUS")
@@ -1349,8 +1452,8 @@ export class CdpLinkedInBrowserAdapter implements LinkedInBrowserAdapter {
 						expectedRecipientIdentifier: composer.recipientIdentifier,
 						expectedExternalConversationKey:
 							composer.externalConversationKey ??
-							action.target.externalConversationKey ??
-							null,
+							expectedExternalConversationKey,
+						composerDiagnostics: await page.inspectMessageComposerDiagnostics(),
 					},
 					observedAt: new Date(),
 				};
@@ -1361,6 +1464,7 @@ export class CdpLinkedInBrowserAdapter implements LinkedInBrowserAdapter {
 					browserProof: {
 						phase: "post-resolution-editor-or-send-control",
 						recipientIdentifier: composer.recipientIdentifier,
+						composerDiagnostics: await page.inspectMessageComposerDiagnostics(),
 					},
 					observedAt: new Date(),
 				};

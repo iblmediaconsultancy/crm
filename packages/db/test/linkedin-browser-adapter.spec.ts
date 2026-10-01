@@ -8,6 +8,7 @@ import {
 	linkedInProfileRecordsMatch,
 	resolveLinkedInComposeConversationEvidence,
 	verifyFreshLinkedInIdentity,
+	verifyLinkedInActionState,
 } from "../src/linkedin-browser-adapter";
 
 const baseObserved = {
@@ -380,6 +381,36 @@ describe("LinkedIn browser identity canonicalization", () => {
 				conversationParticipantIdentifier: null,
 			}),
 		).toBe(false);
+	});
+
+	it("defers stored conversation-key verification until the target composer resolves", () => {
+		const messageAction = {
+			jobId: "message-job",
+			action: "MESSAGE" as const,
+			browserSessionKey: "worker",
+			target: {
+				...target("https://www.linkedin.com/in/ada-lovelace/", "ada-lovelace"),
+				externalConversationKey: "2-stored-thread",
+			},
+		};
+		const profileObservation = {
+			...baseObserved,
+			relationshipState: "CONNECTED" as const,
+			externalConversationKey: null,
+			conversationParticipantIdentifier: null,
+		};
+
+		expect(
+			verifyLinkedInActionState(messageAction, profileObservation),
+		).toEqual({
+			allowed: true,
+		});
+		expect(
+			verifyFreshLinkedInIdentity(messageAction.target, profileObservation),
+		).toEqual({
+			allowed: false,
+			reason: "EXTERNAL_CONVERSATION_MISMATCH",
+		});
 	});
 
 	it("resolves an exact compose overlay recipient and embedded conversation key", () => {
