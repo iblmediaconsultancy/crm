@@ -1046,6 +1046,24 @@ async function pageForPort(port: number): Promise<CdpPage> {
 	return CdpPage.connect(target.webSocketDebuggerUrl);
 }
 
+export function linkedinMessageExecutionUrl(
+	profileUrl: string,
+	externalConversationKey: string | null | undefined,
+): string | null {
+	if (externalConversationKey === null || externalConversationKey === undefined)
+		return profileUrl;
+	const rawKey = externalConversationKey.trim();
+	if (!rawKey) return null;
+	let key: string;
+	try {
+		key = decodeURIComponent(rawKey);
+	} catch {
+		return null;
+	}
+	if (!/^[A-Za-z0-9._~:-]+={0,2}$/.test(key)) return null;
+	return `https://www.linkedin.com/messaging/thread/${key}/`;
+}
+
 async function waitForConnectionRequestModal(
 	page: CdpPage,
 	action: LinkedInConnectionRequestModalAction,
@@ -1326,74 +1344,131 @@ export class CdpLinkedInBrowserAdapter implements LinkedInBrowserAdapter {
 					observedAt: new Date(),
 				};
 			}
-			const messageControl = await page.clickRelationshipControl(
-				"MESSAGE",
-				before,
-			);
-			if (!messageControl.clicked)
-				return {
-					status: "FAILED",
-					errorCode: "MESSAGE_BUTTON_UNAVAILABLE",
-					browserProof: {
-						phase: "profile-message-control",
-						expected: {
+			let expectedRecipientIdentifier: string | null;
+			let expectedExternalConversationKey =
+				action.target.externalConversationKey ?? null;
+			let composer: MessageComposerInspection;
+			if (expectedExternalConversationKey) {
+				const threadUrl = linkedinMessageExecutionUrl(
+					action.target.profileUrl,
+					expectedExternalConversationKey,
+				);
+				expectedRecipientIdentifier =
+					action.target.stableMemberIdentifier?.trim() || null;
+				if (!threadUrl || !expectedRecipientIdentifier)
+					return {
+						status: "AMBIGUOUS",
+						errorCode: "WRONG_CONVERSATION",
+						browserProof: {
+							phase: "existing-thread-target-validation",
 							contactId: action.target.contactId,
 							routeId: action.target.routeId,
-							profileUrl: action.target.profileUrl,
-							profileIdentifier: action.target.profileIdentifier,
-							externalConversationKey:
-								action.target.externalConversationKey ?? null,
+							expectedProfileUrl: action.target.profileUrl,
+							expectedRecipientIdentifier,
+							expectedExternalConversationKey,
+							threadUrl,
+							page: proofFor(action, before),
 						},
-						observed: proofFor(action, before),
-					},
-					observedAt: new Date(),
-				};
-			if (
-				action.target.externalConversationKey &&
-				messageControl.externalConversationKey &&
-				!linkedInConversationIdentityMatches(action.target, {
-					externalConversationKey: messageControl.externalConversationKey,
-					conversationParticipantIdentifier: messageControl.recipientIdentifier,
-				})
-			)
-				return {
-					status: "AMBIGUOUS",
-					errorCode: "WRONG_CONVERSATION",
-					browserProof: {
-						phase: "profile-message-control-conversation-mismatch",
-						expectedContactId: action.target.contactId,
-						expectedRouteId: action.target.routeId,
-						expectedProfileUrl: action.target.profileUrl,
-						expectedExternalConversationKey:
-							action.target.externalConversationKey,
-						observedControlHrefConversationKey:
-							messageControl.externalConversationKey,
-						observedRecipientIdentifier: messageControl.recipientIdentifier,
-						page: proofFor(action, before),
-					},
-					observedAt: new Date(),
-				};
-			const expectedExternalConversationKey =
-				action.target.externalConversationKey ??
-				messageControl.externalConversationKey ??
-				null;
-			const composer = await waitForMessageComposer(
-				page,
-				messageControl.recipientIdentifier,
-				expectedExternalConversationKey,
-			);
+						observedAt: new Date(),
+					};
+				await page.navigate(threadUrl);
+				const threadState = await page.observe();
+				if (threadState.challenge)
+					return {
+						status: "AMBIGUOUS",
+						errorCode: threadState.challenge.includes("captcha")
+							? "CAPTCHA"
+							: "SECURITY_CHALLENGE",
+						browserProof: {
+							phase: "existing-thread-navigation-security-check",
+							threadUrl,
+							page: proofFor(action, threadState),
+						},
+						observedAt: new Date(),
+					};
+				if (!threadState.authenticated)
+					return {
+						status: "FAILED",
+						errorCode: "LINKEDIN_UNAUTHENTICATED",
+						browserProof: {
+							phase: "existing-thread-navigation-auth-check",
+							threadUrl,
+							page: proofFor(action, threadState),
+						},
+						observedAt: new Date(),
+					};
+				composer = await waitForMessageComposer(
+					page,
+					expectedRecipientIdentifier,
+					expectedExternalConversationKey,
+				);
+				if (
+					composer.status === "FOUND" &&
+					!linkedInConversationIdentityMatches(action.target, {
+						externalConversationKey: composer.externalConversationKey,
+						conversationParticipantIdentifier: composer.recipientIdentifier,
+					})
+				)
+					return {
+						status: "AMBIGUOUS",
+						errorCode: "WRONG_CONVERSATION",
+						browserProof: {
+							phase: "existing-thread-identity-mismatch",
+							contactId: action.target.contactId,
+							routeId: action.target.routeId,
+							expectedRecipientIdentifier,
+							expectedExternalConversationKey,
+							resolvedRecipientIdentifier: composer.recipientIdentifier,
+							resolvedExternalConversationKey: composer.externalConversationKey,
+							threadUrl,
+							composerDiagnostics:
+								await page.inspectMessageComposerDiagnostics(),
+						},
+						observedAt: new Date(),
+					};
+			} else {
+				const messageControl = await page.clickRelationshipControl(
+					"MESSAGE",
+					before,
+				);
+				if (!messageControl.clicked)
+					return {
+						status: "FAILED",
+						errorCode: "MESSAGE_BUTTON_UNAVAILABLE",
+						browserProof: {
+							phase: "profile-message-control",
+							expected: {
+								contactId: action.target.contactId,
+								routeId: action.target.routeId,
+								profileUrl: action.target.profileUrl,
+								profileIdentifier: action.target.profileIdentifier,
+								externalConversationKey: null,
+							},
+							observed: proofFor(action, before),
+						},
+						observedAt: new Date(),
+					};
+				expectedRecipientIdentifier = messageControl.recipientIdentifier;
+				expectedExternalConversationKey =
+					messageControl.externalConversationKey;
+				composer = await waitForMessageComposer(
+					page,
+					expectedRecipientIdentifier,
+					expectedExternalConversationKey,
+				);
+			}
 			if (composer.status === "AMBIGUOUS")
 				return {
 					status: "AMBIGUOUS",
 					errorCode: "WRONG_CONVERSATION",
 					browserProof: {
-						phase: "composer-resolution",
+						phase: expectedExternalConversationKey
+							? "existing-thread-composer-resolution"
+							: "composer-resolution",
 						contactId: action.target.contactId,
 						routeId: action.target.routeId,
-						expectedRecipientIdentifier: messageControl.recipientIdentifier,
+						expectedRecipientIdentifier,
 						expectedExternalConversationKey,
-						observedControlHrefConversationKey:
-							messageControl.externalConversationKey,
 						composerDiagnostics: await page.inspectMessageComposerDiagnostics(),
 						page: proofFor(action, before),
 					},
@@ -1404,14 +1479,14 @@ export class CdpLinkedInBrowserAdapter implements LinkedInBrowserAdapter {
 					status: "FAILED",
 					errorCode: "MESSAGE_EDITOR_UNAVAILABLE",
 					browserProof: {
-						phase: "pre-send-composer-availability",
+						phase: expectedExternalConversationKey
+							? "existing-thread-composer-availability"
+							: "pre-send-composer-availability",
 						composer,
 						contactId: action.target.contactId,
 						routeId: action.target.routeId,
-						expectedRecipientIdentifier: messageControl.recipientIdentifier,
+						expectedRecipientIdentifier,
 						expectedExternalConversationKey,
-						observedControlHrefConversationKey:
-							messageControl.externalConversationKey,
 						composerDiagnostics: await page.inspectMessageComposerDiagnostics(),
 						page: proofFor(action, before),
 					},
@@ -1440,7 +1515,7 @@ export class CdpLinkedInBrowserAdapter implements LinkedInBrowserAdapter {
 			const filled = action.body
 				? await page.fillAndSend(
 						action.body,
-						composer.recipientIdentifier,
+						expectedRecipientIdentifier,
 						composer.externalConversationKey ?? expectedExternalConversationKey,
 					)
 				: false;
