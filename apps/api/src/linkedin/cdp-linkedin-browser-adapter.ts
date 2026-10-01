@@ -307,6 +307,7 @@ export function resolveLinkedInProfileDisplayName(
 				heading.visible &&
 				!heading.excluded &&
 				Boolean(text) &&
+				!/^explore premium profiles$/i.test(text) &&
 				!/^\d+\s+notifications?(?:\s+total)?$/i.test(text)
 			);
 		})
