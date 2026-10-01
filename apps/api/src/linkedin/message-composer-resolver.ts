@@ -31,6 +31,45 @@ export type LinkedInMessageComposerSnapshot = {
 	surfaces: LinkedInMessageComposerSurface[];
 };
 
+export function summarizeLinkedInMessageComposerSnapshot(
+	snapshot: LinkedInMessageComposerSnapshot,
+) {
+	return {
+		url: snapshot.url,
+		candidateSurfaceCount: snapshot.surfaces.length,
+		surfaces: snapshot.surfaces.map((surface) => ({
+			index: surface.index,
+			kind: surface.kind,
+			recipientIdentifier: surface.recipientIdentifier,
+			externalConversationKey: surface.externalConversationKey,
+			externalMessageKey: surface.externalMessageKey,
+			recipientCount: surface.recipientCount,
+			visible: surface.visible,
+			connected: surface.connected,
+			editors: surface.editors.map((editor) => ({
+				index: editor.index,
+				nodeIdentity: editor.nodeIdentity ?? null,
+				tagName: editor.tagName,
+				role: editor.role,
+				ariaLabel: editor.ariaLabel,
+				placeholder: editor.placeholder,
+				visible: editor.visible,
+				connected: editor.connected,
+				disabled: editor.disabled,
+			})),
+			sendControls: surface.sendControls.map((control) => ({
+				index: control.index,
+				tagName: control.tagName,
+				role: control.role,
+				ariaLabel: control.ariaLabel,
+				visible: control.visible,
+				connected: control.connected,
+				disabled: control.disabled,
+			})),
+		})),
+	};
+}
+
 export type LinkedInMessageComposerResolution =
 	| { status: "NONE" }
 	| { status: "LOADING" }
@@ -109,6 +148,31 @@ export function resolveLinkedInMessageComposer(
 	const expectedConversation = normalizeKey(
 		input.expectedExternalConversationKey,
 	);
+	const matchingRecipientSurfaces = expectedRecipient
+		? snapshot.surfaces.filter(
+				(surface) =>
+					surface.visible &&
+					surface.connected &&
+					surface.recipientIdentifier === expectedRecipient,
+			)
+		: [];
+	if (
+		expectedConversation &&
+		matchingRecipientSurfaces.some((surface) => {
+			const observedConversation = normalizeKey(
+				surface.externalConversationKey,
+			);
+			return (
+				observedConversation && observedConversation !== expectedConversation
+			);
+		})
+	)
+		return { status: "AMBIGUOUS" };
+	const missingConversationKeySurfaces = expectedConversation
+		? matchingRecipientSurfaces.filter(
+				(surface) => !normalizeKey(surface.externalConversationKey),
+			)
+		: [];
 	const candidates = snapshot.surfaces.filter((surface) => {
 		if (!surface.visible || !surface.connected) return false;
 		if (!surface.recipientIdentifier && !expectedConversation) return false;
@@ -121,10 +185,14 @@ export function resolveLinkedInMessageComposer(
 			surfaceConversation !== expectedConversation
 		)
 			return false;
-		if (expectedConversation && !surfaceConversation && !expectedRecipient)
-			return false;
+		if (expectedConversation && !surfaceConversation) return false;
 		return true;
 	});
+	if (missingConversationKeySurfaces.length > 0) {
+		if (missingConversationKeySurfaces.length + candidates.length > 1)
+			return { status: "AMBIGUOUS" };
+		return { status: "LOADING" };
+	}
 	if (candidates.length === 0) return { status: "NONE" };
 	if (candidates.length !== 1) return { status: "AMBIGUOUS" };
 	const surface = candidates[0];

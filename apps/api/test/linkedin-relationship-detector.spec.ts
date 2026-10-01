@@ -1,6 +1,9 @@
 import { describe, expect, it } from "bun:test";
 import { verifyFreshLinkedInIdentity } from "@crm/db/linkedin-browser-adapter";
-import { detectLinkedInRelationshipState } from "../src/linkedin/cdp-linkedin-browser-adapter";
+import {
+	detectLinkedInRelationshipState,
+	resolveLinkedInProfileDisplayName,
+} from "../src/linkedin/cdp-linkedin-browser-adapter";
 import { resolveLinkedInRelationshipControl } from "../src/linkedin/relationship-control-resolver";
 
 const base = {
@@ -35,6 +38,34 @@ function control(
 }
 
 describe("LinkedIn relationship control detection", () => {
+	it("skips the LinkedIn notifications heading and resolves the profile name", () => {
+		expect(
+			resolveLinkedInProfileDisplayName([
+				{ text: "0 notifications", visible: true, excluded: false },
+				{ text: "Loading", visible: false, excluded: false },
+				{ text: "Other profile", visible: true, excluded: true },
+				{ text: "Yasin Özpinar", visible: true, excluded: false },
+			]),
+		).toBe("Yasin Özpinar");
+	});
+
+	it("does not treat a notification heading as a verified profile name", () => {
+		expect(
+			resolveLinkedInProfileDisplayName([
+				{ text: "0 notifications total", visible: true, excluded: false },
+			]),
+		).toBeNull();
+	});
+
+	it("fails closed when multiple visible headings could identify the profile", () => {
+		expect(
+			resolveLinkedInProfileDisplayName([
+				{ text: "Yasin Özpinar", visible: true, excluded: false },
+				{ text: "Alex Veremeev", visible: true, excluded: false },
+			]),
+		).toBeNull();
+	});
+
 	it("detects Gijs's Dutch ordinary-anchor Connect control", () => {
 		expect(
 			detectLinkedInRelationshipState({

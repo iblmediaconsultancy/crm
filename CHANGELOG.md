@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.7](https://github.com/iblmediaconsultancy/crm/compare/v1.5.6...v1.5.7) (2026-10-01)
+
+
+### Fixes
+
+* harden LinkedIn profile and conversation resolution ([14509a8](https://github.com/iblmediaconsultancy/crm/commit/14509a894b342b2c205e807da1405d519bbbb94e))
+
 ## [1.5.6](https://github.com/iblmediaconsultancy/crm/compare/v1.5.5...v1.5.6) (2026-09-30)
 
 

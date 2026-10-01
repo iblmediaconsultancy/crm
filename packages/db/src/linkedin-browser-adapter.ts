@@ -503,7 +503,15 @@ export function verifyLinkedInActionState(
 	action: LinkedInBrowserAction,
 	observed: LinkedInBrowserIdentityEvidence,
 ): { allowed: true } | { allowed: false; reason: string } {
-	const identity = verifyFreshLinkedInIdentity(action.target, observed);
+	const profileTarget =
+		action.action === "MESSAGE"
+			? {
+					...action.target,
+					conversationId: undefined,
+					externalConversationKey: null,
+				}
+			: action.target;
+	const identity = verifyFreshLinkedInIdentity(profileTarget, observed);
 	if (!identity.allowed) return identity;
 	if (
 		action.action === "CONNECTION_REQUEST" &&
