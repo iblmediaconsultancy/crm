@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.8](https://github.com/iblmediaconsultancy/crm/compare/v1.5.7...v1.5.8) (2026-10-01)
+
+
+### Fixes
+
+* ignore LinkedIn recommendation headings during profile verification ([1cd364a](https://github.com/iblmediaconsultancy/crm/commit/1cd364add6fbe8a01bc55a5edda9bf7bb031557c))
+
 ## [1.5.7](https://github.com/iblmediaconsultancy/crm/compare/v1.5.6...v1.5.7) (2026-10-01)
 
 
