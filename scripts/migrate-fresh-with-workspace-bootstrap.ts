@@ -45,7 +45,9 @@ if (
 	throw new Error("Fresh replay is limited to a loopback PostgreSQL database.");
 
 const client = new pg.Client({ connectionString });
-const workspace = await mkdtemp(path.join(repoRoot, ".tmp-fresh-migration-"));
+const workspace = await mkdtemp(
+	path.join(repoRoot, "packages", "db", ".tmp-fresh-migration-"),
+);
 
 async function migrationDirectories() {
 	const entries = await Array.fromAsync(
