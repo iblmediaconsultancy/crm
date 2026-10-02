@@ -20,6 +20,7 @@ import { SsoTable } from "./sso-table";
 export const metadata: Metadata = {
 	title: "SSO",
 };
+export const instant = false;
 
 export default function SsoSettingsPage({
 	searchParams,

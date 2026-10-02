@@ -17,6 +17,7 @@ import { CurrencySettings } from "./currency-settings";
 export const metadata: Metadata = {
 	title: "Currencies",
 };
+export const instant = false;
 
 export default function CurrenciesSettingsPage() {
 	return (
