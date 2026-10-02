@@ -100,7 +100,10 @@ export default defineEval({
 			});
 			t.check(saved.agent?.status, equals("DRAFT"));
 			t.check(saved.agent?.versions[0]?.status, equals("READY"));
-			t.check(saved.agent?.versions[0]?.modelId, equals("gemini-3.1-flash-lite"));
+			t.check(
+				saved.agent?.versions[0]?.modelId,
+				equals("gemini-3.1-flash-lite"),
+			);
 			t.check(
 				saved.agent?.versions[0]?.modelContextWindowTokens,
 				equals(1_048_576),

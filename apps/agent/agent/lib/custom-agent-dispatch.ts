@@ -1,6 +1,6 @@
 import { db, type Prisma } from "@crm/db";
-import type { SendFn } from "eve/channels";
 import { DEFAULT_AGENT_MODEL } from "@crm/db/settings";
+import type { SendFn } from "eve/channels";
 import { lockAgentRun, runTerminalEventId } from "./run-state";
 
 const BUILDER_BATCH = 20;

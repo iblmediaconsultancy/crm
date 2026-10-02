@@ -367,9 +367,7 @@ export function latestTurnFailure(
 				message,
 			)
 				? "restricted"
-				: /rate.?limit|too many requests|resource.?exhausted/i.test(
-						message,
-					)
+				: /rate.?limit|too many requests|resource.?exhausted/i.test(message)
 					? "rate-limit"
 					: /credits?|quota|billing|usage limit/i.test(message)
 						? "credits"

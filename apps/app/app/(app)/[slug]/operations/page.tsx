@@ -66,13 +66,35 @@ export default async function OperationsPage() {
 				</PageShellHeading>
 			</PageShellHeader>
 			<PageShellContent>
-				<nav aria-label="Football CRM" className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+				<nav
+					aria-label="Football CRM"
+					className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4"
+				>
 					{[
-						["Players", "players"], ["Football agents", "football-agents"], ["Agencies", "agencies"], ["Clubs", "clubs"],
-						["Representations", "representations"], ["Leads", "leads"], ["Tasks", "football-tasks"], ["Outreach", "outreach"],
-						...(workspace.viewerRole === "contributor" ? [] : [["Duplicates", "duplicates"], ["Allocation", "allocation"]]),
+						["Players", "players"],
+						["Football agents", "football-agents"],
+						["Agencies", "agencies"],
+						["Clubs", "clubs"],
+						["Representations", "representations"],
+						["Leads", "leads"],
+						["Tasks", "football-tasks"],
+						["Outreach", "outreach"],
+						...(workspace.viewerRole === "contributor"
+							? []
+							: [
+									["Duplicates", "duplicates"],
+									["Allocation", "allocation"],
+								]),
 						["Archived", "archived"],
-					].map(([label, href]) => <Link key={href} href={workspaceUrl(workspace.slug, href)} className="rounded-md border bg-card px-3 py-2 text-sm font-medium hover:bg-muted">{label}</Link>)}
+					].map(([label, href]) => (
+						<Link
+							key={href}
+							href={workspaceUrl(workspace.slug, href)}
+							className="rounded-md border bg-card px-3 py-2 text-sm font-medium hover:bg-muted"
+						>
+							{label}
+						</Link>
+					))}
 				</nav>
 				<section
 					aria-labelledby="operations-summary"
@@ -93,7 +115,10 @@ export default async function OperationsPage() {
 					))}
 				</section>
 
-				<OperationsActions viewerRole={workspace.viewerRole} viewerUserId={session.user.id} />
+				<OperationsActions
+					viewerRole={workspace.viewerRole}
+					viewerUserId={session.user.id}
+				/>
 
 				<div className="grid gap-4 xl:grid-cols-2">
 					<Collection
@@ -248,7 +273,7 @@ function Collection({
 		<Card>
 			<CardHeader>
 				<CardTitle>{title}</CardTitle>
-			<CardDescription className="block">{description}</CardDescription>
+				<CardDescription className="block">{description}</CardDescription>
 			</CardHeader>
 			<CardContent className="grid gap-2">
 				{children}

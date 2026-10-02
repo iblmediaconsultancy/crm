@@ -390,7 +390,7 @@ nothing. The agent owns judgement; the data surface owns filing.
 
 ### Turning it on
 
-Same value in both processes, from the one root `.env`:
+Same value in the app, API, and agent, from the one root `.env`:
 
 ```sh
 AGENT_URL="http://127.0.0.1:2000"        # the default
@@ -416,7 +416,8 @@ wrong place.
 
 A variable in `.env` is not enough on its own: Turbo runs in strict env mode, so
 `apps/app/turbo.json` and `apps/agent/turbo.json` both declare the pair in
-`passThroughEnv`. Adding a variable and not declaring it produces exactly the
+`passThroughEnv`; the API inherits it from the root Turbo allow-list. Adding a
+variable and not declaring it produces exactly the
 `401` above.
 
 ### Checking it without a browser

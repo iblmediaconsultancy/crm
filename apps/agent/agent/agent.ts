@@ -1,7 +1,7 @@
 import "@crm/env/load";
 
 import { DEFAULT_AGENT_MODEL } from "@crm/db/settings";
-import { defineAgent, type AgentDefinition } from "eve";
+import { type AgentDefinition, defineAgent } from "eve";
 import { logCapabilities } from "./lib/capabilities";
 import { AGENT_MODEL } from "./lib/model";
 

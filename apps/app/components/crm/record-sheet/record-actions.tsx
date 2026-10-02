@@ -110,7 +110,10 @@ export function RecordActions({
 	const destruction = useMutation(destructionOptions);
 	const verb = restoring ? "Restore" : "Archive";
 	const dependencyTotal = impact.data
-		? Object.values(impact.data.dependencies).reduce((sum, count) => sum + count, 0)
+		? Object.values(impact.data.dependencies).reduce(
+				(sum, count) => sum + count,
+				0,
+			)
 		: 0;
 	return (
 		<>
@@ -165,9 +168,7 @@ export function RecordActions({
 					<AlertDialogFooter>
 						<AlertDialogCancel>Cancel</AlertDialogCancel>
 						<AlertDialogAction
-							disabled={
-								reason.trim().length < 3 || lifecycleMutation.isPending
-							}
+							disabled={reason.trim().length < 3 || lifecycleMutation.isPending}
 							onClick={() =>
 								lifecycleMutation.mutate({ id: record.id, version, reason })
 							}
@@ -182,9 +183,9 @@ export function RecordActions({
 					<AlertDialogHeader>
 						<AlertDialogTitle>Permanently destroy {name}?</AlertDialogTitle>
 						<AlertDialogDescription>
-							This exceptional Admin-only operation cannot be undone. The current
-							impact preview found {dependencyTotal} dependent records. If the
-							record or dependency set changes, confirmation will fail.
+							This exceptional Admin-only operation cannot be undone. The
+							current impact preview found {dependencyTotal} dependent records.
+							If the record or dependency set changes, confirmation will fail.
 						</AlertDialogDescription>
 					</AlertDialogHeader>
 					{impact.isLoading ? (
@@ -205,9 +206,7 @@ export function RecordActions({
 								aria-label="Destruction reason"
 								placeholder="Detailed reason (required)"
 								value={destructionReason}
-								onChange={(event) =>
-									setDestructionReason(event.target.value)
-								}
+								onChange={(event) => setDestructionReason(event.target.value)}
 							/>
 						</div>
 					)}

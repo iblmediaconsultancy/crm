@@ -494,8 +494,7 @@ describe("latestTurnFailure", () => {
 					type: "turn.failed",
 					data: {
 						code: "MODEL_CALL_FAILED",
-						message:
-							"Gemini resource exhausted: requests are rate-limited.",
+						message: "Gemini resource exhausted: requests are rate-limited.",
 					},
 				},
 			]),
