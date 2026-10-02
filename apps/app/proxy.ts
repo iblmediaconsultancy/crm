@@ -12,7 +12,12 @@ import { workspaceUrl } from "@/lib/workspace-url";
 const LANDING_PATH = "/";
 
 const SIGN_IN_PATH = "/sign-in";
-const PUBLIC_AUTH_PATHS = [SIGN_IN_PATH, "/accept-invitation", "/forgot-password", "/reset-password"];
+const PUBLIC_AUTH_PATHS = [
+	SIGN_IN_PATH,
+	"/accept-invitation",
+	"/forgot-password",
+	"/reset-password",
+];
 
 const UNGATED = ["/eve"];
 
@@ -21,7 +26,8 @@ const SECTIONS = ["/companies", "/contacts", "/deals", "/settings"];
 export async function proxy(request: NextRequest) {
 	const { pathname } = request.nextUrl;
 
-	if (PUBLIC_AUTH_PATHS.some((path) => isUnder(pathname, path))) return NextResponse.next();
+	if (PUBLIC_AUTH_PATHS.some((path) => isUnder(pathname, path)))
+		return NextResponse.next();
 
 	if (
 		getSessionCookie(request, { cookiePrefix: AUTH_COOKIE_PREFIX }) === null

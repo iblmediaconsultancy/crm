@@ -12,9 +12,9 @@ import {
 import { requireSession } from "@/lib/session";
 import { HydrateClient } from "@/lib/trpc/hydrate";
 import { getServerQueryClient, getServerTrpc } from "@/lib/trpc/server";
+import { MemberInvitations } from "./member-invitations";
 import { membersSearchParams } from "./members-search-params";
 import { MembersTable } from "./members-table";
-import { MemberInvitations } from "./member-invitations";
 
 export const metadata: Metadata = {
 	title: "Team",
@@ -63,7 +63,10 @@ async function Members({
 
 	return (
 		<HydrateClient>
-			<div className="grid gap-4"><MemberInvitations /><MembersTable /></div>
+			<div className="grid gap-4">
+				<MemberInvitations />
+				<MembersTable />
+			</div>
 		</HydrateClient>
 	);
 }

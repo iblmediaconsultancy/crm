@@ -92,9 +92,7 @@ export function CompaniesBulkActions({
 				</DropdownMenuGroup>
 				<DropdownMenuSeparator />
 				<DropdownMenuGroup>
-					<DropdownMenuItem
-												onSelect={() => setConfirming(true)}
-					>
+					<DropdownMenuItem onSelect={() => setConfirming(true)}>
 						<Renew />
 						Archive
 					</DropdownMenuItem>

@@ -79,7 +79,9 @@ export function MembersTable() {
 	const remove = useMutation(
 		trpc.workspace.removeMember.mutationOptions({
 			onSuccess: () =>
-				success("Member access removed, sessions revoked, and history preserved."),
+				success(
+					"Member access removed, sessions revoked, and history preserved.",
+				),
 			onError: failure,
 		}),
 	);
@@ -202,8 +204,7 @@ export function MembersTable() {
 								onSelect={() =>
 									setStatus.mutate({
 										memberId: row.id,
-										status:
-											row.status === "ACTIVE" ? "SUSPENDED" : "ACTIVE",
+										status: row.status === "ACTIVE" ? "SUSPENDED" : "ACTIVE",
 									})
 								}
 							>

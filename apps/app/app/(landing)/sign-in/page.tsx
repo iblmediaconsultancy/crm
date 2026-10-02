@@ -8,7 +8,14 @@ export const metadata: Metadata = { title: "Sign in" };
 export default function SignInPage() {
 	return (
 		<AuthShell>
-			<Suspense fallback={<AuthHeading title="Welcome back" description="Sign in with your account to continue." />}>
+			<Suspense
+				fallback={
+					<AuthHeading
+						title="Welcome back"
+						description="Sign in with your account to continue."
+					/>
+				}
+			>
 				<EmailSignIn />
 			</Suspense>
 		</AuthShell>
