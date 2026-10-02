@@ -1,5 +1,5 @@
 import { DEFAULT_AGENT_MODEL } from "@crm/db/settings";
-import { defineAgent, type AgentDefinition } from "eve";
+import { type AgentDefinition, defineAgent } from "eve";
 import { z } from "zod";
 import { AGENT_MODEL } from "../../lib/model";
 
