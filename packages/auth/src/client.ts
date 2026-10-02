@@ -1,6 +1,6 @@
 import { organizationClient } from "better-auth/client/plugins";
-import { workspaceAccess, workspaceRoles } from "./access";
 import { createAuthClient } from "better-auth/react";
+import { workspaceAccess, workspaceRoles } from "./access";
 
 export const authClient = createAuthClient({
 	baseURL: typeof window === "undefined" ? undefined : window.location.origin,

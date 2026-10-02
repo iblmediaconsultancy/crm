@@ -39,10 +39,7 @@ export const auth = betterAuth({
 				to: user.email,
 				subject: "Reset your IBL Command Center password",
 				text: `Open this secure link to reset your password: ${publicUrlString}`,
-				idempotencyKey: stableSystemEmailKey(
-					"PASSWORD_RESET",
-					publicUrlString,
-				),
+				idempotencyKey: stableSystemEmailKey("PASSWORD_RESET", publicUrlString),
 				kind: "PASSWORD_RESET",
 			});
 		},

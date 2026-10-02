@@ -100,7 +100,7 @@ is set.
 | `GITHUB_TOKEN` | Raises the GitHub rate limit from 60/hour |
 | `BLOB_READ_WRITE_TOKEN` | Mirrors logos and photos into Blob |
 | `GOOGLE_GENERATIVE_AI_API_KEY` | Direct Gemini API access for the agent |
-| `AGENT_BRIDGE_SECRET` | The rep-facing Agent panel — see `agent.md` |
+| `AGENT_BRIDGE_SECRET` | Shared authenticated app/API-to-agent bridge — see `agent.md` |
 
 `BLOB_READ_WRITE_TOKEN` is also in `env.validation.ts` and `apps/api/turbo.json`
 because the API and the seed write pictures too. The Next.js app is deliberately

@@ -138,9 +138,7 @@ export function ContactsBulkActions({
 				</DropdownMenuGroup>
 				<DropdownMenuSeparator />
 				<DropdownMenuGroup>
-					<DropdownMenuItem
-												onSelect={() => setConfirming(true)}
-					>
+					<DropdownMenuItem onSelect={() => setConfirming(true)}>
 						<Renew />
 						Archive
 					</DropdownMenuItem>

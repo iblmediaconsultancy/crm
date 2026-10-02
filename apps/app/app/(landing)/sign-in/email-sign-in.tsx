@@ -6,7 +6,7 @@ import { Input } from "@crm/ui/components/input";
 import { Label } from "@crm/ui/components/label";
 import { Spinner } from "@crm/ui/components/spinner";
 import Link from "next/link";
-import { useState, type FormEvent } from "react";
+import { type FormEvent, useState } from "react";
 import { toast } from "sonner";
 
 export function EmailSignIn() {
@@ -58,7 +58,13 @@ export function EmailSignIn() {
 				Sign in
 			</Button>
 			<p className="text-center text-muted-foreground text-xs">
-				Invite-only. <Link className="underline underline-offset-3 hover:text-foreground" href="/forgot-password">Forgot password?</Link>
+				Invite-only.{" "}
+				<Link
+					className="underline underline-offset-3 hover:text-foreground"
+					href="/forgot-password"
+				>
+					Forgot password?
+				</Link>
 			</p>
 		</form>
 	);

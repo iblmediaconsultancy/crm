@@ -12,7 +12,6 @@ import {
 	AlertDialogTitle,
 } from "@crm/ui/components/alert-dialog";
 import { Button } from "@crm/ui/components/button";
-import { Input } from "@crm/ui/components/input";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -24,6 +23,7 @@ import {
 	DropdownMenuSubTrigger,
 	DropdownMenuTrigger,
 } from "@crm/ui/components/dropdown-menu";
+import { Input } from "@crm/ui/components/input";
 import { Spinner } from "@crm/ui/components/spinner";
 import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
@@ -169,10 +169,20 @@ export function BulkArchiveDialog({
 					<AlertDialogTitle>{title}</AlertDialogTitle>
 					<AlertDialogDescription>{description}</AlertDialogDescription>
 				</AlertDialogHeader>
-				<Input aria-label="Archive reason" placeholder="Reason (required)" value={reason} onChange={(event) => setReason(event.target.value)} />
+				<Input
+					aria-label="Archive reason"
+					placeholder="Reason (required)"
+					value={reason}
+					onChange={(event) => setReason(event.target.value)}
+				/>
 				<AlertDialogFooter>
 					<AlertDialogCancel>Cancel</AlertDialogCancel>
-					<AlertDialogAction disabled={reason.trim().length < 3} onClick={() => onConfirm(reason.trim())}>Archive</AlertDialogAction>
+					<AlertDialogAction
+						disabled={reason.trim().length < 3}
+						onClick={() => onConfirm(reason.trim())}
+					>
+						Archive
+					</AlertDialogAction>
 				</AlertDialogFooter>
 			</AlertDialogContent>
 		</AlertDialog>

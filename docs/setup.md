@@ -39,6 +39,12 @@ AGENT_URL="http://127.0.0.1:2000"   # 127.0.0.1, not localhost: eve dev is IPv4-
 AGENT_BRIDGE_SECRET="$(openssl rand -base64 32)"
 ```
 
+Generate the value once and store it in the repository-root `.env`. The app,
+API, and agent must receive that same value. Do not generate a separate value
+for each process or put it in a command-line argument. Restart all three after
+changing it. The API declaration remains optional for general self-hosters; the
+Atlas local runtime requires it when the authenticated bridge is in use.
+
 | Agent tab error | Cause |
 | --- | --- |
 | `503` | `AGENT_BRIDGE_SECRET` unset in the app's process |
