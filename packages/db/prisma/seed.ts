@@ -370,21 +370,26 @@ async function seedCompanies(
 	const companies = [];
 
 	for (const company of COMPANIES) {
-		const existing = await db.company.findFirst({ where: { domain: company.domain }, select: { id: true, name: true, domain: true, iconUrl: true } });
-		const row = existing ?? await db.company.create({
-			data: {
-				name: company.name,
-				domain: company.domain,
-				website: `https://${company.domain}`,
-				industry: company.industry,
-				city: company.city,
-				country: company.country,
-				countryCode: company.countryCode,
-				ownerId: pick(ownerIds),
-				createdAt: daysFromNow(-integer(30, 400), 12),
-			},
+		const existing = await db.company.findFirst({
+			where: { domain: company.domain },
 			select: { id: true, name: true, domain: true, iconUrl: true },
 		});
+		const row =
+			existing ??
+			(await db.company.create({
+				data: {
+					name: company.name,
+					domain: company.domain,
+					website: `https://${company.domain}`,
+					industry: company.industry,
+					city: company.city,
+					country: company.country,
+					countryCode: company.countryCode,
+					ownerId: pick(ownerIds),
+					createdAt: daysFromNow(-integer(30, 400), 12),
+				},
+				select: { id: true, name: true, domain: true, iconUrl: true },
+			}));
 		companies.push({ ...row, domain: row.domain ?? company.domain });
 	}
 
@@ -436,20 +441,25 @@ async function seedContacts(
 			if (used.has(email)) continue;
 			used.add(email);
 
-			const existingContact = await db.contact.findFirst({ where: { email }, select: { id: true } });
-			const contact = existingContact ?? await db.contact.create({
-				data: {
-					firstName,
-					lastName,
-					email,
-					title: pick(TITLES),
-					phone: chance(0.4) ? `+1 415 555 ${integer(1000, 9999)}` : null,
-					companyId: company.id,
-					ownerId: pick(ownerIds),
-					createdAt: daysFromNow(-integer(10, 300), 12),
-				},
+			const existingContact = await db.contact.findFirst({
+				where: { email },
 				select: { id: true },
 			});
+			const contact =
+				existingContact ??
+				(await db.contact.create({
+					data: {
+						firstName,
+						lastName,
+						email,
+						title: pick(TITLES),
+						phone: chance(0.4) ? `+1 415 555 ${integer(1000, 9999)}` : null,
+						companyId: company.id,
+						ownerId: pick(ownerIds),
+						createdAt: daysFromNow(-integer(10, 300), 12),
+					},
+					select: { id: true },
+				}));
 
 			contacts.push({ id: contact.id, companyId: company.id });
 		}
@@ -497,7 +507,7 @@ async function seedRates(): Promise<number> {
 		},
 		update: {},
 		select: { id: true },
-			});
+	});
 
 	seedBase = await readReportingCurrency(db);
 
