@@ -10,6 +10,7 @@ import {
 import { requireSession } from "@/lib/session";
 import { AtlasOperationsSummary } from "../atlas-operations-summary";
 import { OperationsDirectory } from "../operations/directory-client";
+import { AtlasAuthorizationControls } from "./atlas-authorization-controls";
 import { OutreachLifecycleControls } from "./outreach-lifecycle-controls";
 import { OutreachWorkbench } from "./outreach-workbench";
 import { ProspectBacklogSummary } from "./prospect-backlog-summary";
@@ -37,6 +38,7 @@ export default async function Page() {
 						Manual approval workspace
 					</summary>
 					<div className="grid gap-6 border-t p-4 md:p-6">
+						<AtlasAuthorizationControls />
 						<p className="text-muted-foreground text-sm">
 							Use this only when reviewing research, editing a draft, approving
 							a send or scheduling a follow-up.

@@ -11,12 +11,13 @@ import { Webhook } from "svix";
 import { InjectDatabase } from "../database/database.constants";
 import { runInPrincipalTransaction } from "../database/database-context";
 import { ThreadWriterService } from "../mailbox/thread-writer.service";
+import { followUpAuthorizationDisposition } from "./follow-up-authorization";
 import { standardColdFollowUpDueDates } from "./follow-up-cadence";
+import { FOLLOW_UP_CLAIM_SQL } from "./follow-up-claim";
 import { localProviderDoubleEnabled } from "./local-provider-double";
 
 export { businessDaysAfter } from "./working-hours";
 
-const CLAIM = `UPDATE "followUpStep" SET "status"='LEASED', "leaseOwner"=$1, "leasedUntil"=NOW()+INTERVAL '60 seconds', "attemptCount"="attemptCount"+1, "updatedAt"=NOW() WHERE "id"=(SELECT s."id" FROM "followUpStep" s JOIN "followUpPlan" p ON p."id"=s."planId" WHERE s."status" IN ('PENDING','LEASED') AND p."status"='ACTIVE' AND s."dueAt"<=NOW() AND (s."retryAt" IS NULL OR s."retryAt"<=NOW()) AND (s."leasedUntil" IS NULL OR s."leasedUntil"<=NOW()) AND s."attemptCount"<s."maxAttempts" ORDER BY s."dueAt",s."id" FOR UPDATE OF s SKIP LOCKED LIMIT 1) RETURNING "id","planId","draftId","attemptCount"`;
 type Claim = {
 	id: string;
 	planId: string;
@@ -761,7 +762,7 @@ export class OutreachLifecycleService {
 			const rows = await withPrincipal(
 				this.db,
 				{ userId: null, kind: "worker" },
-				(tx) => tx.$queryRawUnsafe<Claim[]>(CLAIM, workerId),
+				(tx) => tx.$queryRawUnsafe<Claim[]>(FOLLOW_UP_CLAIM_SQL, workerId),
 			);
 			const step = rows[0];
 			if (!step) break;
@@ -958,10 +959,17 @@ export class OutreachLifecycleService {
 							select: { atlasLiveOutreachEnabled: true },
 						})
 					: null;
+				const storedAuthorizationValid = Boolean(
+					draft?.authorization &&
+						draft.authorization.scope === "STANDARD_COLD_OUTREACH" &&
+						draft.authorization.status === "ACTIVE" &&
+						(draft.authorization.expiresAt === null ||
+							draft.authorization.expiresAt > new Date()),
+				);
 				const currentAuthorization =
 					draft?.coldOutreach &&
 					draft.status === "DRAFT" &&
-					!draft.authorization
+					!storedAuthorizationValid
 						? await tx.outreachAuthorization.findFirst({
 								where: {
 									scope: "STANDARD_COLD_OUTREACH",
@@ -977,24 +985,37 @@ export class OutreachLifecycleService {
 								},
 							})
 						: null;
-				const authorization = draft?.authorization ?? currentAuthorization;
-				const autonomous = Boolean(
-					draft?.coldOutreach &&
-						draft.status === "DRAFT" &&
-						draft.atlasAuthorizedAt &&
-						authorization?.scope === "STANDARD_COLD_OUTREACH" &&
-						authorization.status === "ACTIVE" &&
-						(authorization.expiresAt === null ||
-							authorization.expiresAt > new Date()) &&
-						settings?.atlasLiveOutreachEnabled === true &&
-						process.env.ATLAS_LIVE_OUTREACH_ENABLED?.trim().toLowerCase() ===
-							"true" &&
-						draft.mailbox?.address.toLowerCase() === "outreach@iblmedia.com",
+				const effectiveAuthorization =
+					currentAuthorization ?? draft?.authorization;
+				const authorizationValid = Boolean(
+					effectiveAuthorization?.scope === "STANDARD_COLD_OUTREACH" &&
+						effectiveAuthorization.status === "ACTIVE" &&
+						(effectiveAuthorization.expiresAt === null ||
+							effectiveAuthorization.expiresAt > new Date()),
+				);
+				const liveOutreachEnabled =
+					settings?.atlasLiveOutreachEnabled === true &&
+					process.env.ATLAS_LIVE_OUTREACH_ENABLED?.trim().toLowerCase() ===
+						"true";
+				const mailboxAllowed =
+					draft?.mailbox?.address.toLowerCase() === "outreach@iblmedia.com";
+				const hasAuthorizationEvidence = Boolean(
+					draft?.atlasAuthorizedAt || currentAuthorization,
 				);
 				const manuallyApproved = Boolean(
 					draft?.status === "APPROVED" &&
 						draft.outreachApproval?.status === "APPROVED",
 				);
+				const authorizationDisposition = followUpAuthorizationDisposition({
+					manuallyApproved,
+					coldDraft: Boolean(draft?.coldOutreach && draft.status === "DRAFT"),
+					mailboxAllowed,
+					hasAuthorizationEvidence,
+					authorizationValid,
+					liveOutreachEnabled,
+				});
+				const autonomous =
+					authorizationDisposition === "READY" && !manuallyApproved;
 				if (
 					!draft ||
 					plan?.channel !== "EMAIL" ||
@@ -1002,7 +1023,7 @@ export class OutreachLifecycleService {
 					personProtected ||
 					activeLinkedInConversation ||
 					organizationProtection ||
-					(!manuallyApproved && !autonomous) ||
+					authorizationDisposition === "CANCEL" ||
 					draft.recipientRoute?.contact?.lifecycleState !== "ACTIVE" ||
 					consent?.status === "DO_NOT_CONTACT"
 				) {
@@ -1029,6 +1050,26 @@ export class OutreachLifecycleService {
 						});
 					return;
 				}
+				if (authorizationDisposition === "WAIT") {
+					const holdReason =
+						!hasAuthorizationEvidence || !authorizationValid
+							? "OUTREACH_AUTHORIZATION_REQUIRED"
+							: !liveOutreachEnabled
+								? "ATLAS_LIVE_OUTREACH_DISABLED"
+								: "OUTREACH_MAILBOX_NOT_AUTHORIZED";
+					await tx.followUpStep.updateMany({
+						where: { id: step.id, leaseOwner: workerId },
+						data: {
+							status: "PENDING",
+							attemptCount: { decrement: 1 },
+							leaseOwner: null,
+							leasedUntil: null,
+							retryAt: new Date(Date.now() + 60_000),
+							lastErrorCode: holdReason,
+						},
+					});
+					return;
+				}
 				await tx.outboundDelivery.upsert({
 					where: { idempotencyKey: `followup-delivery:${step.id}` },
 					create: {
@@ -1042,11 +1083,15 @@ export class OutreachLifecycleService {
 					data: {
 						status: "QUEUED",
 						authorizationId:
-							autonomous && !draft.authorization
-								? currentAuthorization?.id
+							autonomous && currentAuthorization
+								? currentAuthorization.id
 								: undefined,
 						atlasAuthorizedAt:
-							autonomous && !draft.atlasAuthorizedAt ? new Date() : undefined,
+							autonomous &&
+							currentAuthorization &&
+							(!draft.atlasAuthorizedAt || !storedAuthorizationValid)
+								? new Date()
+								: undefined,
 						approvedAt: autonomous ? new Date() : undefined,
 					},
 				});
