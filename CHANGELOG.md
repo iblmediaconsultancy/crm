@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.5.9](https://github.com/iblmediaconsultancy/crm/compare/v1.5.8...v1.5.9) (2026-10-02)
+
+
+### Fixes
+
+* **atlas:** restore authenticated email authorization flow ([cadb50e](https://github.com/iblmediaconsultancy/crm/commit/cadb50eb63c019cb541dfc32229f29de6f72a956))
+* **atlas:** restore authenticated email authorization flow ([2bbdd5c](https://github.com/iblmediaconsultancy/crm/commit/2bbdd5c8b077d5c04a4e912890f7429c20e29d0b))
+* **db:** seed workspace before Atlas membership ([9a9896c](https://github.com/iblmediaconsultancy/crm/commit/9a9896c659cc0c77410b2fa8713c5b3fb340916d))
+
 ## [1.5.8](https://github.com/iblmediaconsultancy/crm/compare/v1.5.7...v1.5.8) (2026-10-01)
 
 
