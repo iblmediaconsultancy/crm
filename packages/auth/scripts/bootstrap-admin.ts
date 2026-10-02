@@ -6,7 +6,9 @@ const passwordFile = process.env.IBL_BOOTSTRAP_ADMIN_PASSWORD_FILE?.trim();
 const migrationUrlFile = process.env.DATABASE_MIGRATION_URL_FILE?.trim();
 
 if (process.argv.length > 2) {
-	throw new Error("Bootstrap accepts no command-line configuration or secrets.");
+	throw new Error(
+		"Bootstrap accepts no command-line configuration or secrets.",
+	);
 }
 if (!email || !passwordFile || !migrationUrlFile) {
 	throw new Error(
@@ -17,9 +19,12 @@ const [password, migrationUrl] = await Promise.all([
 	readFile(passwordFile, "utf8").then((value) => value.trim()),
 	readFile(migrationUrlFile, "utf8").then((value) => value.trim()),
 ]);
-if (!password || !migrationUrl) throw new Error("A bootstrap secret file is empty.");
+if (!password || !migrationUrl)
+	throw new Error("A bootstrap secret file is empty.");
 if (password.length < 12) {
-	throw new Error("The bootstrap Admin password file must contain at least 12 characters.");
+	throw new Error(
+		"The bootstrap Admin password file must contain at least 12 characters.",
+	);
 }
 
 process.env.DATABASE_URL = migrationUrl;
@@ -34,8 +39,10 @@ try {
 	const now = new Date();
 
 	await db.$transaction(async (tx) => {
-        await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext('ibl-admin-bootstrap'))");
-        const activeAdmin = await tx.member.findFirst({
+		await tx.$executeRawUnsafe(
+			"SELECT pg_advisory_xact_lock(hashtext('ibl-admin-bootstrap'))",
+		);
+		const activeAdmin = await tx.member.findFirst({
 			where: {
 				organizationId: WORKSPACE_ID,
 				role: "admin",
@@ -44,7 +51,9 @@ try {
 			select: { id: true },
 		});
 		if (activeAdmin) {
-			throw new Error("Bootstrap refused because an active Admin already exists.");
+			throw new Error(
+				"Bootstrap refused because an active Admin already exists.",
+			);
 		}
 		const workspace = await tx.organization.upsert({
 			where: { id: WORKSPACE_ID },
