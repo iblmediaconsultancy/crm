@@ -78,7 +78,7 @@ function deploy(configPath: string) {
 	execFileSync(
 		process.execPath,
 		["x", "--bun", "prisma", "migrate", "deploy", "--config", configPath],
-		{ cwd: repoRoot, stdio: "inherit" },
+		{ cwd: path.join(repoRoot, "packages", "db"), stdio: "inherit" },
 	);
 }
 
