@@ -15,6 +15,7 @@
 		"lint": "biome check .",
 		"postinstall": "node scripts/chmod-trpc-binary.mjs",
 		"start": "bun src/main.ts",
+		"start:worker": "bun src/worker.ts",
 		"start:inbound-worker": "bun src/inbound-worker.ts",
 		"linkedin:executor": "bun src/linkedin/local-linkedin-executor-cli.ts",
 		"start:prod": "bun dist/main.js",

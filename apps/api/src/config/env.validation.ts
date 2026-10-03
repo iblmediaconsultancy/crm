@@ -186,6 +186,10 @@ export class EnvironmentVariables {
 
 	@IsOptional()
 	@IsString()
+	ATLAS_SCHEDULED_EXECUTION_ENABLED?: string;
+
+	@IsOptional()
+	@IsString()
 	ATLAS_LINKEDIN_LOCAL_EXECUTOR_ENABLED?: string;
 
 	@IsOptional()

@@ -18,6 +18,10 @@ import {
 	localResendTransport,
 } from "./local-provider-double";
 import { MiabSentSyncService } from "./miab-sent-sync.service";
+import {
+	atlasLiveOutreachEnvironmentEnabled,
+	atlasScheduledExecutionEnabled,
+} from "./outreach-execution-gates";
 import type { ResendCredentialSource } from "./provider-credentials";
 import {
 	EnvironmentResendCredentialSource,
@@ -47,18 +51,27 @@ const CLAIM_SYSTEM_EMAIL = [
 	'  "subject", "textBody", "idempotencyKey", "attemptCount"',
 ].join("\n");
 
-const CLAIM_OUTBOUND = [
+export const CLAIM_OUTBOUND = [
 	'UPDATE "outboundDelivery"',
 	'SET "status" = \'SENDING\', "leaseOwner" = $1,',
 	"  \"leasedUntil\" = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') + INTERVAL '60 seconds',",
 	'  "attemptCount" = "attemptCount" + 1, "updatedAt" = NOW()',
 	'WHERE "id" = (',
-	'  SELECT "id" FROM "outboundDelivery"',
-	"  WHERE \"status\" IN ('PENDING', 'RETRY', 'SENDING')",
-	'    AND ("retryAt" IS NULL OR "retryAt" <= (CURRENT_TIMESTAMP AT TIME ZONE \'UTC\'))',
-	'    AND ("leasedUntil" IS NULL OR "leasedUntil" <= (CURRENT_TIMESTAMP AT TIME ZONE \'UTC\'))',
-	'    AND "attemptCount" < 5',
-	'  ORDER BY "createdAt", "id" FOR UPDATE SKIP LOCKED LIMIT 1',
+	'  SELECT od."id" FROM "outboundDelivery" od',
+	'  JOIN "draft" d ON d."id" = od."draftId"',
+	"  WHERE od.\"status\" IN ('PENDING', 'RETRY', 'SENDING')",
+	'    AND (od."retryAt" IS NULL OR od."retryAt" <= (CURRENT_TIMESTAMP AT TIME ZONE \'UTC\'))',
+	'    AND (od."leasedUntil" IS NULL OR od."leasedUntil" <= (CURRENT_TIMESTAMP AT TIME ZONE \'UTC\'))',
+	'    AND od."attemptCount" < 5',
+	'    AND ($4::boolean OR EXISTS (SELECT 1 FROM "providerCapability" pc WHERE pc."key" = \'RESEND_OUTBOUND\' AND pc."status" = \'VERIFIED\'))',
+	'    AND (d."coldOutreach" = false OR (',
+	"      $2::boolean",
+	'      AND d."atlasAuthorizedAt" IS NOT NULL',
+	'      AND EXISTS (SELECT 1 FROM "outreachAuthorization" a WHERE a."id" = d."authorizationId" AND a."scope" = \'STANDARD_COLD_OUTREACH\' AND a."status" = \'ACTIVE\' AND (a."expiresAt" IS NULL OR a."expiresAt" > (CURRENT_TIMESTAMP AT TIME ZONE \'UTC\')))',
+	'      AND EXISTS (SELECT 1 FROM "appSetting" s WHERE s."id" = \'app\' AND s."atlasLiveOutreachEnabled" = true)',
+	"      AND (od.\"idempotencyKey\" NOT LIKE 'followup-delivery:%' OR $3::boolean)",
+	"    ))",
+	'  ORDER BY od."createdAt", od."id" FOR UPDATE OF od SKIP LOCKED LIMIT 1',
 	') RETURNING "id", "draftId", "attemptCount"',
 ].join("\n");
 
@@ -194,10 +207,20 @@ export class PostgresJobWorkerService {
 	}
 
 	private async processOutbound(workerId: string): Promise<string | null> {
+		const liveOutreachEnabled = atlasLiveOutreachEnvironmentEnabled();
+		const scheduledExecutionEnabled = atlasScheduledExecutionEnabled();
+		const localProviderDouble = localProviderDoubleEnabled();
 		const rows = await withPrincipal(
 			this.db,
 			{ userId: null, kind: "worker" },
-			(tx) => tx.$queryRawUnsafe<ClaimedDelivery[]>(CLAIM_OUTBOUND, workerId),
+			(tx) =>
+				tx.$queryRawUnsafe<ClaimedDelivery[]>(
+					CLAIM_OUTBOUND,
+					workerId,
+					liveOutreachEnabled,
+					scheduledExecutionEnabled,
+					localProviderDouble,
+				),
 		);
 		const delivery = rows[0];
 		if (!delivery) return null;
@@ -360,8 +383,7 @@ export class PostgresJobWorkerService {
 							(draft.authorization.expiresAt === null ||
 								draft.authorization.expiresAt > new Date()) &&
 							settings?.atlasLiveOutreachEnabled === true &&
-							process.env.ATLAS_LIVE_OUTREACH_ENABLED?.trim().toLowerCase() ===
-								"true");
+							atlasLiveOutreachEnvironmentEnabled());
 					const senderValid =
 						!draft.coldOutreach ||
 						draft.mailbox?.address.toLowerCase() === "outreach@iblmedia.com";
