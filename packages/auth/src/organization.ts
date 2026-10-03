@@ -6,6 +6,7 @@ import {
 	type WorkspacePermission,
 	type WorkspaceRole,
 } from "./permissions";
+import { DEFAULT_WORKSPACE_NAME } from "./workspace-name";
 
 export {
 	FINANCE_PERMISSIONS,
@@ -15,9 +16,7 @@ export {
 	type WorkspacePermission,
 	type WorkspaceRole,
 } from "./permissions";
-export { WORKSPACE_ID };
-
-export const DEFAULT_WORKSPACE_NAME = "IBL Media Consultancy";
+export { DEFAULT_WORKSPACE_NAME, WORKSPACE_ID };
 
 const ROLE_PERMISSIONS: Record<
 	WorkspaceRole,
