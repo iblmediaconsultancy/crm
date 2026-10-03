@@ -195,11 +195,15 @@ describe("finance integrity", () => {
 
 	test("captures and reads a company monthly snapshot", async () => {
 		await finance.commandCenter(userId, "admin", { scope: "everyone" });
+		const now = new Date();
+		const periodStart = new Date(
+			Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
+		);
 		const snapshot = await db.companyFinancialSnapshot.findUnique({
 			where: {
 				currency_periodStart: {
 					currency: "EUR",
-					periodStart: new Date("2026-08-01T00:00:00.000Z"),
+					periodStart,
 				},
 			},
 		});

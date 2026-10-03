@@ -82,8 +82,12 @@ beforeAll(async () => {
 		update: {},
 	});
 
-	const company = (await db.company.findFirst({ where: { domain }, select: { id: true } })) ??
-		(await db.company.create({ data: { name: `Money Co ${suffix}`, domain }, select: { id: true } }));
+	const company =
+		(await db.company.findFirst({ where: { domain }, select: { id: true } })) ??
+		(await db.company.create({
+			data: { name: `Money Co ${suffix}`, domain },
+			select: { id: true },
+		}));
 	companyId = company.id;
 
 	await rate("EUR", "1.10", RateSource.FETCHED);

@@ -25,13 +25,13 @@ import {
 	paginate,
 	resolveOrderBy,
 } from "../trpc/list-input";
+import { MembershipSecurityService } from "./membership-security.service";
 import type {
 	MemberListInput,
 	SetMemberRoleInput,
 	SetMemberStatusInput,
 	UpdateWorkspaceInput,
 } from "./workspace.contracts";
-import { MembershipSecurityService } from "./membership-security.service";
 
 export interface Workspace {
 	id: string;
@@ -61,7 +61,14 @@ const MEMBER_SELECT = {
 	role: true,
 	createdAt: true,
 	userId: true,
-	user: { select: { name: true, email: true, image: true, profile: { select: { status: true } } } },
+	user: {
+		select: {
+			name: true,
+			email: true,
+			image: true,
+			profile: { select: { status: true } },
+		},
+	},
 } as const;
 
 type MemberRow = Prisma.MemberGetPayload<{ select: typeof MEMBER_SELECT }>;
@@ -209,7 +216,11 @@ export class WorkspaceService {
 		userId: string,
 		input: SetMemberStatusInput,
 	): Promise<WorkspaceMember> {
-		await this.membershipSecurity.setStatus(userId, input.memberId, input.status);
+		await this.membershipSecurity.setStatus(
+			userId,
+			input.memberId,
+			input.status,
+		);
 		return this.readMember(input.memberId, userId);
 	}
 
@@ -227,7 +238,10 @@ export class WorkspaceService {
 			input.previousMemberId,
 		);
 	}
-	private async readMember(memberId: string, userId: string): Promise<WorkspaceMember> {
+	private async readMember(
+		memberId: string,
+		userId: string,
+	): Promise<WorkspaceMember> {
 		const row = await this.db.member.findUniqueOrThrow({
 			where: { id: memberId },
 			select: MEMBER_SELECT,

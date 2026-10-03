@@ -72,6 +72,18 @@ const VERBS: Record<string, string> = {
 	set_field_value: "Filled in a custom field",
 	manage_fields: "Changed what the CRM tracks",
 	archive_field: "Asked to retire a field",
+	create_ibl_draft: "Created an unsent IBL draft",
+	create_ibl_proposal: "Drafted an IBL proposal for review",
+	enrich_atlas_commercial_quality:
+		"Recorded evidence-backed commercial research",
+	inspect_ibl_research: "Reviewed the scoped IBL research request",
+	list_atlas_outreach_queue: "Reviewed eligible Atlas email leads",
+	list_ibl_agent_capabilities: "Checked the agent's allowed capabilities",
+	record_ibl_evidence: "Recorded a research source",
+	record_ibl_finding: "Proposed a research finding",
+	send_atlas_email: "Queued an Atlas email",
+	submit_ibl_research_review: "Submitted research for human review",
+	write_atlas_daily_report: "Wrote the Atlas daily report",
 
 	load_skill: "Read its instructions for this",
 	web_search: "Searched the web",

@@ -43,15 +43,19 @@ here, what do we sell.
 
 - **The id is a constant, never a parameter.** A function taking an `organizationId`
   has turned the plugin into tenancy plumbing.
-- **Signing in is the join; no invite flow.** `ensureWorkspaceMembership` runs in
-  `databaseHooks.session.create.before` and **degrades, never throws** — a throw fails
-  the session create and locks everyone out. The plugin's `invitation` table is unused.
-- **First account is owner**, and the hook enrols pre-existing users, oldest first.
+- **Sign-in does not enroll users.** `ensureWorkspaceMembership` runs in
+  `databaseHooks.session.create.before` and grants an active workspace context only
+  when the user already has a workspace membership and an `ACTIVE` user profile. A
+  missing membership or inactive profile leaves `activeOrganizationId` null. User
+  creation is invite-only, and the plugin's `invitation` table is unused.
+- **Membership roles are `admin`, `team`, and `contributor`**, enforced by the
+  workspace permission model. Sign-in preserves the existing assigned role and never
+  creates or changes a membership.
 - **Permissions come from `@crm/auth`** — `canRenameWorkspace`, `canChangeRole`,
   `canConfigureSso`, `canManageCurrency` — enforced by the service *and* used to
   disable the UI control, so the button and the 403 cannot disagree.
-  `WorkspaceService` adds one invariant: **the last owner cannot be demoted**, with
-  `FOR UPDATE` on the owner rows before counting.
+  `WorkspaceService` adds one invariant: **the last admin cannot be demoted**, with
+  `FOR UPDATE` on the admin rows before counting.
 - **Reads and writes go through tRPC**, not `authClient.organization.*`.
 - **Name and website are required at onboarding and cannot be skipped**, in the form
   *and* in `updateWorkspaceInput`, posting the same `workspace.update` as settings.
@@ -89,8 +93,7 @@ every query still resolves through `WORKSPACE_ID`.
 
 - **The slug is the plugin's column**, written by `workspaceSlug(name)`
   (`@crm/db/workspace`) on rename and create. **Never derive it on read.**
-- `ensureWorkspaceMembership` reconciles it; `RESERVED_SLUGS` prevents collision with
-  a real route (a collision gets `-crm`).
+- `RESERVED_SLUGS` prevents collision with a real route (a collision gets `-crm`).
 - **The proxy is the only thing that puts the slug on.** Missing or stale slugs are
   redirected with the query string intact, not 404'd; `[slug]/layout.tsx` is the
   backstop.

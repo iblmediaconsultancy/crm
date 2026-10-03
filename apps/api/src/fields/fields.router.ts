@@ -33,17 +33,26 @@ export class FieldsRouter {
 		return this.fields.coverage(id);
 	}
 
-	@Mutation({ input: fieldCreateInput, meta: { permission: "workspace.manage" } })
+	@Mutation({
+		input: fieldCreateInput,
+		meta: { permission: "workspace.manage" },
+	})
 	async create(@Input() input: z.infer<typeof fieldCreateInput>) {
 		return this.fields.create(input);
 	}
 
-	@Mutation({ input: fieldUpdateArgs, meta: { permission: "workspace.manage" } })
+	@Mutation({
+		input: fieldUpdateArgs,
+		meta: { permission: "workspace.manage" },
+	})
 	async update(@Input() input: z.infer<typeof fieldUpdateArgs>) {
 		return this.fields.update(input.id, input.data);
 	}
 
-	@Mutation({ input: fieldReorderInput, meta: { permission: "workspace.manage" } })
+	@Mutation({
+		input: fieldReorderInput,
+		meta: { permission: "workspace.manage" },
+	})
 	async reorder(@Input() input: z.infer<typeof fieldReorderInput>) {
 		return this.fields.reorder(input);
 	}

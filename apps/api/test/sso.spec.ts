@@ -133,6 +133,4 @@ describe("the sign-in page's read", () => {
 			{ providerId: "okta", name: "Okta" },
 		]);
 	});
-
-
 });

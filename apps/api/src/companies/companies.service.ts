@@ -15,9 +15,7 @@ import {
 } from "@nestjs/common";
 import { AgentQueueService } from "../agent/agent-queue.service";
 import { AgentTriggerService } from "../agent/agent-trigger.service";
-import {
-	ActivityStampService,
-} from "../crm/activity-stamp.service";
+import { ActivityStampService } from "../crm/activity-stamp.service";
 import { type BulkResult, requireOwner, runBulk } from "../crm/bulk";
 import { DuplicateService } from "../crm/duplicate.service";
 import { blankToNull, toCents } from "../crm/values";
@@ -192,10 +190,10 @@ export class CompaniesService {
 			where: { id },
 			select: {
 				id: true,
-					lifecycleState: true,
-					version: true,
-					archiveReason: true,
-					archivedAt: true,
+				lifecycleState: true,
+				version: true,
+				archiveReason: true,
+				archivedAt: true,
 				name: true,
 				domain: true,
 				website: true,
@@ -222,7 +220,6 @@ export class CompaniesService {
 				enrichmentStatus: true,
 				enrichedAt: true,
 				enrichmentError: true,
-
 
 				createdAt: true,
 				owner: { select: OWNER_SELECT },
@@ -301,7 +298,6 @@ export class CompaniesService {
 
 	async create(input: CompanyCreateInput) {
 		const domain = normalizeDomain(input.domain);
-
 
 		const company = await this.db.company.create({
 			data: {

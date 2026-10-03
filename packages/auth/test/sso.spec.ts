@@ -7,9 +7,9 @@ const { canConfigureSso, ssoCallbackBase, ssoCallbackURL, ssoProviderName } =
 
 describe("canConfigureSso", () => {
 	it("is the same answer as renaming the workspace", () => {
-		expect(canConfigureSso("owner")).toBe(true);
 		expect(canConfigureSso("admin")).toBe(true);
-		expect(canConfigureSso("member")).toBe(false);
+		expect(canConfigureSso("team")).toBe(false);
+		expect(canConfigureSso("contributor")).toBe(false);
 		expect(canConfigureSso(null)).toBe(false);
 	});
 });

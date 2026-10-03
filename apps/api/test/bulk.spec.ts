@@ -29,7 +29,10 @@ const conversion = new ConversionService(db);
 const directory = new CompanyDirectoryService(db, agent);
 
 const fields = new FieldsService(db, agent);
-const duplicates = { detectContact: async () => [], detectCompany: async () => [] };
+const duplicates = {
+	detectContact: async () => [],
+	detectCompany: async () => [],
+};
 const contacts = new ContactsService(
 	db,
 	directory,
@@ -135,12 +138,18 @@ describe("assigning an owner to a selection", () => {
 			email: `alan@${domain}`,
 		});
 
-		await expect(
-			contacts.bulkAssignOwner({
+		let error: Error | undefined;
+		try {
+			await contacts.bulkAssignOwner({
 				ids: [contact.id],
 				ownerId: `nobody-${suffix}`,
-			}),
-		).rejects.toThrow(/does not work here/);
+			});
+		} catch (caught) {
+			if (caught instanceof Error) error = caught;
+		}
+
+		expect(error).toBeInstanceOf(Error);
+		expect(error?.message).toMatch(/does not work here/);
 
 		expect(
 			await db.contact.findUnique({

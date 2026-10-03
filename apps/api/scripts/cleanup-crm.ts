@@ -65,17 +65,21 @@ async function googleAccessToken(account: {
 			grant_type: "refresh_token",
 		}),
 	});
-	if (!response.ok) throw new Error(`Google token refresh failed: ${response.status}`);
+	if (!response.ok)
+		throw new Error(`Google token refresh failed: ${response.status}`);
 	const data = (await response.json()) as {
 		access_token?: string;
 		expires_in?: number;
 	};
-	if (!data.access_token) throw new Error("Google token refresh returned no access token");
+	if (!data.access_token)
+		throw new Error("Google token refresh returned no access token");
 	await db.account.updateMany({
 		where: { userId: ATLAS_OPERATOR_ID, providerId: GOOGLE_PROVIDER_ID },
 		data: {
 			accessToken: encryptGoogleCalendarToken(data.access_token, secret),
-			accessTokenExpiresAt: new Date(Date.now() + (data.expires_in ?? 3600) * 1000),
+			accessTokenExpiresAt: new Date(
+				Date.now() + (data.expires_in ?? 3600) * 1000,
+			),
 		},
 	});
 	return data.access_token;
@@ -87,14 +91,21 @@ async function removeDummyGoogleEvent() {
 		select: { id: true, title: true, googleEventId: true, calendarId: true },
 	});
 	if (!request) return { status: "not_found" as const };
-	if (!request.googleEventId) return { status: "no_google_event_id" as const, request };
+	if (!request.googleEventId)
+		return { status: "no_google_event_id" as const, request };
 	const account = await db.account.findFirst({
 		where: { userId: ATLAS_OPERATOR_ID, providerId: GOOGLE_PROVIDER_ID },
-		select: { accessToken: true, refreshToken: true, accessTokenExpiresAt: true },
+		select: {
+			accessToken: true,
+			refreshToken: true,
+			accessTokenExpiresAt: true,
+		},
 	});
-	if (!account) throw new Error("Google Calendar account is not connected for Atlas");
+	if (!account)
+		throw new Error("Google Calendar account is not connected for Atlas");
 	const accessToken = await googleAccessToken(account);
-	const calendarId = request.calendarId || process.env.GOOGLE_CALENDAR_PRIMARY_ID || "primary";
+	const calendarId =
+		request.calendarId || process.env.GOOGLE_CALENDAR_PRIMARY_ID || "primary";
 	const response = await fetch(
 		`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(request.googleEventId)}`,
 		{ method: "DELETE", headers: { authorization: `Bearer ${accessToken}` } },
@@ -117,11 +128,26 @@ async function counts() {
 		db.deal.groupBy({ by: ["lifecycleState"], _count: { _all: true } }),
 		db.activity.groupBy({ by: ["lifecycleState"], _count: { _all: true } }),
 		db.contactRoute.groupBy({ by: ["lifecycleState"], _count: { _all: true } }),
-		db.clientFinancialProfile.groupBy({ by: ["lifecycleState"], _count: { _all: true } }),
-		db.financialEvent.groupBy({ by: ["lifecycleState"], _count: { _all: true } }),
-		db.financialSnapshot.groupBy({ by: ["lifecycleState"], _count: { _all: true } }),
-		db.companyFinancialSnapshot.groupBy({ by: ["lifecycleState"], _count: { _all: true } }),
-		db.meetingRequest.groupBy({ by: ["lifecycleState"], _count: { _all: true } }),
+		db.clientFinancialProfile.groupBy({
+			by: ["lifecycleState"],
+			_count: { _all: true },
+		}),
+		db.financialEvent.groupBy({
+			by: ["lifecycleState"],
+			_count: { _all: true },
+		}),
+		db.financialSnapshot.groupBy({
+			by: ["lifecycleState"],
+			_count: { _all: true },
+		}),
+		db.companyFinancialSnapshot.groupBy({
+			by: ["lifecycleState"],
+			_count: { _all: true },
+		}),
+		db.meetingRequest.groupBy({
+			by: ["lifecycleState"],
+			_count: { _all: true },
+		}),
 		db.agentTask.groupBy({ by: ["lifecycleState"], _count: { _all: true } }),
 		db.agentEvent.groupBy({ by: ["lifecycleState"], _count: { _all: true } }),
 		db.userProfile.groupBy({ by: ["status"], _count: { _all: true } }),
@@ -150,13 +176,19 @@ async function counts() {
 
 async function main() {
 	if (!DATABASE_URL) throw new Error("DATABASE_URL is required");
-	if (!process.env.ATLAS_LIVE_OUTREACH_ENABLED || process.env.ATLAS_LIVE_OUTREACH_ENABLED === "true")
+	if (
+		!process.env.ATLAS_LIVE_OUTREACH_ENABLED ||
+		process.env.ATLAS_LIVE_OUTREACH_ENABLED === "true"
+	)
 		throw new Error("ATLAS_LIVE_OUTREACH_ENABLED must be explicitly false");
 	const before = await counts();
 	const googleDeletion = await removeDummyGoogleEvent();
 	const archive = await db.$transaction(async (tx) => {
 		const seedCompanies = await tx.company.findMany({
-			where: { name: { in: [...SEED_COMPANY_NAMES] }, lifecycleState: "ACTIVE" },
+			where: {
+				name: { in: [...SEED_COMPANY_NAMES] },
+				lifecycleState: "ACTIVE",
+			},
 			select: { id: true },
 		});
 		const seedCompanyIds = seedCompanies.map((row) => row.id);
@@ -173,7 +205,10 @@ async function main() {
 			select: { id: true },
 		});
 		const seedRoutes = await tx.contactRoute.findMany({
-			where: { sourceKey: { startsWith: "atlas-v1:" }, lifecycleState: "ACTIVE" },
+			where: {
+				sourceKey: { startsWith: "atlas-v1:" },
+				lifecycleState: "ACTIVE",
+			},
 			select: { id: true },
 		});
 		const dummyDeal = await tx.deal.findFirst({
@@ -182,7 +217,11 @@ async function main() {
 		});
 		const dummyActivities = dummyDeal
 			? await tx.activity.findMany({
-					where: { dealId: dummyDeal.id, type: "STAGE_CHANGE", lifecycleState: "ACTIVE" },
+					where: {
+						dealId: dummyDeal.id,
+						type: "STAGE_CHANGE",
+						lifecycleState: "ACTIVE",
+					},
 					select: { id: true },
 				})
 			: [];
@@ -216,7 +255,10 @@ async function main() {
 			where: {
 				lifecycleState: "ACTIVE",
 				OR: [
-					{ kind: "workspace-profile", reason: { contains: "ibl.example.test" } },
+					{
+						kind: "workspace-profile",
+						reason: { contains: "ibl.example.test" },
+					},
 					{ sessionId: { startsWith: "wrun_" } },
 				],
 			},
@@ -232,25 +274,55 @@ async function main() {
 			archivedByUserId: ATLAS_OPERATOR_ID,
 			archiveReason: REASON,
 		};
-		const companies = await tx.company.updateMany({ where: { id: { in: seedCompanyIds } }, data: update });
-		const contacts = await tx.contact.updateMany({ where: { id: { in: seedContacts.map((row) => row.id) } }, data: update });
-		const deals = await tx.deal.updateMany({ where: { id: { in: seedDeals.map((row) => row.id) } }, data: update });
-		const activities = await tx.activity.updateMany({ where: { id: { in: seedActivities.map((row) => row.id) } }, data: update });
-		const routes = await tx.contactRoute.updateMany({ where: { id: { in: seedRoutes.map((row) => row.id) } }, data: { lifecycleState: "ARCHIVED" } });
+		const companies = await tx.company.updateMany({
+			where: { id: { in: seedCompanyIds } },
+			data: update,
+		});
+		const contacts = await tx.contact.updateMany({
+			where: { id: { in: seedContacts.map((row) => row.id) } },
+			data: update,
+		});
+		const deals = await tx.deal.updateMany({
+			where: { id: { in: seedDeals.map((row) => row.id) } },
+			data: update,
+		});
+		const activities = await tx.activity.updateMany({
+			where: { id: { in: seedActivities.map((row) => row.id) } },
+			data: update,
+		});
+		const routes = await tx.contactRoute.updateMany({
+			where: { id: { in: seedRoutes.map((row) => row.id) } },
+			data: { lifecycleState: "ARCHIVED" },
+		});
 		const dummyDealUpdate = dummyDeal
 			? await tx.deal.update({ where: { id: dummyDeal.id }, data: update })
 			: null;
-		const dummyActivityUpdate = await tx.activity.updateMany({ where: { id: { in: dummyActivities.map((row) => row.id) } }, data: update });
-		const meetings = await tx.meetingRequest.updateMany({ where: { id: { in: dummyMeetings.map((row) => row.id) } }, data: { lifecycleState: "ARCHIVED" } });
-		const profiles = await tx.clientFinancialProfile.updateMany({ where: { id: { in: financialProfileIds } }, data: { lifecycleState: "ARCHIVED" } });
-		const financialEvents = await tx.financialEvent.count({ where: { financialProfileId: { in: financialProfileIds } } });
-		const financialSnapshots = await tx.financialSnapshot.updateMany({ where: { financialProfileId: { in: financialProfileIds } }, data: { lifecycleState: "ARCHIVED" } });
+		const dummyActivityUpdate = await tx.activity.updateMany({
+			where: { id: { in: dummyActivities.map((row) => row.id) } },
+			data: update,
+		});
+		const meetings = await tx.meetingRequest.updateMany({
+			where: { id: { in: dummyMeetings.map((row) => row.id) } },
+			data: { lifecycleState: "ARCHIVED" },
+		});
+		const profiles = await tx.clientFinancialProfile.updateMany({
+			where: { id: { in: financialProfileIds } },
+			data: { lifecycleState: "ARCHIVED" },
+		});
+		const financialEvents = await tx.financialEvent.count({
+			where: { financialProfileId: { in: financialProfileIds } },
+		});
+		const financialSnapshots = await tx.financialSnapshot.updateMany({
+			where: { financialProfileId: { in: financialProfileIds } },
+			data: { lifecycleState: "ARCHIVED" },
+		});
 		const oldCompanySnapshots = await tx.companyFinancialSnapshot.findMany({
 			where: { lifecycleState: "ACTIVE" },
 			select: { id: true, currency: true, periodStart: true, data: true },
 		});
 		const snapshotsToArchive = oldCompanySnapshots.filter(
-			(row) => !JSON.stringify(row.data ?? {}).includes("crm-cleanup-recalculation"),
+			(row) =>
+				!JSON.stringify(row.data ?? {}).includes("crm-cleanup-recalculation"),
 		);
 		await tx.companyFinancialSnapshot.updateMany({
 			where: { id: { in: snapshotsToArchive.map((row) => row.id) } },
@@ -259,11 +331,14 @@ async function main() {
 		const currencies = new Map<string, Date>();
 		for (const row of oldCompanySnapshots) {
 			const current = currencies.get(row.currency);
-			if (!current || row.periodStart > current) currencies.set(row.currency, row.periodStart);
+			if (!current || row.periodStart > current)
+				currencies.set(row.currency, row.periodStart);
 		}
 		const cleanCurrencies = new Set(
 			oldCompanySnapshots
-				.filter((row) => JSON.stringify(row.data ?? {}).includes("crm-cleanup-recalculation"))
+				.filter((row) =>
+					JSON.stringify(row.data ?? {}).includes("crm-cleanup-recalculation"),
+				)
 				.map((row) => row.currency),
 		);
 		for (const [currency, periodStart] of currencies) {
@@ -285,16 +360,31 @@ async function main() {
 					newMrrBase: null,
 					lostMrrBase: null,
 					activeClients: 0,
-					data: { capturedAt: now.toISOString(), source: "crm-cleanup-recalculation" },
+					data: {
+						capturedAt: now.toISOString(),
+						source: "crm-cleanup-recalculation",
+					},
 				},
 			});
 		}
-		const suspended = await tx.userProfile.updateMany({ where: { userId: REVIEW_ADMIN_ID, status: "ACTIVE" }, data: { status: "SUSPENDED", suspendedAt: now } });
-		const seedProfilesSuspended = await tx.userProfile.updateMany({ where: { userId: { in: [...SEED_USER_IDS] }, status: "ACTIVE" }, data: { status: "SUSPENDED", suspendedAt: now } });
-		const sessions = await tx.session.deleteMany({ where: { userId: REVIEW_ADMIN_ID } });
+		const suspended = await tx.userProfile.updateMany({
+			where: { userId: REVIEW_ADMIN_ID, status: "ACTIVE" },
+			data: { status: "SUSPENDED", suspendedAt: now },
+		});
+		const seedProfilesSuspended = await tx.userProfile.updateMany({
+			where: { userId: { in: [...SEED_USER_IDS] }, status: "ACTIVE" },
+			data: { status: "SUSPENDED", suspendedAt: now },
+		});
+		const sessions = await tx.session.deleteMany({
+			where: { userId: REVIEW_ADMIN_ID },
+		});
 		const archivedAgentTasks = await tx.agentTask.updateMany({
 			where: { id: { in: agentTasks.map((row) => row.id) } },
-			data: { lifecycleState: "ARCHIVED", finishedAt: now, outcome: "QUARANTINED: old development task" },
+			data: {
+				lifecycleState: "ARCHIVED",
+				finishedAt: now,
+				outcome: "QUARANTINED: old development task",
+			},
 		});
 		const archivedAgentEvents = await tx.agentEvent.updateMany({
 			where: { sessionId: { in: agentSessionIds } },

@@ -7,6 +7,7 @@ describe("finance permissions", () => {
 	test("allows an explicit grant and respects an explicit block", async () => {
 		let allowed: boolean | undefined;
 		const service = new PermissionAccessService({
+			user: { findUnique: async () => null },
 			workspacePermissionOverride: {
 				findUnique: async () => (allowed === undefined ? null : { allowed }),
 			},

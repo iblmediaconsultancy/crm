@@ -57,7 +57,10 @@ export class AgentsRouter {
 		return this.runs.activity(input.id, input.limit, ctx.user.id);
 	}
 
-	@Mutation({ input: agentUpdateInput, meta: { permission: "workspace.manage" } })
+	@Mutation({
+		input: agentUpdateInput,
+		meta: { permission: "workspace.manage" },
+	})
 	async update(
 		@Ctx() ctx: AuthedTrpcContext,
 		@Input() input: z.infer<typeof agentUpdateInput>,
@@ -65,7 +68,10 @@ export class AgentsRouter {
 		return this.agents.update(input, ctx.user.id);
 	}
 
-	@Mutation({ input: agentDeployInput, meta: { permission: "workspace.manage" } })
+	@Mutation({
+		input: agentDeployInput,
+		meta: { permission: "workspace.manage" },
+	})
 	async deploy(
 		@Ctx() ctx: AuthedTrpcContext,
 		@Input() input: z.infer<typeof agentDeployInput>,
@@ -98,7 +104,10 @@ export class AgentsRouter {
 		return this.agents.remove(id, ctx.user.id);
 	}
 
-	@Mutation({ input: agentRunNowInput, meta: { permission: "workspace.manage" } })
+	@Mutation({
+		input: agentRunNowInput,
+		meta: { permission: "workspace.manage" },
+	})
 	async runNow(
 		@Ctx() ctx: AuthedTrpcContext,
 		@Input() input: z.infer<typeof agentRunNowInput>,

@@ -325,7 +325,7 @@ function safeFilename(value: string) {
 	return (
 		value
 			.normalize("NFKC")
-			.replace(/[\x00-\x1f\x7f/\\:]+/g, "_")
+			.replace(/[\p{Cc}/\\:]+/gu, "_")
 			.replace(/^\.+/, "")
 			.slice(0, 180) || "attachment.bin"
 	);
