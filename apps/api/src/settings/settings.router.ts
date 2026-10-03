@@ -18,7 +18,10 @@ export class SettingsRouter {
 		return this.settings.researchKey();
 	}
 
-	@Mutation({ input: setResearchKeyInput, meta: { permission: "workspace.manage" } })
+	@Mutation({
+		input: setResearchKeyInput,
+		meta: { permission: "workspace.manage" },
+	})
 	async setResearchKey(@Input() input: z.infer<typeof setResearchKeyInput>) {
 		return this.settings.setResearchKey(input.apiKey);
 	}

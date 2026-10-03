@@ -43,7 +43,10 @@ export class MailboxRouter {
 		return this.mailbox.get(ctx.user.id, input.mailboxId);
 	}
 
-	@Mutation({ input: updateOwnedMailboxIdentityInput, meta: { permission: "workspace.manage" } })
+	@Mutation({
+		input: updateOwnedMailboxIdentityInput,
+		meta: { permission: "workspace.manage" },
+	})
 	updateOwnedIdentity(
 		@Ctx() ctx: AuthedTrpcContext,
 		@Input() input: z.infer<typeof updateOwnedMailboxIdentityInput>,

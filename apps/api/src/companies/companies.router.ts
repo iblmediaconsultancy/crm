@@ -9,11 +9,11 @@ import {
 } from "nestjs-trpc";
 import type { z } from "zod";
 import {
-	canonicalLifecycleInput,
+	type CanonicalLifecycleInput,
+	canonicalBulkLifecycleInput,
 	canonicalDeletionImpactInput,
 	canonicalDestructiveDeleteInput,
-	canonicalBulkLifecycleInput,
-	type CanonicalLifecycleInput,
+	canonicalLifecycleInput,
 } from "../crm/canonical-lifecycle.contracts";
 import { CanonicalLifecycleService } from "../crm/canonical-lifecycle.service";
 import type { AuthedTrpcContext } from "../trpc/context.types";
@@ -68,7 +68,10 @@ export class CompaniesRouter {
 		);
 	}
 
-	@Mutation({ input: companyUpdateArgs, meta: { permission: "crm.update.owned" } })
+	@Mutation({
+		input: companyUpdateArgs,
+		meta: { permission: "crm.update.owned" },
+	})
 	async update(
 		@Ctx() ctx: AuthedTrpcContext,
 		@Input() input: z.infer<typeof companyUpdateArgs>,
@@ -80,7 +83,10 @@ export class CompaniesRouter {
 		return this.companies.update(input.id, input.data);
 	}
 
-	@Mutation({ input: canonicalLifecycleInput, meta: { permission: "crm.archive" } })
+	@Mutation({
+		input: canonicalLifecycleInput,
+		meta: { permission: "crm.archive" },
+	})
 	async archive(
 		@Ctx() ctx: AuthedTrpcContext,
 		@Input() input: CanonicalLifecycleInput,
@@ -91,11 +97,23 @@ export class CompaniesRouter {
 		});
 	}
 
-	@Mutation({ input: canonicalBulkLifecycleInput, meta: { permission: "crm.archive" } })
-	async bulkArchive(@Ctx() ctx: AuthedTrpcContext, @Input() input: z.infer<typeof canonicalBulkLifecycleInput>) {
-		return this.lifecycle.bulkArchive("company", input, { userId: ctx.user.id, role: ctx.workspaceRole });
+	@Mutation({
+		input: canonicalBulkLifecycleInput,
+		meta: { permission: "crm.archive" },
+	})
+	async bulkArchive(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof canonicalBulkLifecycleInput>,
+	) {
+		return this.lifecycle.bulkArchive("company", input, {
+			userId: ctx.user.id,
+			role: ctx.workspaceRole,
+		});
 	}
-	@Mutation({ input: canonicalLifecycleInput, meta: { permission: "crm.restore" } })
+	@Mutation({
+		input: canonicalLifecycleInput,
+		meta: { permission: "crm.restore" },
+	})
 	async restore(
 		@Ctx() ctx: AuthedTrpcContext,
 		@Input() input: CanonicalLifecycleInput,
@@ -106,21 +124,24 @@ export class CompaniesRouter {
 		});
 	}
 
-	@Mutation({ input: companyBulkOwnerInput, meta: { permission: "crm.bulk.assign" } })
+	@Mutation({
+		input: companyBulkOwnerInput,
+		meta: { permission: "crm.bulk.assign" },
+	})
 	async bulkAssignOwner(@Input() input: z.infer<typeof companyBulkOwnerInput>) {
 		return this.companies.bulkAssignOwner(input);
 	}
 
-	@Mutation({ input: companyBulkInput, meta: { permission: "crm.update.shared" } })
+	@Mutation({
+		input: companyBulkInput,
+		meta: { permission: "crm.update.shared" },
+	})
 	async bulkEnrich(@Input("ids") ids: string[]) {
 		return this.companies.bulkEnrich(ids);
 	}
 
 	@Mutation({ input: companyIdInput, meta: { permission: "crm.update.owned" } })
-	async enrich(
-		@Ctx() ctx: AuthedTrpcContext,
-		@Input("id") id: string,
-	) {
+	async enrich(@Ctx() ctx: AuthedTrpcContext, @Input("id") id: string) {
 		await this.lifecycle.assertCanUpdate("company", id, {
 			userId: ctx.user.id,
 			role: ctx.workspaceRole,
@@ -137,7 +158,10 @@ export class CompaniesRouter {
 		return this.companies.research(id, ctx.user.id);
 	}
 
-	@Mutation({ input: setPrimaryContactInput, meta: { permission: "crm.update.owned" } })
+	@Mutation({
+		input: setPrimaryContactInput,
+		meta: { permission: "crm.update.owned" },
+	})
 	async setPrimaryContact(
 		@Ctx() ctx: AuthedTrpcContext,
 		@Input() input: z.infer<typeof setPrimaryContactInput>,
@@ -148,13 +172,28 @@ export class CompaniesRouter {
 		});
 		return this.companies.setPrimaryContact(input.companyId, input.contactId);
 	}
-	@Query({ input: canonicalDeletionImpactInput, meta: { permission: "canonical.destroy" } })
+	@Query({
+		input: canonicalDeletionImpactInput,
+		meta: { permission: "canonical.destroy" },
+	})
 	destructionImpact(@Ctx() ctx: AuthedTrpcContext, @Input("id") id: string) {
-		return this.lifecycle.deletionImpact("company", id, { userId: ctx.user.id, role: ctx.workspaceRole });
+		return this.lifecycle.deletionImpact("company", id, {
+			userId: ctx.user.id,
+			role: ctx.workspaceRole,
+		});
 	}
 
-	@Mutation({ input: canonicalDestructiveDeleteInput, meta: { permission: "canonical.destroy" } })
-	destructiveDelete(@Ctx() ctx: AuthedTrpcContext, @Input() input: z.infer<typeof canonicalDestructiveDeleteInput>) {
-		return this.lifecycle.destructiveDelete("company", input, { userId: ctx.user.id, role: ctx.workspaceRole });
+	@Mutation({
+		input: canonicalDestructiveDeleteInput,
+		meta: { permission: "canonical.destroy" },
+	})
+	destructiveDelete(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof canonicalDestructiveDeleteInput>,
+	) {
+		return this.lifecycle.destructiveDelete("company", input, {
+			userId: ctx.user.id,
+			role: ctx.workspaceRole,
+		});
 	}
 }

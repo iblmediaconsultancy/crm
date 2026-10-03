@@ -1,6 +1,6 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import type { WorkspaceRole } from "@crm/auth";
-import { Prisma, type Db, type DomainEntityType } from "@crm/db";
+import { type Db, type DomainEntityType, Prisma } from "@crm/db";
 import {
 	ConflictException,
 	ForbiddenException,

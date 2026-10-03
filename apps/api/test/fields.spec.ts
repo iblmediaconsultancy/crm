@@ -38,7 +38,10 @@ const queue = new AgentQueueService(db);
 const conversion = new ConversionService(db);
 
 const fields = new FieldsService(db, agent);
-const duplicates = { detectContact: async () => [], detectCompany: async () => [] };
+const duplicates = {
+	detectContact: async () => [],
+	detectCompany: async () => [],
+};
 const companies = new CompaniesService(
 	db,
 	agent,

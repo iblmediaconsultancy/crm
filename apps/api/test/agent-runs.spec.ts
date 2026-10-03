@@ -122,10 +122,12 @@ describe("manual agent runs", () => {
 			userId,
 		);
 		expect(
-			(await db.agentRun.findUniqueOrThrow({
-				where: { id: runId },
-				select: { modelId: true },
-			})).modelId,
+			(
+				await db.agentRun.findUniqueOrThrow({
+					where: { id: runId },
+					select: { modelId: true },
+				})
+			).modelId,
 		).toBe("gemini-3.1-flash-lite");
 		const startedAt = new Date("2026-08-05T12:00:00.000Z");
 		const completedAt = new Date("2026-08-05T12:00:02.000Z");

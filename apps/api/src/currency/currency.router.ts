@@ -30,7 +30,10 @@ export class CurrencyRouter {
 		return this.currency.settings(ctx.user.id);
 	}
 
-	@Mutation({ input: setReportingCurrencyInput, meta: { permission: "finance.edit" } })
+	@Mutation({
+		input: setReportingCurrencyInput,
+		meta: { permission: "finance.edit" },
+	})
 	async setReportingCurrency(
 		@Ctx() ctx: AuthedTrpcContext,
 		@Input() input: z.infer<typeof setReportingCurrencyInput>,
@@ -46,7 +49,10 @@ export class CurrencyRouter {
 		return this.currency.setManualRate(ctx.user.id, input.currency, input.rate);
 	}
 
-	@Mutation({ input: removeManualRateInput, meta: { permission: "finance.edit" } })
+	@Mutation({
+		input: removeManualRateInput,
+		meta: { permission: "finance.edit" },
+	})
 	async removeManualRate(
 		@Ctx() ctx: AuthedTrpcContext,
 		@Input() input: z.infer<typeof removeManualRateInput>,

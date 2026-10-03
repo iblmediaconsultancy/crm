@@ -35,10 +35,7 @@ export class OnboardingService {
 		};
 	}
 
-	async invite(
-		actorUserId: string,
-		input: z.infer<typeof inviteMemberInput>,
-	) {
+	async invite(actorUserId: string, input: z.infer<typeof inviteMemberInput>) {
 		const existing = await this.db.user.findUnique({
 			where: { email: input.email },
 			select: { id: true },
@@ -52,11 +49,11 @@ export class OnboardingService {
 		const expiresAt = new Date(
 			Date.now() + input.expiresInDays * 24 * 60 * 60 * 1000,
 		);
-		const appUrl = (process.env.APP_URL?.split(",")[0] ?? "http://localhost:3000").replace(
-			/\/$/,
-			"",
-		);
-		const url = appUrl + "/accept-invitation?id=" + encodeURIComponent(invitationId);
+		const appUrl = (
+			process.env.APP_URL?.split(",")[0] ?? "http://localhost:3000"
+		).replace(/\/$/, "");
+		const url =
+			appUrl + "/accept-invitation?id=" + encodeURIComponent(invitationId);
 		const key = stableSystemEmailKey("INVITATION", invitationId);
 		return this.db.$transaction(async (tx) => {
 			await tx.invitation.updateMany({
@@ -84,7 +81,9 @@ export class OnboardingService {
 					actorUserId,
 					recipientEmail: input.email,
 					subject: "Invitation to IBL Command Center",
-					textBody: "You were invited to IBL Command Center. Accept the invitation: " + url,
+					textBody:
+						"You were invited to IBL Command Center. Accept the invitation: " +
+						url,
 					idempotencyKey: key,
 				},
 			});
@@ -124,13 +123,24 @@ export class OnboardingService {
 
 	async resend(actorUserId: string, invitationId: string) {
 		const invitation = await this.db.invitation.findFirst({
-			where: { id: invitationId, organizationId: WORKSPACE_ID, status: "pending" },
+			where: {
+				id: invitationId,
+				organizationId: WORKSPACE_ID,
+				status: "pending",
+			},
 			select: { email: true, role: true },
 		});
-		if (!invitation || (invitation.role !== "team" && invitation.role !== "contributor")) {
+		if (
+			!invitation ||
+			(invitation.role !== "team" && invitation.role !== "contributor")
+		) {
 			throw new NotFoundException("Pending invitation not found.");
 		}
-		return this.invite(actorUserId, { email: invitation.email, role: invitation.role, expiresInDays: 7 });
+		return this.invite(actorUserId, {
+			email: invitation.email,
+			role: invitation.role,
+			expiresInDays: 7,
+		});
 	}
 
 	async cancel(actorUserId: string, invitationId: string) {
@@ -142,7 +152,8 @@ export class OnboardingService {
 			},
 			data: { status: "canceled" },
 		});
-		if (result.count !== 1) throw new NotFoundException("Pending invitation not found.");
+		if (result.count !== 1)
+			throw new NotFoundException("Pending invitation not found.");
 		await this.db.securityAuditEvent.create({
 			data: {
 				actorUserId,
@@ -168,7 +179,9 @@ export class OnboardingService {
 				invitation.status !== "pending" ||
 				invitation.expiresAt <= now
 			) {
-				throw new BadRequestException("This invitation is invalid or has expired.");
+				throw new BadRequestException(
+					"This invitation is invalid or has expired.",
+				);
 			}
 			if (invitation.role !== "team" && invitation.role !== "contributor") {
 				throw new BadRequestException("This invitation has an invalid role.");
