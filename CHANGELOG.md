@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.3](https://github.com/iblmediaconsultancy/crm/compare/v1.6.2...v1.6.3) (2026-10-03)
+
+
+### Fixes
+
+* **api:** gate outbound claims before leasing ([#36](https://github.com/iblmediaconsultancy/crm/issues/36)) ([d16b996](https://github.com/iblmediaconsultancy/crm/commit/d16b99650a32e56d0d68a74bcd83ddf24677f05a))
+
 ## [1.6.2](https://github.com/iblmediaconsultancy/crm/compare/v1.6.1...v1.6.2) (2026-10-03)
 
 
