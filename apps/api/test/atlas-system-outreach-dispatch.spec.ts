@@ -39,6 +39,22 @@ async function withLiveOutreachEnabled<T>(work: () => Promise<T>): Promise<T> {
 }
 
 describe("Atlas system outreach readiness and dispatch", () => {
+	test("reports READY for the verified system mailbox without user ownership", () => {
+		const readiness = evaluateAtlasSystemReadiness(
+			stateReady,
+			runtimeReady,
+			true,
+		);
+
+		expect(readiness.status).toBe("READY");
+		expect(readiness.mailbox).toMatchObject({
+			status: "READY",
+			owner: "ATLAS_SYSTEM_OPERATOR",
+			address: "outreach@iblmedia.com",
+		});
+		expect(readiness.blockers).toEqual([]);
+	});
+
 	test("keeps system mailbox readiness separate and blocks when either live gate is off", () => {
 		const readiness = evaluateAtlasSystemReadiness(
 			{ ...stateReady, crmLiveOutreachEnabled: false },
