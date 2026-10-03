@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { firstMessageBrowserStateAllowsSend } from "@crm/db/linkedin-browser-adapter";
+import { linkedinMessageExecutionUrl } from "../src/linkedin/cdp-linkedin-browser-adapter";
 import {
 	type LinkedInMessageComposerSnapshot,
 	type LinkedInMessageComposerSurface,
@@ -243,6 +244,93 @@ describe("LinkedIn message composer resolver", () => {
 			{ expectedExternalConversationKey: "thread-42" },
 		);
 		expect(result.status).toBe("FOUND");
+	});
+
+	it("binds an existing thread composer to both the recipient and thread key", () => {
+		const result = resolveLinkedInMessageComposer(
+			snapshot({
+				kind: "THREAD",
+				recipientIdentifier: recipient,
+				externalConversationKey: "thread-42",
+			}),
+			{
+				expectedRecipientIdentifier: recipient,
+				expectedExternalConversationKey: "thread-42",
+			},
+		);
+		expect(result.status).toBe("FOUND");
+		expect(
+			resolveLinkedInMessageComposer(
+				snapshot({
+					kind: "THREAD",
+					recipientIdentifier: otherRecipient,
+					externalConversationKey: "thread-42",
+				}),
+				{
+					expectedRecipientIdentifier: recipient,
+					expectedExternalConversationKey: "thread-42",
+				},
+			).status,
+		).not.toBe("FOUND");
+		expect(
+			resolveLinkedInMessageComposer(
+				snapshot({
+					kind: "THREAD",
+					recipientIdentifier: recipient,
+					externalConversationKey: "thread-other",
+				}),
+				{
+					expectedRecipientIdentifier: recipient,
+					expectedExternalConversationKey: "thread-42",
+				},
+			).status,
+		).toBe("AMBIGUOUS");
+	});
+
+	it("matches percent-encoded thread keys to their canonical key", () => {
+		const result = resolveLinkedInMessageComposer(
+			snapshot({
+				kind: "THREAD",
+				recipientIdentifier: recipient,
+				externalConversationKey: "thread-42==",
+			}),
+			{
+				expectedRecipientIdentifier: recipient,
+				expectedExternalConversationKey: "thread-42%3D%3D",
+			},
+		);
+		expect(result.status).toBe("FOUND");
+	});
+
+	it("navigates existing-conversation replies to the stored thread", () => {
+		expect(
+			linkedinMessageExecutionUrl(
+				"https://www.linkedin.com/in/ster-hassan-147b433b0/",
+				"2-NTkzYjE3MDgtODU4My00YzlkLTk2MWYtNWY5OGViYmViZjY3XzEwMA==",
+			),
+		).toBe(
+			"https://www.linkedin.com/messaging/thread/2-NTkzYjE3MDgtODU4My00YzlkLTk2MWYtNWY5OGViYmViZjY3XzEwMA==/",
+		);
+		expect(
+			linkedinMessageExecutionUrl(
+				"https://www.linkedin.com/in/ster-hassan-147b433b0/",
+				"2-thread-42%3D%3D",
+			),
+		).toBe("https://www.linkedin.com/messaging/thread/2-thread-42==/");
+	});
+
+	it("keeps first-message navigation on the profile when no thread is stored", () => {
+		const profileUrl = "https://www.linkedin.com/in/ster-hassan-147b433b0/";
+		expect(linkedinMessageExecutionUrl(profileUrl, null)).toBe(profileUrl);
+	});
+
+	it("rejects unsafe stored conversation keys", () => {
+		expect(
+			linkedinMessageExecutionUrl(
+				"https://www.linkedin.com/in/ster-hassan-147b433b0/",
+				"thread-42/other?recipient=wrong",
+			),
+		).toBeNull();
 	});
 
 	it("keeps exact existing threads bound to their stored conversation", () => {
