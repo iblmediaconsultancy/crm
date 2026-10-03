@@ -43,6 +43,9 @@ beforeAll(async () => {
 			},
 		],
 	});
+	await db.userProfile.createMany({
+		data: [{ userId }, { userId: viewerId }],
+	});
 	await db.member.createMany({
 		data: [
 			{
