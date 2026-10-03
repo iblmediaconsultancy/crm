@@ -176,8 +176,8 @@ describe("agent lifecycle", () => {
 			{ id: agentId, versionId, clientRequestId: crypto.randomUUID() },
 			userId,
 		);
-		const nextRunAt = new Date("2026-08-06T12:00:00.000Z");
-		const lastRunAt = new Date("2026-08-05T12:00:00.000Z");
+		const nextRunAt = new Date(Date.now() + 60 * 60 * 1000);
+		const lastRunAt = new Date(nextRunAt.getTime() - 24 * 60 * 60 * 1000);
 		await db.agentTrigger.create({
 			data: {
 				agentId,

@@ -60,9 +60,7 @@ describe("Auth (e2e)", () => {
 			.get("/api/trpc/sso.signInOptions")
 			.expect(200);
 
-		expect(response.body.result.data).toEqual({
-			providers: [],
-		});
+		expect(response.body.result.data).toEqual({ providers: [] });
 	});
 
 	it("keeps the SSO configuration itself behind the session", async () => {

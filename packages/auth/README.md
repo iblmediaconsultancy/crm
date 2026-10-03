@@ -70,7 +70,7 @@ whatever `process.env` its host process has, and `src/env.ts` imports
 CLI loads `auth.ts` directly. See
 [`docs/environment.md`](../../docs/environment.md).
 
-Public signup and Google/Microsoft social authentication are disabled. Accounts are created through a validated invitation or the one-time Admin bootstrap. `ALLOWED_SIGN_IN`, active membership status, the Admin/Team/Contributor permission matrix, service guards, and forced PostgreSQL RLS all participate in authorization.
+Public signup and Google/Microsoft social authentication are disabled. Accounts are provisioned through the one-time Admin bootstrap or authorized administration. Sign-in does not enroll a user: access requires an existing workspace membership and an `ACTIVE` user profile. The assigned `admin`, `team`, or `contributor` role is preserved. `ALLOWED_SIGN_IN`, membership status, the workspace permission matrix, service guards, and forced PostgreSQL RLS all participate in authorization.
 
 ## Changing the schema
 

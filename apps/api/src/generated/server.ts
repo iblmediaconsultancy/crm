@@ -593,11 +593,15 @@ const appRouter = t.router({
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OperationsRouter["createProof"]>>)
     }),
   outreachLifecycle: t.router({
+    atlasSystemReadiness: publicProcedure
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OutreachLifecycleRouter["atlasSystemReadiness"]>>),
     listAtlasAuthorizations: publicProcedure
       .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OutreachLifecycleRouter["listAtlasAuthorizations"]>>),
     issueAtlasAuthorization: publicProcedure
       .input(atlasAuthorizationIssueInput)
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OutreachLifecycleRouter["issueAtlasAuthorization"]>>),
+    dispatchAtlasOutreach: publicProcedure
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OutreachLifecycleRouter["dispatchAtlasOutreach"]>>),
     revokeAtlasAuthorization: publicProcedure
       .input(atlasAuthorizationRevokeInput)
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OutreachLifecycleRouter["revokeAtlasAuthorization"]>>),

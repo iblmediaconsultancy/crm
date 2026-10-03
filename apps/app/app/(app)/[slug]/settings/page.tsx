@@ -17,6 +17,7 @@ import { ProfileForm } from "./profile-form";
 export const metadata: Metadata = {
 	title: "Profile",
 };
+export const instant = false;
 
 export default function GeneralSettingsPage() {
 	return (

@@ -13,7 +13,7 @@ bun run test
 bun run build && bun run start:prod
 ```
 
-The API requires `DATABASE_URL`, `BETTER_AUTH_SECRET`, and `ALLOWED_SIGN_IN`. Public signup is disabled; users enter through an invitation or an Admin bootstrap. Google and Microsoft authentication and mailbox modules are quarantined and are not part of the V2 runtime. Provider sending credentials belong only to the PostgreSQL-backed worker. `src/config/env.validation.ts` defines the runtime groups; [`docs/environment.md`](../../docs/environment.md) explains where the file is
+The API requires `DATABASE_URL`, `BETTER_AUTH_SECRET`, and `ALLOWED_SIGN_IN`. Public signup is disabled. Sign-in does not enroll users: access requires an existing workspace membership and an `ACTIVE` user profile, preserving the assigned `admin`, `team`, or `contributor` role. Accounts are provisioned through the one-time Admin bootstrap or authorized administration. Google and Microsoft authentication and mailbox modules are quarantined and are not part of the V2 runtime. Provider sending credentials belong only to the PostgreSQL-backed worker. `src/config/env.validation.ts` defines the runtime groups; [`docs/environment.md`](../../docs/environment.md) explains where the file is
 found.
 
 Bun is the runtime, not just the package manager: `@crm/db` and `@crm/auth`

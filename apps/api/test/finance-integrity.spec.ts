@@ -9,7 +9,6 @@ import { FinanceService } from "../src/finance/finance.service";
 const suffix = process.env.TEST_RUN_ID ?? "finance-integrity-spec";
 const domain = `finance-${suffix}.test`;
 const userId = `finance-user-${suffix}`;
-
 const conversion = {
 	reportingCurrency: async () => "EUR",
 	rateFor: async () => ({

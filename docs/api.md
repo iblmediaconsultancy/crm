@@ -47,7 +47,9 @@ here, what do we sell.
   `databaseHooks.session.create.before` and grants an active workspace context only
   when the user already has a workspace membership and an `ACTIVE` user profile. A
   missing membership or inactive profile leaves `activeOrganizationId` null. User
-  creation is invite-only, and the plugin's `invitation` table is unused.
+  creation is not available through sign-in; accounts are provisioned through the
+  one-time Admin bootstrap or authorized administration. The plugin's `invitation`
+  table is unused.
 - **Membership roles are `admin`, `team`, and `contributor`**, enforced by the
   workspace permission model. Sign-in preserves the existing assigned role and never
   creates or changes a membership.
