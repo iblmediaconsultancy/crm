@@ -6,7 +6,7 @@ describe("Atlas authorization lifecycle", () => {
 	test("issues a scoped authorization and persists its audit event", async () => {
 		const events: unknown[] = [];
 		const transactions: unknown[] = [];
-		const expiresAt = new Date("2026-10-02T18:00:00.000Z");
+		const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
 		const authorization = {
 			id: "auth-new",
 			status: "ACTIVE" as const,

@@ -180,7 +180,9 @@ export class SsoService {
 		void userId;
 		void headers;
 		void input;
-		throw new ForbiddenException("SSO is disabled in IBL Command Center Phase 1.");
+		throw new ForbiddenException(
+			"SSO is disabled in IBL Command Center Phase 1.",
+		);
 	}
 
 	async remove(
@@ -191,7 +193,9 @@ export class SsoService {
 		void userId;
 		void headers;
 		void input;
-		throw new ForbiddenException("SSO is disabled in IBL Command Center Phase 1.");
+		throw new ForbiddenException(
+			"SSO is disabled in IBL Command Center Phase 1.",
+		);
 	}
 	private searchWhere(q: string): Prisma.SsoProviderWhereInput {
 		const term = q.trim();

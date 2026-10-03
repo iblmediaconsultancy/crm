@@ -38,7 +38,10 @@ const queue = new AgentQueueService(db);
 const conversion = new ConversionService(db);
 
 const fields = new FieldsService(db, agent);
-const duplicates = { detectContact: async () => [], detectCompany: async () => [] };
+const duplicates = {
+	detectContact: async () => [],
+	detectCompany: async () => [],
+};
 const companies = new CompaniesService(
 	db,
 	agent,
@@ -177,9 +180,15 @@ describe("field definitions", () => {
 			spec_runs_on: "AWS",
 		});
 
-		await expect(fields.update(field.id, { type: "TEXT" })).rejects.toThrow(
-			/cannot change/,
-		);
+		let error: Error | undefined;
+		try {
+			await fields.update(field.id, { type: "TEXT" });
+		} catch (caught) {
+			if (caught instanceof Error) error = caught;
+		}
+
+		expect(error).toBeInstanceOf(Error);
+		expect(error?.message).toMatch(/cannot change/);
 	});
 
 	it("will not turn a field into a select with nothing to choose", async () => {
@@ -195,9 +204,15 @@ describe("field definitions", () => {
 			showOnTable: false,
 		});
 
-		await expect(fields.update(field.id, { type: "SELECT" })).rejects.toThrow(
-			/at least one option/,
-		);
+		let error: Error | undefined;
+		try {
+			await fields.update(field.id, { type: "SELECT" });
+		} catch (caught) {
+			if (caught instanceof Error) error = caught;
+		}
+
+		expect(error).toBeInstanceOf(Error);
+		expect(error?.message).toMatch(/at least one option/);
 	});
 
 	it("archives without losing values, and restores them", async () => {
@@ -251,9 +266,15 @@ describe("field definitions", () => {
 			keys.indexOf("spec_runs_on"),
 		);
 
-		await expect(
-			fields.reorder({ entity: "CONTACT", ids: [first.id] }),
-		).rejects.toThrow(/not on this record type/);
+		let error: Error | undefined;
+		try {
+			await fields.reorder({ entity: "CONTACT", ids: [first.id] });
+		} catch (caught) {
+			if (caught instanceof Error) error = caught;
+		}
+
+		expect(error).toBeInstanceOf(Error);
+		expect(error?.message).toMatch(/not on this record type/);
 	});
 });
 
@@ -295,9 +316,17 @@ describe("field values", () => {
 		expect(renewal?.value).toBe("2027-03-31T12:30:00.000Z");
 
 		for (const raw of ["2027/03/31", "03-31-2027", "31 March 2027"]) {
-			await expect(
-				fields.applyValues(db, "COMPANY", record, { spec_renewal: raw }),
-			).rejects.toThrow(/takes a date/);
+			let error: Error | undefined;
+			try {
+				await fields.applyValues(db, "COMPANY", record, {
+					spec_renewal: raw,
+				});
+			} catch (caught) {
+				if (caught instanceof Error) error = caught;
+			}
+
+			expect(error).toBeInstanceOf(Error);
+			expect(error?.message).toMatch(/takes a date/);
 		}
 
 		expect(
@@ -322,12 +351,18 @@ describe("field values", () => {
 	it("writes none of a batch when one value in it is refused", async () => {
 		const record = await makeCompany("batch");
 
-		await expect(
-			fields.applyValues(db, "COMPANY", record, {
+		let error: Error | undefined;
+		try {
+			await fields.applyValues(db, "COMPANY", record, {
 				spec_seats: "12",
 				spec_renewal: "the spring",
-			}),
-		).rejects.toThrow(/takes a date/);
+			});
+		} catch (caught) {
+			if (caught instanceof Error) error = caught;
+		}
+
+		expect(error).toBeInstanceOf(Error);
+		expect(error?.message).toMatch(/takes a date/);
 
 		expect(await db.fieldValue.count({ where: { companyId: record } })).toBe(0);
 	});
@@ -347,12 +382,18 @@ describe("field values", () => {
 			showOnTable: false,
 		});
 
-		await expect(
-			fields.applyValues(db, "COMPANY", record, {
+		let error: Error | undefined;
+		try {
+			await fields.applyValues(db, "COMPANY", record, {
 				spec_seats: "12",
 				spec_champion: `nobody-${suffix}`,
-			}),
-		).rejects.toThrow(/works here/);
+			});
+		} catch (caught) {
+			if (caught instanceof Error) error = caught;
+		}
+
+		expect(error).toBeInstanceOf(Error);
+		expect(error?.message).toMatch(/works here/);
 
 		expect(await db.fieldValue.count({ where: { companyId: record } })).toBe(0);
 
@@ -429,9 +470,17 @@ describe("a select option that was taken away", () => {
 			),
 		).toEqual(["Silver"]);
 
-		await expect(
-			fields.applyValues(db, "COMPANY", record, { spec_tier: "Gold" }),
-		).rejects.toThrow(/no option/);
+		let error: Error | undefined;
+		try {
+			await fields.applyValues(db, "COMPANY", record, {
+				spec_tier: "Gold",
+			});
+		} catch (caught) {
+			if (caught instanceof Error) error = caught;
+		}
+
+		expect(error).toBeInstanceOf(Error);
+		expect(error?.message).toMatch(/no option/);
 	});
 
 	it("still reads as a label in a table, not as an option id", async () => {

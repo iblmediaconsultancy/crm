@@ -54,8 +54,14 @@ export class MembershipSecurityService {
 			});
 			if (status === "SUSPENDED") {
 				await tx.session.deleteMany({ where: { userId: target.userId } });
-				await this.enqueueReallocation(tx, actorUserId, target.userId, "MEMBER_SUSPENDED");
-			}			await this.audit(tx, actorUserId, "MEMBER_STATUS_CHANGED", target.id, {
+				await this.enqueueReallocation(
+					tx,
+					actorUserId,
+					target.userId,
+					"MEMBER_SUSPENDED",
+				);
+			}
+			await this.audit(tx, actorUserId, "MEMBER_STATUS_CHANGED", target.id, {
 				from: target.user.profile?.status ?? null,
 				to: status,
 			});
@@ -74,7 +80,12 @@ export class MembershipSecurityService {
 				data: { status: "SUSPENDED", suspendedAt: new Date() },
 			});
 			await tx.session.deleteMany({ where: { userId: target.userId } });
-			await this.enqueueReallocation(tx, actorUserId, target.userId, "MEMBER_REMOVED");
+			await this.enqueueReallocation(
+				tx,
+				actorUserId,
+				target.userId,
+				"MEMBER_REMOVED",
+			);
 			await this.audit(tx, actorUserId, "MEMBER_REMOVED", target.id, {
 				userId: target.userId,
 				sessionsRevoked: true,

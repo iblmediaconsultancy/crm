@@ -7,6 +7,7 @@ import {
 	UseMiddlewares,
 } from "nestjs-trpc";
 import type { z } from "zod";
+import { AgentTriggerService } from "../agent/agent-trigger.service";
 import { OutreachLifecycleService } from "../providers/outreach-lifecycle.service";
 import type { AuthedTrpcContext } from "../trpc/context.types";
 import { AuthMiddleware } from "../trpc/middlewares/auth.middleware";
@@ -23,7 +24,17 @@ import {
 @Router({ alias: "outreachLifecycle" })
 @UseMiddlewares(AuthMiddleware, PermissionMiddleware)
 export class OutreachLifecycleRouter {
-	constructor(private readonly outreach: OutreachLifecycleService) {}
+	constructor(
+		private readonly outreach: OutreachLifecycleService,
+		private readonly agentTrigger: AgentTriggerService,
+	) {}
+	@Query({ meta: { permission: "outreach.approve" } })
+	atlasSystemReadiness(@Ctx() ctx: AuthedTrpcContext) {
+		return this.outreach.atlasSystemReadiness({
+			userId: ctx.user.id,
+			role: ctx.workspaceRole,
+		});
+	}
 	@Query({ meta: { permission: "outreach.approve" } }) listAtlasAuthorizations(
 		@Ctx() ctx: AuthedTrpcContext,
 	) {
@@ -44,6 +55,15 @@ export class OutreachLifecycleRouter {
 			{ userId: ctx.user.id, role: ctx.workspaceRole },
 			input,
 		);
+	}
+	@Mutation({ meta: { permission: "outreach.approve" } })
+	async dispatchAtlasOutreach(@Ctx() ctx: AuthedTrpcContext) {
+		const task = await this.outreach.dispatchAtlasOutreach({
+			userId: ctx.user.id,
+			role: ctx.workspaceRole,
+		});
+		this.agentTrigger.atlasOutreachQueued();
+		return task;
 	}
 	@Mutation({
 		input: atlasAuthorizationRevokeInput,

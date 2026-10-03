@@ -19,6 +19,7 @@ import { MembersTable } from "./members-table";
 export const metadata: Metadata = {
 	title: "Team",
 };
+export const instant = false;
 
 export default function MembersSettingsPage({
 	searchParams,

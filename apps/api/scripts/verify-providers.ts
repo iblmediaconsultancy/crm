@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
 import { db, Prisma, type ProviderCapabilityKey } from "@crm/db";
+import { TlsMiabProtocolClient } from "../src/providers/miab-imap.client";
 import {
 	EnvironmentMiabCredentialSource,
 	EnvironmentResendCredentialSource,
 } from "../src/providers/provider-credentials";
-import { TlsMiabProtocolClient } from "../src/providers/miab-imap.client";
 import { HttpResendTransport } from "../src/providers/resend-transport";
 
 const args = new Set(process.argv.slice(2));

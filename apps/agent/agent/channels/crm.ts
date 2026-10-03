@@ -81,6 +81,14 @@ export default defineChannel({
 			return new Response(null, { status: 202 });
 		}),
 
+		POST("/internal/crm/readiness", async (request) => {
+			if (!authorised(request)) {
+				return new Response("Unauthorized", { status: 401 });
+			}
+
+			return new Response(null, { status: 204 });
+		}),
+
 		POST(
 			"/internal/crm/research-dispatch",
 			async (request, { send, waitUntil }) => {

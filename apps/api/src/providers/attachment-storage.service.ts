@@ -57,7 +57,9 @@ export class AttachmentStorageService {
 				const checksumSha256 = createHash("sha256")
 					.update(item.content)
 					.digest("hex");
-				const filename = safeFilename(item.filename ?? "attachment.bin");
+				const filename = sanitizeAttachmentFilename(
+					item.filename ?? "attachment.bin",
+				);
 				const objectKey = `mailboxes/${mailboxId}/messages/${messageId}/${checksumSha256}-${filename}`;
 				const existing = await this.db.messageAttachment.findUnique({
 					where: { objectKey },
@@ -321,11 +323,16 @@ async function secret(fileName: string, legacyName: string) {
 	if (value && process.env.NODE_ENV !== "production") return value;
 	throw new ConflictException(`${fileName} is not configured.`);
 }
-function safeFilename(value: string) {
+const unsafeFilenameCharacters = new RegExp(
+	`[${String.fromCharCode(0)}-${String.fromCharCode(31)}${String.fromCharCode(127)}/\\\\:]+`,
+	"g",
+);
+
+export function sanitizeAttachmentFilename(value: string) {
 	return (
 		value
 			.normalize("NFKC")
-			.replace(/[\x00-\x1f\x7f/\\:]+/g, "_")
+			.replace(unsafeFilenameCharacters, "_")
 			.replace(/^\.+/, "")
 			.slice(0, 180) || "attachment.bin"
 	);

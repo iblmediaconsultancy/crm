@@ -8,9 +8,9 @@ import type {
 	MiddlewareResponse,
 	TRPCMiddleware,
 } from "nestjs-trpc";
-import { setRequestUserId } from "../../logging/request-context";
 import { InjectDatabase } from "../../database/database.constants";
 import { runInPrincipalTransaction } from "../../database/database-context";
+import { setRequestUserId } from "../../logging/request-context";
 import type { AuthedTrpcContext, BaseTrpcContext } from "../context.types";
 
 @Injectable()
@@ -39,7 +39,10 @@ export class AuthMiddleware implements TRPCMiddleware {
 			},
 		});
 		if (identity?.profile?.status !== "ACTIVE") {
-			throw new TRPCError({ code: "FORBIDDEN", message: "Account is suspended." });
+			throw new TRPCError({
+				code: "FORBIDDEN",
+				message: "Account is suspended.",
+			});
 		}
 		const role = identity.members[0]?.role;
 		if (!role || !isWorkspaceRole(role)) {

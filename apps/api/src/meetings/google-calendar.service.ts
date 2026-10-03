@@ -67,8 +67,8 @@ export class GoogleCalendarService {
 			linked: Boolean(account),
 			connected: Boolean(
 				account?.refreshToken &&
-				parseScopes(account.scope).has(READ_SCOPE) &&
-				parseScopes(account.scope).has(WRITE_SCOPE),
+					parseScopes(account.scope).has(READ_SCOPE) &&
+					parseScopes(account.scope).has(WRITE_SCOPE),
 			),
 			readAccess: parseScopes(account?.scope).has(READ_SCOPE),
 			writeAccess: parseScopes(account?.scope).has(WRITE_SCOPE),

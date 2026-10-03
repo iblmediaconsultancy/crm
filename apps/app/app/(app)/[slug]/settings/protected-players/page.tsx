@@ -13,6 +13,7 @@ import { getServerQueryClient, getServerTrpc } from "@/lib/trpc/server";
 import { ProtectedPlayersForm } from "./protected-players-form";
 
 export const metadata: Metadata = { title: "Protected players" };
+export const instant = false;
 
 export default async function ProtectedPlayersPage() {
 	await requireSession();

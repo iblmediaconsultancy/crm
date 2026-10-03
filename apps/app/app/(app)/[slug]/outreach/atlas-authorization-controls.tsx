@@ -42,6 +42,11 @@ export function AtlasAuthorizationControls() {
 		...trpc.outreachLifecycle.listAtlasAuthorizations.queryOptions(),
 		enabled: canManage,
 	});
+	const readiness = useQuery({
+		...trpc.outreachLifecycle.atlasSystemReadiness.queryOptions(),
+		enabled: canManage,
+		refetchInterval: 30_000,
+	});
 	const [expiresAt, setExpiresAt] = useState("");
 	const [reason, setReason] = useState("");
 	const [confirmed, setConfirmed] = useState(false);
@@ -72,6 +77,15 @@ export function AtlasAuthorizationControls() {
 			onError: (error) => toast.error(error.message),
 		}),
 	);
+	const dispatch = useMutation(
+		trpc.outreachLifecycle.dispatchAtlasOutreach.mutationOptions({
+			onSuccess: async () => {
+				toast.success("Atlas Email cycle queued.");
+				await queryClient.invalidateQueries();
+			},
+			onError: (error) => toast.error(error.message),
+		}),
+	);
 
 	if (!workspace.data || !canManage) return null;
 
@@ -86,6 +100,67 @@ export function AtlasAuthorizationControls() {
 				</CardDescription>
 			</CardHeader>
 			<CardContent className="grid gap-5">
+				<section
+					className="grid gap-3 rounded-md border p-4"
+					aria-labelledby="atlas-system-readiness"
+				>
+					<div className="grid gap-1">
+						<h3 id="atlas-system-readiness" className="font-medium text-sm">
+							Atlas system sender
+						</h3>
+						<p className="text-sm text-muted-foreground">
+							This is Atlas’s verified system mailbox, separate from your
+							personal mailbox. A cycle can start only when its provider,
+							bridge, authorization and both live-outreach gates are ready.
+						</p>
+					</div>
+					{readiness.isPending ? (
+						<p className="text-sm text-muted-foreground" role="status">
+							Checking Atlas system readiness.
+						</p>
+					) : readiness.error ? (
+						<p className="text-sm text-destructive" role="alert">
+							Unable to verify Atlas system readiness.
+						</p>
+					) : readiness.data ? (
+						<>
+							<div className="grid gap-2 text-sm sm:grid-cols-2">
+								<p>
+									Mailbox: {readiness.data.mailbox.status} ·{" "}
+									{readiness.data.mailbox.address}
+								</p>
+								<p>Provider: {readiness.data.provider}</p>
+								<p>Agent bridge: {readiness.data.bridge}</p>
+								<p>PostgreSQL worker: {readiness.data.postgresWorker}</p>
+								<p>Authorization: {readiness.data.authorization.status}</p>
+								<p>Live outreach: {readiness.data.liveOutreach}</p>
+								<p>Dispatch: {readiness.data.status}</p>
+							</div>
+							{readiness.data.blockers.length ? (
+								<p className="text-xs text-muted-foreground">
+									Blocked by: {readiness.data.blockers.join(", ")}
+								</p>
+							) : null}
+							<div className="grid gap-2">
+								<p className="text-xs text-muted-foreground">
+									Running a cycle asks Atlas to review its eligible queue and
+									may send one email if all runtime and per-send safeguards
+									pass.
+								</p>
+								<Button
+									disabled={
+										readiness.data.status !== "READY" || dispatch.isPending
+									}
+									onClick={() => dispatch.mutate()}
+								>
+									{dispatch.isPending
+										? "Queueing Atlas cycle…"
+										: "Run Atlas Email cycle"}
+								</Button>
+							</div>
+						</>
+					) : null}
+				</section>
 				<form
 					className="grid gap-3"
 					onSubmit={(event) => {

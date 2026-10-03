@@ -835,8 +835,11 @@ export const ac = createAccessControl(statement);
   `banned`, `banReason`, `banExpires` to `User` and `impersonatedBy` to
   `Session`. Skipping this produces runtime adapter errors, not type errors.
 
-First Google sign-in bootstraps as `owner` if no users exist; everyone after
-defaults to `rep`, promoted from Settings → Members.
+This early plan's Google sign-in bootstrap and `owner`/`rep` roles were superseded.
+The current policy is administratively provisioned accounts, no sign-in
+auto-enrollment, an existing workspace membership plus an `ACTIVE` user profile,
+and the `admin`/`team`/`contributor` role model. See [`api.md`](api.md) and the
+authentication package README.
 
 ---
 

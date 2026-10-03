@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.0](https://github.com/iblmediaconsultancy/crm/compare/v1.5.9...v1.6.0) (2026-10-03)
+
+
+### Features
+
+* **atlas:** restore authenticated Email dispatch readiness ([789e8ce](https://github.com/iblmediaconsultancy/crm/commit/789e8ced1d559bc4b415d5ba9ab07d5b77eadc97))
+
 ## [1.5.9](https://github.com/iblmediaconsultancy/crm/compare/v1.5.8...v1.5.9) (2026-10-02)
 
 

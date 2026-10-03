@@ -26,7 +26,9 @@ const result = await db.$transaction(async (tx) => {
 		},
 	});
 	if (!atlas || atlas.kind !== "SYSTEM_OPERATOR")
-		throw new Error("The expected Atlas system operator account was not found.");
+		throw new Error(
+			"The expected Atlas system operator account was not found.",
+		);
 
 	const existing = await tx.user.findUnique({
 		where: { email: IHSAN_EMAIL },
@@ -140,7 +142,9 @@ const result = await db.$transaction(async (tx) => {
 		});
 	}
 
-	const sessions = await tx.session.deleteMany({ where: { userId: ATLAS_USER_ID } });
+	const sessions = await tx.session.deleteMany({
+		where: { userId: ATLAS_USER_ID },
+	});
 	await tx.securityAuditEvent.createMany({
 		data: [
 			{
@@ -157,10 +161,13 @@ const result = await db.$transaction(async (tx) => {
 				resourceType: "WorkspaceMember",
 				resourceId: atlasMember.id,
 				outcome: "SUCCEEDED",
-				metadata: { role: "contributor", interactiveSessionsRevoked: sessions.count },
+				metadata: {
+					role: "contributor",
+					interactiveSessionsRevoked: sessions.count,
+				},
 			},
 			...(atlasGoogle && !ihsanGoogle
-				? [
+				? ([
 						{
 							actorUserId: ATLAS_USER_ID,
 							action: "GOOGLE_CALENDAR_ACCOUNT_TRANSFERRED",
@@ -169,7 +176,7 @@ const result = await db.$transaction(async (tx) => {
 							outcome: "SUCCEEDED",
 							metadata: { fromUserId: ATLAS_USER_ID, toUserId: ihsan.id },
 						},
-					] as const
+					] as const)
 				: []),
 		],
 	});

@@ -36,7 +36,9 @@ export class MailboxConversationService {
 			},
 		});
 		if (!thread) throw new NotFoundException("Email thread not found.");
-		const faces = await this.facesFor(thread.messages.map((message) => message.fromEmail));
+		const faces = await this.facesFor(
+			thread.messages.map((message) => message.fromEmail),
+		);
 		return {
 			...thread,
 			firstMessageAt: thread.firstMessageAt.toISOString(),
@@ -99,7 +101,11 @@ export class MailboxConversationService {
 		const accessible = await withPrincipal(
 			this.db,
 			{ userId, kind: "user" },
-			(tx) => tx.emailThread.findUnique({ where: { id: threadId }, select: { id: true } }),
+			(tx) =>
+				tx.emailThread.findUnique({
+					where: { id: threadId },
+					select: { id: true },
+				}),
 		);
 		if (!accessible) throw new NotFoundException("Email thread not found.");
 	}
@@ -108,20 +114,26 @@ export class MailboxConversationService {
 		const accessible = await withPrincipal(
 			this.db,
 			{ userId, kind: "user" },
-			(tx) => tx.activity.findFirst({
-				where: { calendarEventId: eventId, lifecycleState: "ACTIVE" },
-				select: { id: true },
-			}),
+			(tx) =>
+				tx.activity.findFirst({
+					where: { calendarEventId: eventId, lifecycleState: "ACTIVE" },
+					select: { id: true },
+				}),
 		);
 		if (!accessible) throw new NotFoundException("Calendar event not found.");
 	}
 
 	private async facesFor(addresses: string[]) {
-		const emails = [...new Set(addresses.map((address) => address.toLowerCase()))];
+		const emails = [
+			...new Set(addresses.map((address) => address.toLowerCase())),
+		];
 		if (emails.length === 0) return new Map<string, string>();
 		const [contacts, users] = await Promise.all([
 			this.db.contact.findMany({
-				where: { email: { in: emails, mode: "insensitive" }, lifecycleState: "ACTIVE" },
+				where: {
+					email: { in: emails, mode: "insensitive" },
+					lifecycleState: "ACTIVE",
+				},
 				select: { email: true, imageUrl: true },
 			}),
 			this.db.user.findMany({
@@ -131,23 +143,29 @@ export class MailboxConversationService {
 		]);
 		const faces = new Map<string, string>();
 		for (const contact of contacts) {
-			if (contact.email && contact.imageUrl) faces.set(contact.email.toLowerCase(), contact.imageUrl);
+			if (contact.email && contact.imageUrl)
+				faces.set(contact.email.toLowerCase(), contact.imageUrl);
 		}
-		for (const user of users) if (user.image) faces.set(user.email.toLowerCase(), user.image);
+		for (const user of users)
+			if (user.image) faces.set(user.email.toLowerCase(), user.image);
 		return faces;
 	}
 }
 
-function recipientsOf(value: unknown): { email: string; name: string | null; kind: string }[] {
+function recipientsOf(
+	value: unknown,
+): { email: string; name: string | null; kind: string }[] {
 	if (!Array.isArray(value)) return [];
 	return value.flatMap((entry) => {
 		if (typeof entry !== "object" || entry === null) return [];
 		const record = entry as Record<string, unknown>;
 		if (typeof record.email !== "string") return [];
-		return [{
-			email: record.email,
-			name: typeof record.name === "string" ? record.name : null,
-			kind: typeof record.kind === "string" ? record.kind : "to",
-		}];
+		return [
+			{
+				email: record.email,
+				name: typeof record.name === "string" ? record.name : null,
+				kind: typeof record.kind === "string" ? record.kind : "to",
+			},
+		];
 	});
 }
