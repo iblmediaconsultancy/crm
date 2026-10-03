@@ -1038,9 +1038,9 @@ export class ConversationsService {
 		const member = await this.db.member.findUnique({
 			where: {
 				organizationId_userId: { organizationId: WORKSPACE_ID, userId },
-                user: { profile: { status: "ACTIVE" } },
-            },
-            select: { id: true },
+				user: { profile: { status: "ACTIVE" } },
+			},
+			select: { id: true },
 		});
 
 		if (!member) {

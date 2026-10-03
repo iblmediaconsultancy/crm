@@ -13,6 +13,7 @@ import { getServerQueryClient, getServerTrpc } from "@/lib/trpc/server";
 import { GoogleCalendarConnection } from "./google-calendar-connection";
 
 export const metadata: Metadata = { title: "Connections" };
+export const instant = false;
 
 export default async function ConnectionsSettingsPage() {
 	await requireSession();

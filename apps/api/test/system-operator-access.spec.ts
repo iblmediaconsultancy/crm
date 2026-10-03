@@ -38,16 +38,20 @@ describe("system operator workspace access", () => {
 				findUnique: async () => ({ kind: "HUMAN" }),
 			},
 			workspacePermissionOverride: {
-				findUnique: async ({ where }: { where: { userId_permission: { permission: string } } }) =>
+				findUnique: async ({
+					where,
+				}: {
+					where: { userId_permission: { permission: string } };
+				}) =>
 					where.userId_permission.permission === "finance.edit"
 						? { allowed: true }
 						: null,
 			},
 		} as never);
 
-		expect(await service.can("ihsan-human", "contributor", "finance.edit")).toBe(
-			true,
-		);
+		expect(
+			await service.can("ihsan-human", "contributor", "finance.edit"),
+		).toBe(true);
 		expect(await service.can("ihsan-human", "contributor", "crm.read")).toBe(
 			true,
 		);

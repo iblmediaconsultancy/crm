@@ -142,6 +142,10 @@ export class AgentTriggerService {
 		this.pokeRoute("/internal/crm/research-dispatch");
 	}
 
+	atlasOutreachQueued(): void {
+		this.poke();
+	}
+
 	async backfill(input: {
 		kind: string;
 		reason: string;

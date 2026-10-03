@@ -29,7 +29,10 @@ const conversion = new ConversionService(db);
 const directory = new CompanyDirectoryService(db, agent);
 
 const fields = new FieldsService(db, agent);
-const duplicates = { detectContact: async () => [], detectCompany: async () => [] };
+const duplicates = {
+	detectContact: async () => [],
+	detectCompany: async () => [],
+};
 const contacts = new ContactsService(
 	db,
 	directory,

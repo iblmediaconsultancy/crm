@@ -1,6 +1,6 @@
 import { db } from "@crm/db";
-import { MiabSentSyncService } from "../src/providers/miab-sent-sync.service";
 import { TlsMiabProtocolClient } from "../src/providers/miab-imap.client";
+import { MiabSentSyncService } from "../src/providers/miab-sent-sync.service";
 import { EnvironmentMiabCredentialSource } from "../src/providers/provider-credentials";
 
 const idempotencyKeys = [
@@ -49,7 +49,9 @@ async function main() {
 		},
 		orderBy: { createdAt: "asc" },
 	});
-	console.log(JSON.stringify({ marked: marked.count, processed, result }, null, 2));
+	console.log(
+		JSON.stringify({ marked: marked.count, processed, result }, null, 2),
+	);
 }
 
 await main().finally(() => db.$disconnect());

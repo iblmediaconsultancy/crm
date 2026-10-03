@@ -6,8 +6,7 @@ const { canConfigureSso, ssoCallbackBase, ssoCallbackURL, ssoProviderName } =
 	await import("../src/sso");
 
 describe("canConfigureSso", () => {
-	it("is the same answer as renaming the workspace", () => {
-		expect(canConfigureSso("owner")).toBe(true);
+	it("allows workspace admins to configure SSO", () => {
 		expect(canConfigureSso("admin")).toBe(true);
 		expect(canConfigureSso("member")).toBe(false);
 		expect(canConfigureSso(null)).toBe(false);

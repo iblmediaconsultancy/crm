@@ -279,7 +279,7 @@ export function OutreachWorkbench() {
 						}
 					/>
 					<Readiness
-						label="Mailbox"
+						label="Personal mailbox"
 						value={data?.readiness.mailbox ?? "CHECKING"}
 						detail={
 							ownedMailboxes.length

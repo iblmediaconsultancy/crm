@@ -60,22 +60,7 @@ describe("Auth (e2e)", () => {
 			.get("/api/trpc/sso.signInOptions")
 			.expect(200);
 
-		const { auth } = await import("@crm/auth");
-		const socialProviders = (
-			auth.options as {
-				socialProviders?: Record<string, unknown>;
-			}
-		).socialProviders;
-		const googleConfigured = Boolean(socialProviders?.google);
-		const microsoftConfigured = Boolean(
-			socialProviders?.microsoft,
-		);
-
-		expect(response.body.result.data).toEqual({
-			google: googleConfigured,
-			microsoft: microsoftConfigured,
-			providers: [],
-		});
+		expect(response.body.result.data).toEqual({ providers: [] });
 	});
 
 	it("keeps the SSO configuration itself behind the session", async () => {

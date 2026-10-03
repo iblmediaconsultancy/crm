@@ -133,13 +133,12 @@ export class RollupService {
 	}
 
 	private async shape(): Promise<Properties> {
-		const [members, ssoProviders, postgres, contextKey] =
-			await Promise.all([
-				this.db.member.count({ where: { organizationId: WORKSPACE_ID } }),
-				this.db.ssoProvider.count(),
-				this.postgresMajor(),
-				this.db.appSetting.findFirst({ select: { contextDevApiKey: true } }),
-			]);
+		const [members, ssoProviders, postgres, contextKey] = await Promise.all([
+			this.db.member.count({ where: { organizationId: WORKSPACE_ID } }),
+			this.db.ssoProvider.count(),
+			this.postgresMajor(),
+			this.db.appSetting.findFirst({ select: { contextDevApiKey: true } }),
+		]);
 
 		return {
 			node_version: process.versions.node.split(".")[0] ?? null,

@@ -9,6 +9,9 @@ import { FinanceService } from "../src/finance/finance.service";
 const suffix = process.env.TEST_RUN_ID ?? "finance-integrity-spec";
 const domain = `finance-${suffix}.test`;
 const userId = `finance-user-${suffix}`;
+const currentMonthStart = new Date();
+currentMonthStart.setUTCDate(1);
+currentMonthStart.setUTCHours(0, 0, 0, 0);
 
 const conversion = {
 	reportingCurrency: async () => "EUR",
@@ -199,7 +202,7 @@ describe("finance integrity", () => {
 			where: {
 				currency_periodStart: {
 					currency: "EUR",
-					periodStart: new Date("2026-08-01T00:00:00.000Z"),
+					periodStart: currentMonthStart,
 				},
 			},
 		});

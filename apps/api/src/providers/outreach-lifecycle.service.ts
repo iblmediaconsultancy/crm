@@ -11,6 +11,10 @@ import { Webhook } from "svix";
 import { InjectDatabase } from "../database/database.constants";
 import { runInPrincipalTransaction } from "../database/database-context";
 import { ThreadWriterService } from "../mailbox/thread-writer.service";
+import {
+	atlasRuntimeReadiness,
+	evaluateAtlasSystemReadiness,
+} from "./atlas-runtime-readiness";
 import { followUpAuthorizationDisposition } from "./follow-up-authorization";
 import { standardColdFollowUpDueDates } from "./follow-up-cadence";
 import { FOLLOW_UP_CLAIM_SQL } from "./follow-up-claim";
@@ -36,6 +40,172 @@ export class OutreachLifecycleService {
 		@InjectDatabase() private readonly db: Db,
 		private readonly threadWriter?: ThreadWriterService,
 	) {}
+
+	async atlasSystemReadiness(actor: {
+		userId: string;
+		role: "admin" | "team" | "contributor";
+	}) {
+		if (actor.role === "contributor")
+			throw new ConflictException("Manager access is required.");
+		const now = new Date();
+		const state = await withPrincipal(
+			this.db,
+			{ userId: actor.userId, kind: "user" },
+			async (tx) => {
+				const [operator, mailbox, capability, settings, authorization] =
+					await Promise.all([
+						tx.user.findUnique({
+							where: { id: "atlas-operator" },
+							select: { kind: true },
+						}),
+						tx.mailbox.findUnique({
+							where: { id: "atlas-outreach-mailbox" },
+							select: {
+								id: true,
+								ownerUserId: true,
+								address: true,
+								status: true,
+							},
+						}),
+						tx.providerCapability.findUnique({
+							where: { key: "RESEND_OUTBOUND" },
+							select: { status: true },
+						}),
+						tx.appSetting.findUnique({
+							where: { id: "app" },
+							select: { atlasLiveOutreachEnabled: true },
+						}),
+						tx.outreachAuthorization.findFirst({
+							where: {
+								scope: "STANDARD_COLD_OUTREACH",
+								status: "ACTIVE",
+								OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+							},
+							orderBy: { issuedAt: "desc" },
+							select: { id: true, expiresAt: true },
+						}),
+					]);
+				return { operator, mailbox, capability, settings, authorization };
+			},
+		);
+		const runtime = await atlasRuntimeReadiness();
+		return evaluateAtlasSystemReadiness(
+			{
+				operatorKind: state.operator?.kind ?? null,
+				mailbox: state.mailbox,
+				providerCapabilityStatus: state.capability?.status ?? null,
+				crmLiveOutreachEnabled:
+					state.settings?.atlasLiveOutreachEnabled === true,
+				authorization: state.authorization,
+			},
+			runtime,
+			process.env.ATLAS_LIVE_OUTREACH_ENABLED?.trim().toLowerCase() === "true",
+		);
+	}
+
+	async dispatchAtlasOutreach(actor: {
+		userId: string;
+		role: "admin" | "team" | "contributor";
+	}) {
+		const readiness = await this.atlasSystemReadiness(actor);
+		if (readiness.status !== "READY")
+			throw new ConflictException({
+				message: "Atlas Email dispatch is blocked by current readiness gates.",
+				blockers: readiness.blockers,
+			});
+		const now = new Date();
+		return withPrincipal(
+			this.db,
+			{ userId: actor.userId, kind: "user" },
+			async (tx) => {
+				await tx.$executeRaw`SELECT pg_advisory_xact_lock(415084, 1)`;
+				const [operator, mailbox, capability, settings, authorization] =
+					await Promise.all([
+						tx.user.findUnique({
+							where: { id: "atlas-operator" },
+							select: { kind: true },
+						}),
+						tx.mailbox.findUnique({
+							where: { id: "atlas-outreach-mailbox" },
+							select: {
+								ownerUserId: true,
+								address: true,
+								status: true,
+							},
+						}),
+						tx.providerCapability.findUnique({
+							where: { key: "RESEND_OUTBOUND" },
+							select: { status: true },
+						}),
+						tx.appSetting.findUnique({
+							where: { id: "app" },
+							select: { atlasLiveOutreachEnabled: true },
+						}),
+						tx.outreachAuthorization.findFirst({
+							where: {
+								scope: "STANDARD_COLD_OUTREACH",
+								status: "ACTIVE",
+								OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+							},
+							orderBy: { issuedAt: "desc" },
+							select: { id: true },
+						}),
+					]);
+				if (
+					operator?.kind !== "SYSTEM_OPERATOR" ||
+					mailbox?.ownerUserId !== "atlas-operator" ||
+					mailbox.address.toLowerCase() !== "outreach@iblmedia.com" ||
+					mailbox.status !== "VERIFIED" ||
+					capability?.status !== "VERIFIED" ||
+					!settings?.atlasLiveOutreachEnabled ||
+					process.env.ATLAS_LIVE_OUTREACH_ENABLED?.trim().toLowerCase() !==
+						"true" ||
+					!authorization
+				)
+					throw new ConflictException(
+						"Atlas Email readiness changed before dispatch; refresh and try again.",
+					);
+				const existing = await tx.agentTask.findFirst({
+					where: {
+						kind: "atlas-outreach",
+						lifecycleState: "ACTIVE",
+						finishedAt: null,
+					},
+					select: { id: true },
+				});
+				if (existing)
+					throw new ConflictException(
+						"An Atlas Email cycle is already queued or running.",
+					);
+				const task = await tx.agentTask.create({
+					data: {
+						kind: "atlas-outreach",
+						reason:
+							"Explicitly dispatched from authenticated Atlas Email controls",
+						priority: 1000,
+						budget: 8,
+						dueAt: now,
+					},
+				});
+				await tx.domainAuditEvent.create({
+					data: {
+						actorUserId: actor.userId,
+						action: "ATLAS_OUTREACH_DISPATCH_REQUESTED",
+						entityType: "OUTREACH",
+						entityId: task.id,
+						outcome: "SUCCESS",
+						requestId: `atlas-outreach-dispatch:${task.id}`,
+						metadata: {
+							kind: task.kind,
+							authorizationId: authorization.id,
+							triggeredBy: "authenticated_ui",
+						},
+					},
+				});
+				return { id: task.id, status: "QUEUED" as const };
+			},
+		);
+	}
 
 	async listAtlasAuthorizations(actor: {
 		userId: string;

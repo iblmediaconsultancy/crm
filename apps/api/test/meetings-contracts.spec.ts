@@ -20,6 +20,7 @@ describe("meeting request contract", () => {
 			attendeeEmails: ["Prospect@Example.com"],
 		});
 		expect(result.success).toBe(true);
-		if (result.success) expect(result.data.attendeeEmails).toEqual(["prospect@example.com"]);
+		if (result.success)
+			expect(result.data.attendeeEmails).toEqual(["prospect@example.com"]);
 	});
 });

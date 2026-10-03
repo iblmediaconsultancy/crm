@@ -9,7 +9,11 @@ export const canonicalLifecycleInput = z.object({
 export type CanonicalLifecycleInput = z.infer<typeof canonicalLifecycleInput>;
 
 export const canonicalBulkLifecycleInput = z.object({
-	ids: z.array(z.string().min(1)).min(1).max(100).transform((ids) => [...new Set(ids)]),
+	ids: z
+		.array(z.string().min(1))
+		.min(1)
+		.max(100)
+		.transform((ids) => [...new Set(ids)]),
 	reason: z.string().trim().min(3).max(500),
 });
 

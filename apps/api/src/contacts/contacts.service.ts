@@ -16,9 +16,7 @@ import {
 import { AgentQueueService } from "../agent/agent-queue.service";
 import { AgentTriggerService } from "../agent/agent-trigger.service";
 import { CompanyDirectoryService } from "../companies/company-directory.service";
-import {
-	ActivityStampService,
-} from "../crm/activity-stamp.service";
+import { ActivityStampService } from "../crm/activity-stamp.service";
 import { type BulkResult, requireOwner, runBulk } from "../crm/bulk";
 import { DuplicateService } from "../crm/duplicate.service";
 import { blankToNull, normalizeEmail, toCents } from "../crm/values";
@@ -181,10 +179,10 @@ export class ContactsService {
 			where: { id },
 			select: {
 				id: true,
-					lifecycleState: true,
-					version: true,
-					archiveReason: true,
-					archivedAt: true,
+				lifecycleState: true,
+				version: true,
+				archiveReason: true,
+				archivedAt: true,
 				firstName: true,
 				lastName: true,
 				email: true,
@@ -196,7 +194,6 @@ export class ContactsService {
 				imageUrl: true,
 				enrichmentStatus: true,
 				enrichmentError: true,
-
 
 				createdAt: true,
 				brief: {
@@ -290,7 +287,6 @@ export class ContactsService {
 
 	async create(input: ContactCreateInput) {
 		const email = normalizeEmail(input.email ?? "");
-
 
 		const companyId =
 			input.companyId ??

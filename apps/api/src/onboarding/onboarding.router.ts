@@ -44,7 +44,10 @@ export class OnboardingRouter {
 		return this.onboarding.pending(input);
 	}
 
-	@Mutation({ input: inviteMemberInput, meta: { permission: "workspace.manage" } })
+	@Mutation({
+		input: inviteMemberInput,
+		meta: { permission: "workspace.manage" },
+	})
 	@UseMiddlewares(AuthMiddleware, PermissionMiddleware)
 	invite(
 		@Ctx() ctx: AuthedTrpcContext,
@@ -53,7 +56,10 @@ export class OnboardingRouter {
 		return this.onboarding.invite(ctx.user.id, input);
 	}
 
-	@Mutation({ input: invitationIdInput, meta: { permission: "workspace.manage" } })
+	@Mutation({
+		input: invitationIdInput,
+		meta: { permission: "workspace.manage" },
+	})
 	@UseMiddlewares(AuthMiddleware, PermissionMiddleware)
 	resend(
 		@Ctx() ctx: AuthedTrpcContext,
@@ -61,7 +67,10 @@ export class OnboardingRouter {
 	) {
 		return this.onboarding.resend(ctx.user.id, invitationId);
 	}
-	@Mutation({ input: invitationIdInput, meta: { permission: "workspace.manage" } })
+	@Mutation({
+		input: invitationIdInput,
+		meta: { permission: "workspace.manage" },
+	})
 	@UseMiddlewares(AuthMiddleware, PermissionMiddleware)
 	cancel(
 		@Ctx() ctx: AuthedTrpcContext,
