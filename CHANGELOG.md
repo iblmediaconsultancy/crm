@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.2](https://github.com/iblmediaconsultancy/crm/compare/v1.6.1...v1.6.2) (2026-10-03)
+
+
+### Fixes
+
+* **app:** keep workspace label import client-safe ([#33](https://github.com/iblmediaconsultancy/crm/issues/33)) ([c9123cc](https://github.com/iblmediaconsultancy/crm/commit/c9123ccb7ad7d8b255c5f798b246c327978d0308))
+
 ## [1.6.1](https://github.com/iblmediaconsultancy/crm/compare/v1.6.0...v1.6.1) (2026-10-03)
 
 
