@@ -42,20 +42,22 @@ const seedUser = async (label: string, createdAt: Date): Promise<string> => {
 	return user.id;
 };
 
-const roleOf = async (userId: string): Promise<string | null> => {
-	const member = await db.member.findUnique({
-		where: { organizationId_userId: { organizationId: WORKSPACE_ID, userId } },
-		select: { role: true },
-	});
-
-	return member?.role ?? null;
-};
-
 const clear = async () => {
 	await db.member.deleteMany({ where: { organizationId: WORKSPACE_ID } });
 	await db.organization.deleteMany({ where: { id: WORKSPACE_ID } });
 	await db.user.deleteMany({
 		where: { email: { endsWith: `.${suffix}@example.test` } },
+	});
+};
+
+const createWorkspace = async () => {
+	await db.organization.create({
+		data: {
+			id: WORKSPACE_ID,
+			name: "Integration test workspace",
+			slug: `${suffix}-workspace`,
+			createdAt: new Date(),
+		},
 	});
 };
 
@@ -76,9 +78,22 @@ beforeAll(async () => {
 
 beforeEach(async () => {
 	await clear();
+	await createWorkspace();
 
 	firstId = await seedUser("first", new Date("2020-01-01T00:00:00Z"));
 	secondId = await seedUser("second", new Date("2021-01-01T00:00:00Z"));
+	await db.userProfile.createMany({
+		data: [{ userId: firstId }, { userId: secondId }],
+	});
+	await db.member.create({
+		data: {
+			id: `${suffix}-first-member`,
+			organizationId: WORKSPACE_ID,
+			userId: firstId,
+			role: "admin",
+			createdAt: new Date("2020-01-01T00:00:00Z"),
+		},
+	});
 });
 
 afterAll(async () => {
@@ -103,61 +118,39 @@ afterAll(async () => {
 });
 
 describe("ensureWorkspaceMembership", () => {
-	it("creates the one workspace and enrols everyone who already had an account", async () => {
-		const workspaceId = await ensureWorkspaceMembership(secondId);
-
-		expect(workspaceId).toBe(WORKSPACE_ID);
-		expect(await roleOf(firstId)).toBe("owner");
-		expect(await roleOf(secondId)).toBe("member");
-	});
-
-	it("is idempotent, so signing in again neither duplicates nor re-roles", async () => {
-		await ensureWorkspaceMembership(secondId);
-
-		await db.member.update({
-			where: {
-				organizationId_userId: {
-					organizationId: WORKSPACE_ID,
-					userId: secondId,
-				},
+	it("returns the workspace for an active member", async () => {
+		await db.member.create({
+			data: {
+				id: `${suffix}-second-member`,
+				organizationId: WORKSPACE_ID,
+				userId: secondId,
+				role: "team",
+				createdAt: new Date("2021-01-01T00:00:00Z"),
 			},
-			data: { role: "admin" },
 		});
 
-		await ensureWorkspaceMembership(secondId);
-		await ensureWorkspaceMembership(secondId);
-
-		const rows = await db.member.findMany({
-			where: { organizationId: WORKSPACE_ID, userId: secondId },
-		});
-
-		expect(rows).toHaveLength(1);
-		expect(rows[0]?.role).toBe("admin");
+		expect(await ensureWorkspaceMembership(secondId)).toBe(WORKSPACE_ID);
 	});
 
-	it("joins someone who signs up later as a member", async () => {
-		await ensureWorkspaceMembership(secondId);
-
-		const laterId = await seedUser("later", new Date("2026-01-01T00:00:00Z"));
-
-		await ensureWorkspaceMembership(laterId);
-
-		expect(await roleOf(laterId)).toBe("member");
+	it("does not return a workspace for a user without membership", async () => {
+		expect(await ensureWorkspaceMembership(secondId)).toBeUndefined();
 	});
 
-	it("leaves the owner alone when a later arrival signs in", async () => {
-		await ensureWorkspaceMembership(secondId);
-
-		const laterId = await seedUser("later", new Date("2026-01-01T00:00:00Z"));
-
-		await ensureWorkspaceMembership(laterId);
-
-		expect(await roleOf(firstId)).toBe("owner");
-
-		const owners = await db.member.count({
-			where: { organizationId: WORKSPACE_ID, role: "owner" },
+	it("does not return a workspace for an inactive profile", async () => {
+		await db.member.create({
+			data: {
+				id: `${suffix}-second-member`,
+				organizationId: WORKSPACE_ID,
+				userId: secondId,
+				role: "team",
+				createdAt: new Date("2021-01-01T00:00:00Z"),
+			},
+		});
+		await db.userProfile.update({
+			where: { userId: secondId },
+			data: { status: "SUSPENDED" },
 		});
 
-		expect(owners).toBe(1);
+		expect(await ensureWorkspaceMembership(secondId)).toBeUndefined();
 	});
 });
