@@ -138,12 +138,18 @@ describe("assigning an owner to a selection", () => {
 			email: `alan@${domain}`,
 		});
 
-		await expect(
-			contacts.bulkAssignOwner({
+		let error: Error | undefined;
+		try {
+			await contacts.bulkAssignOwner({
 				ids: [contact.id],
 				ownerId: `nobody-${suffix}`,
-			}),
-		).rejects.toThrow(/does not work here/);
+			});
+		} catch (caught) {
+			if (caught instanceof Error) error = caught;
+		}
+
+		expect(error).toBeInstanceOf(Error);
+		expect(error?.message).toMatch(/does not work here/);
 
 		expect(
 			await db.contact.findUnique({

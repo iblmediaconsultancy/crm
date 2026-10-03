@@ -8,7 +8,8 @@ const { canConfigureSso, ssoCallbackBase, ssoCallbackURL, ssoProviderName } =
 describe("canConfigureSso", () => {
 	it("allows workspace admins to configure SSO", () => {
 		expect(canConfigureSso("admin")).toBe(true);
-		expect(canConfigureSso("member")).toBe(false);
+		expect(canConfigureSso("team")).toBe(false);
+		expect(canConfigureSso("contributor")).toBe(false);
 		expect(canConfigureSso(null)).toBe(false);
 	});
 });

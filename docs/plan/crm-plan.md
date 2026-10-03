@@ -16,7 +16,7 @@ and [`api.md`](./api.md).
 
 | Decision | Choice | Why |
 | --- | --- | --- |
-| Tenancy | **Single tenant, no organizations** | The repo is already built this way (`20260731160000_remove_organizations`). It's an internal tool; Google sign-in is the only door. |
+| Tenancy | **Single tenant with a singleton workspace** | This early plan's Google-only sign-in description is superseded. Current sign-in requires an existing workspace membership and an `ACTIVE` profile; see [`api.md`](../api.md). |
 | Data fetching | **tRPC (nestjs-trpc) end to end** | Type-safe from Prisma to the table cell, and the pattern is proven in `/Users/lewiscarhart/mvp`. |
 | Table state | **nuqs**, server-side pagination/sort/filter | URLs are shareable and survive reload; the API does the work so 10k rows stay fast. |
 | Data table | Port `mvp`'s `DataTable` into **`packages/ui`** | `design.md` makes `/packages/ui` the single source of truth; `simple-table` and `card-table` already live there. Same code as mvp, different address. |

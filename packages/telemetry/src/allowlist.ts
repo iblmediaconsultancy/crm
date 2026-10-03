@@ -110,8 +110,8 @@ export const AGENT_TOOLS = [
 	"archive_field",
 	"create_ibl_draft",
 	"create_ibl_proposal",
-	"enrich_atlas_commercial_quality",
 	"enrich_company",
+	"enrich_atlas_commercial_quality",
 	"fetch_contact_photo",
 	"find_contact_socials",
 	"get_contact_work_history",
@@ -141,8 +141,8 @@ export const AGENT_TOOLS = [
 	"set_contact_socials",
 	"set_field_value",
 	"submit_ibl_research_review",
-	"write_atlas_daily_report",
 	"write_brief",
+	"write_atlas_daily_report",
 	"write_workspace_profile",
 ] as const;
 

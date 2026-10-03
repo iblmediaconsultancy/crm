@@ -44,7 +44,7 @@ beforeAll(async () => {
 	await db.user.create({
 		data: { id: userId, name: "Test Rep", email: `${userId}@example.test` },
 	});
-	await db.userProfile.create({ data: { userId } });
+	await db.userProfile.create({ data: { userId, status: "ACTIVE" } });
 	await db.member.create({
 		data: {
 			id: memberId,
