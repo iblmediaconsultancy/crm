@@ -131,6 +131,7 @@ export function AtlasAuthorizationControls() {
 								</p>
 								<p>Provider: {readiness.data.provider}</p>
 								<p>Agent bridge: {readiness.data.bridge}</p>
+								<p>PostgreSQL worker: {readiness.data.postgresWorker}</p>
 								<p>Authorization: {readiness.data.authorization.status}</p>
 								<p>Live outreach: {readiness.data.liveOutreach}</p>
 								<p>Dispatch: {readiness.data.status}</p>

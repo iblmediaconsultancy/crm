@@ -35,16 +35,17 @@ async function bootstrap() {
 	process.once("SIGTERM", stop);
 	process.once("SIGINT", stop);
 	logger.log({ message: "PostgreSQL worker ready", intervalMs, workerId });
-	await writeFile(readyFile, new Date().toISOString());
 
 	while (!stopping) {
 		try {
 			const jobsProcessed = await jobs.runDue(workerId);
 			const allocationsProcessed = await allocation.runDue(workerId);
-			const followUpPlansMaterialized = await outreach.materializePendingPlans();
+			const followUpPlansMaterialized =
+				await outreach.materializePendingPlans();
 			const followUpsProcessed = await outreach.runDue(workerId);
 			const attachmentsProcessed = await attachments.runDue(workerId);
 			const mailboxesProcessed = await miab.runDue(workerId);
+			await writeFile(readyFile, new Date().toISOString());
 			logger.debug({
 				message: "Worker tick",
 				jobsProcessed,

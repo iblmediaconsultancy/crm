@@ -2,12 +2,14 @@ import { describe, expect, test } from "bun:test";
 import type { Db } from "@crm/db";
 import {
 	type AtlasRuntimeReadiness,
+	classifyPostgresWorkerHeartbeat,
 	evaluateAtlasSystemReadiness,
 } from "../src/providers/atlas-runtime-readiness";
 import { OutreachLifecycleService } from "../src/providers/outreach-lifecycle.service";
 
 const runtimeReady: AtlasRuntimeReadiness = {
 	bridge: "READY",
+	postgresWorker: "READY",
 	provider: "READY",
 	providerReason: null,
 };
@@ -39,6 +41,20 @@ async function withLiveOutreachEnabled<T>(work: () => Promise<T>): Promise<T> {
 }
 
 describe("Atlas system outreach readiness and dispatch", () => {
+	test("requires a current outbound worker heartbeat", () => {
+		expect(classifyPostgresWorkerHeartbeat(null)).toBe("UNAVAILABLE");
+		expect(classifyPostgresWorkerHeartbeat(10_000, 25_001)).toBe("STALE");
+		expect(classifyPostgresWorkerHeartbeat(10_001, 25_001)).toBe("READY");
+
+		const readiness = evaluateAtlasSystemReadiness(
+			stateReady,
+			{ ...runtimeReady, postgresWorker: "UNAVAILABLE" },
+			true,
+		);
+		expect(readiness.status).toBe("BLOCKED");
+		expect(readiness.blockers).toContain("OUTBOUND_WORKER_UNAVAILABLE");
+	});
+
 	test("reports READY for the verified system mailbox without user ownership", () => {
 		const readiness = evaluateAtlasSystemReadiness(
 			stateReady,
@@ -80,6 +96,7 @@ describe("Atlas system outreach readiness and dispatch", () => {
 			},
 			{
 				bridge: "UNREACHABLE",
+				postgresWorker: "STALE",
 				provider: "BLOCKED",
 				providerReason: "RESEND_CREDENTIAL_UNAVAILABLE",
 			},
@@ -92,6 +109,7 @@ describe("Atlas system outreach readiness and dispatch", () => {
 				"RESEND_OUTBOUND_UNVERIFIED",
 				"RESEND_CREDENTIAL_UNAVAILABLE",
 				"AGENT_BRIDGE_UNREACHABLE",
+				"OUTBOUND_WORKER_STALE",
 				"OUTREACH_AUTHORIZATION_REQUIRED",
 			]),
 		);

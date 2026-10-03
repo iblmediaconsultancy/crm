@@ -1,9 +1,15 @@
+import { stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { bridge } from "../agent/bridge";
 import { resolveAtlasOutreachSender } from "./atlas-sender";
 import { EnvironmentResendCredentialSource } from "./provider-credentials";
 
+export type AtlasPostgresWorkerReadiness = "READY" | "UNAVAILABLE" | "STALE";
+
 export type AtlasRuntimeReadiness = {
 	bridge: "READY" | "UNCONFIGURED" | "UNREACHABLE";
+	postgresWorker: AtlasPostgresWorkerReadiness;
 	provider: "READY" | "BLOCKED";
 	providerReason: string | null;
 };
@@ -19,6 +25,15 @@ export type AtlasSystemReadinessState = {
 	crmLiveOutreachEnabled: boolean;
 	authorization: { id: string; expiresAt: Date | null } | null;
 };
+
+export function classifyPostgresWorkerHeartbeat(
+	lastModifiedMs: number | null,
+	nowMs = Date.now(),
+	staleAfterMs = 15_000,
+): AtlasPostgresWorkerReadiness {
+	if (lastModifiedMs === null) return "UNAVAILABLE";
+	return nowMs - lastModifiedMs <= staleAfterMs ? "READY" : "STALE";
+}
 
 export function evaluateAtlasSystemReadiness(
 	state: AtlasSystemReadinessState,
@@ -42,6 +57,8 @@ export function evaluateAtlasSystemReadiness(
 		blockers.push("RESEND_OUTBOUND_UNVERIFIED");
 	if (runtime.provider !== "READY")
 		blockers.push(runtime.providerReason ?? "RESEND_CONFIGURATION_UNAVAILABLE");
+	if (runtime.postgresWorker !== "READY")
+		blockers.push(`OUTBOUND_WORKER_${runtime.postgresWorker}`);
 	if (runtime.bridge !== "READY")
 		blockers.push(`AGENT_BRIDGE_${runtime.bridge}`);
 	if (!state.authorization) blockers.push("OUTREACH_AUTHORIZATION_REQUIRED");
@@ -60,6 +77,7 @@ export function evaluateAtlasSystemReadiness(
 		},
 		provider: providerReady ? ("READY" as const) : ("BLOCKED" as const),
 		bridge: runtime.bridge,
+		postgresWorker: runtime.postgresWorker,
 		authorization: state.authorization
 			? { status: "ACTIVE" as const, expiresAt: state.authorization.expiresAt }
 			: { status: "REQUIRED" as const, expiresAt: null },
@@ -98,9 +116,14 @@ export async function atlasRuntimeReadiness(): Promise<AtlasRuntimeReadiness> {
 		providerReason =
 			error instanceof Error ? error.message : "PROVIDER_UNAVAILABLE";
 	}
+	let workerModifiedAt: number | null = null;
+	try {
+		workerModifiedAt = (await stat(join(tmpdir(), "worker-ready"))).mtimeMs;
+	} catch {}
 
 	return {
 		bridge: bridgeStatus,
+		postgresWorker: classifyPostgresWorkerHeartbeat(workerModifiedAt),
 		provider: providerReason ? "BLOCKED" : "READY",
 		providerReason,
 	};
