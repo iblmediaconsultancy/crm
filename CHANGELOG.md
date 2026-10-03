@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.1](https://github.com/iblmediaconsultancy/crm/compare/v1.6.0...v1.6.1) (2026-10-03)
+
+
+### Fixes
+
+* **api:** resolve LinkedIn replies through stored threads ([#22](https://github.com/iblmediaconsultancy/crm/issues/22)) ([cb7d19f](https://github.com/iblmediaconsultancy/crm/commit/cb7d19fedc89d3ee428069bbaa1b0a383237645f))
+
 ## [1.6.0](https://github.com/iblmediaconsultancy/crm/compare/v1.5.9...v1.6.0) (2026-10-03)
 
 
