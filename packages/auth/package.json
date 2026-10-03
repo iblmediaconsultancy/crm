@@ -9,7 +9,8 @@
 		"./cookies": "./src/cookies.ts",
 		"./permissions": "./src/permissions.ts",
 		"./scopes": "./src/scopes.ts",
-		"./workspace": "./src/workspace.ts"
+		"./workspace": "./src/workspace.ts",
+		"./workspace-name": "./src/workspace-name.ts"
 	},
 	"scripts": {
 		"auth:generate": "better-auth generate --config src/auth.ts --output ../db/prisma/schema.prisma --y",
