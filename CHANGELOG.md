@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.4](https://github.com/iblmediaconsultancy/crm/compare/v1.6.3...v1.6.4) (2026-10-04)
+
+
+### Fixes
+
+* **api:** idle follow-up recovery while gates are off ([#39](https://github.com/iblmediaconsultancy/crm/issues/39)) ([3975096](https://github.com/iblmediaconsultancy/crm/commit/3975096655d02e6d7fabadb004ef2038a5f42831))
+
 ## [1.6.3](https://github.com/iblmediaconsultancy/crm/compare/v1.6.2...v1.6.3) (2026-10-03)
 
 
