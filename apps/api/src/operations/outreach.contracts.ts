@@ -24,6 +24,10 @@ export const localReplyInput = z.object({
 });
 export const atlasAuthorizationIssueInput = z.object({
 	expiresAt: z.coerce.date().nullable().optional(),
+	followUpCohortId: z.string().min(1).nullable().optional(),
+});
+export const followUpCohortPrepareInput = z.object({
+	stepIds: z.array(z.string().min(1)).min(1).max(500),
 });
 export const atlasAuthorizationRevokeInput = z.object({
 	id: z.string().min(1),

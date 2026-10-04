@@ -17,7 +17,11 @@ import {
 } from "./atlas-runtime-readiness";
 import { followUpAuthorizationDisposition } from "./follow-up-authorization";
 import { standardColdFollowUpDueDates } from "./follow-up-cadence";
-import { FOLLOW_UP_CLAIM_SQL } from "./follow-up-claim";
+import {
+	FOLLOW_UP_CLAIM_SQL,
+	FOLLOW_UP_COHORT_CLAIM_SQL,
+} from "./follow-up-claim";
+import { evaluateFollowUpCohortCandidate } from "./follow-up-cohort-preflight";
 import { localProviderDoubleEnabled } from "./local-provider-double";
 import {
 	atlasLiveOutreachEnvironmentEnabled,
@@ -32,6 +36,7 @@ type Claim = {
 	planId: string;
 	draftId: string | null;
 	attemptCount: number;
+	cohortId?: string | null;
 };
 type ResendEvent = {
 	type: string;
@@ -229,6 +234,7 @@ export class OutreachLifecycleService {
 					select: {
 						id: true,
 						scope: true,
+						followUpCohortId: true,
 						status: true,
 						issuedAt: true,
 						expiresAt: true,
@@ -236,8 +242,266 @@ export class OutreachLifecycleService {
 						revocationReason: true,
 						authorizedBy: { select: { id: true, name: true } },
 						revokedBy: { select: { id: true, name: true } },
+						followUpCohort: {
+							select: {
+								state: true,
+								createdAt: true,
+								members: { select: { id: true } },
+							},
+						},
 					},
 				}),
+		);
+	}
+
+	async previewFollowUpCohort(actor: {
+		userId: string;
+		role: "admin" | "team" | "contributor";
+	}) {
+		if (actor.role === "contributor")
+			throw new ConflictException("Manager access is required.");
+		const now = new Date();
+		return withPrincipal(
+			this.db,
+			{ userId: actor.userId, kind: "user" },
+			async (tx) => {
+				const rows = await tx.followUpStep.findMany({
+					where: {
+						status: "PENDING",
+						dueAt: { lte: now },
+						plan: { status: "ACTIVE", channel: "EMAIL" },
+					},
+					orderBy: [{ dueAt: "asc" }, { id: "asc" }],
+					take: 501,
+					include: {
+						plan: { select: { contactId: true } },
+						draft: {
+							select: {
+								recipientRoute: {
+									select: {
+										value: true,
+										contact: {
+											select: {
+												firstName: true,
+												lastName: true,
+												company: { select: { name: true } },
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				});
+				const results = [];
+				for (const row of rows.slice(0, 500)) {
+					const evaluation = await evaluateFollowUpCohortCandidate(
+						tx,
+						row.id,
+						now,
+					);
+					results.push({
+						id: row.id,
+						position: row.position,
+						dueAt: row.dueAt,
+						canonicalDueAt: evaluation.canonicalDueAt,
+						eligible: evaluation.eligible,
+						reason: evaluation.reason,
+						contactId: row.plan.contactId,
+						contactName: [
+							row.draft?.recipientRoute?.contact?.firstName,
+							row.draft?.recipientRoute?.contact?.lastName,
+						]
+							.filter(Boolean)
+							.join(" "),
+						companyName:
+							row.draft?.recipientRoute?.contact?.company?.name ?? null,
+						route: row.draft?.recipientRoute?.value ?? null,
+					});
+				}
+				return {
+					asOf: now,
+					truncatedAt: rows.length > 500,
+					candidates: results,
+					eligibleCount: results.filter((result) => result.eligible).length,
+					excludedCount: results.filter((result) => !result.eligible).length,
+				};
+			},
+		);
+	}
+
+	async listFollowUpExecutionCohorts(actor: {
+		userId: string;
+		role: "admin" | "team" | "contributor";
+	}) {
+		if (actor.role === "contributor")
+			throw new ConflictException("Manager access is required.");
+		return withPrincipal(
+			this.db,
+			{ userId: actor.userId, kind: "user" },
+			async (tx) => {
+				const cohorts = await tx.followUpExecutionCohort.findMany({
+					orderBy: { createdAt: "desc" },
+					take: 20,
+					select: {
+						id: true,
+						state: true,
+						createdAt: true,
+						sourceContext: true,
+						members: {
+							select: {
+								followUpStepId: true,
+								canonicalDueAt: true,
+								status: true,
+								blockReason: true,
+							},
+						},
+						authorization: {
+							select: {
+								id: true,
+								status: true,
+								issuedAt: true,
+								expiresAt: true,
+							},
+						},
+					},
+				});
+				return cohorts.map((cohort) => {
+					const context = cohort.sourceContext;
+					const excludedValue =
+						context && typeof context === "object" && !Array.isArray(context)
+							? context.excluded
+							: null;
+					const excludedAtPreparation = Array.isArray(excludedValue)
+						? excludedValue.filter(
+								(row): row is { followUpStepId: string; reason: string } =>
+									Boolean(
+										row &&
+											typeof row === "object" &&
+											"followUpStepId" in row &&
+											"reason" in row &&
+											typeof row.followUpStepId === "string" &&
+											typeof row.reason === "string",
+									),
+							)
+						: [];
+					return { ...cohort, excludedAtPreparation };
+				});
+			},
+		);
+	}
+
+	async prepareFollowUpExecutionCohort(
+		actor: { userId: string; role: "admin" | "team" | "contributor" },
+		stepIds: string[],
+	) {
+		if (actor.role === "contributor")
+			throw new ConflictException("Manager access is required.");
+		if (new Set(stepIds).size !== stepIds.length)
+			throw new ConflictException(
+				"A follow-up step may only be selected once.",
+			);
+		const now = new Date();
+		return withPrincipal(
+			this.db,
+			{ userId: actor.userId, kind: "user" },
+			async (tx) => {
+				await tx.$queryRaw`SELECT pg_advisory_xact_lock(902104, 1)`;
+				const members: Array<{ followUpStepId: string; canonicalDueAt: Date }> =
+					[];
+				const excluded: Array<{ followUpStepId: string; reason: string }> = [];
+				for (const id of stepIds) {
+					const evaluation = await evaluateFollowUpCohortCandidate(tx, id, now);
+					if (!evaluation.eligible || !evaluation.canonicalDueAt) {
+						excluded.push({
+							followUpStepId: id,
+							reason: evaluation.reason ?? "FOLLOW_UP_PREFLIGHT_FAILED",
+						});
+						continue;
+					}
+					const alreadyAssigned =
+						await tx.followUpExecutionCohortMember.findFirst({
+							where: {
+								followUpStepId: id,
+								status: "PENDING",
+								cohort: { state: { in: ["READY", "ACTIVE"] } },
+							},
+							select: { id: true },
+						});
+					if (alreadyAssigned) {
+						excluded.push({
+							followUpStepId: id,
+							reason: "EXISTING_EXECUTABLE_COHORT",
+						});
+						continue;
+					}
+					members.push({
+						followUpStepId: id,
+						canonicalDueAt: evaluation.canonicalDueAt,
+					});
+				}
+				const excludedReasons = excluded.reduce<Record<string, number>>(
+					(counts, row) => {
+						counts[row.reason] = (counts[row.reason] ?? 0) + 1;
+						return counts;
+					},
+					{},
+				);
+				const cohort = await tx.followUpExecutionCohort.create({
+					data: {
+						createdById: actor.userId,
+						sourceContext: {
+							preflightVersion: "follow-up-cohort-v1",
+							timeZone: "Europe/Amsterdam",
+							createdAt: now.toISOString(),
+							requestedStepIds: stepIds,
+							includedStepIds: members.map((member) => member.followUpStepId),
+							excluded,
+						},
+					},
+				});
+				if (members.length)
+					await tx.followUpExecutionCohortMember.createMany({
+						data: members.map((member) => ({
+							...member,
+							cohortId: cohort.id,
+						})),
+					});
+				await tx.followUpExecutionCohort.update({
+					where: { id: cohort.id },
+					data: { state: "READY" },
+				});
+				const dueTimes = members.map((member) =>
+					member.canonicalDueAt.getTime(),
+				);
+				await tx.domainAuditEvent.create({
+					data: {
+						actorUserId: actor.userId,
+						action: "ATLAS_FOLLOW_UP_COHORT_PREPARED",
+						entityType: "OUTREACH",
+						entityId: cohort.id,
+						outcome: "SUCCESS",
+						requestId: `atlas-follow-up-cohort:prepared:${cohort.id}`,
+						metadata: {
+							requestedCount: stepIds.length,
+							selectedCount: members.length,
+							excludedCount: excluded.length,
+							excludedReasons,
+						},
+					},
+				});
+				return {
+					id: cohort.id,
+					state: "READY" as const,
+					requestedCount: stepIds.length,
+					selectedCount: members.length,
+					excluded,
+					earliestDueAt: dueTimes.length
+						? new Date(Math.min(...dueTimes))
+						: null,
+					latestDueAt: dueTimes.length ? new Date(Math.max(...dueTimes)) : null,
+				};
+			},
 		);
 	}
 
@@ -246,7 +510,7 @@ export class OutreachLifecycleService {
 			userId: string;
 			role: "admin" | "team" | "contributor";
 		},
-		input: { expiresAt?: Date | null },
+		input: { expiresAt?: Date | null; followUpCohortId?: string | null },
 	) {
 		if (actor.role === "contributor")
 			throw new ConflictException("Manager access is required.");
@@ -259,6 +523,21 @@ export class OutreachLifecycleService {
 			this.db,
 			{ userId: actor.userId, kind: "user" },
 			async (tx) => {
+				await tx.$executeRaw`SELECT pg_advisory_xact_lock(902104, 2)`;
+				const cohort = input.followUpCohortId
+					? await tx.followUpExecutionCohort.findFirst({
+							where: { id: input.followUpCohortId, state: "READY" },
+							include: { members: { select: { id: true } } },
+						})
+					: null;
+				if (input.followUpCohortId && (!cohort || cohort.members.length === 0))
+					throw new ConflictException(
+						"Select a prepared cohort with eligible members.",
+					);
+				const priorAuthorizations = await tx.outreachAuthorization.findMany({
+					where: { scope: "STANDARD_COLD_OUTREACH", status: "ACTIVE" },
+					select: { id: true, followUpCohortId: true },
+				});
 				await tx.outreachAuthorization.updateMany({
 					where: { scope: "STANDARD_COLD_OUTREACH", status: "ACTIVE" },
 					data: {
@@ -268,12 +547,26 @@ export class OutreachLifecycleService {
 						revocationReason: "Superseded by a newer authorization",
 					},
 				});
+				const priorCohortIds = priorAuthorizations.flatMap((row) =>
+					row.followUpCohortId ? [row.followUpCohortId] : [],
+				);
+				if (priorCohortIds.length)
+					await tx.followUpExecutionCohort.updateMany({
+						where: { id: { in: priorCohortIds }, state: "ACTIVE" },
+						data: { state: "CANCELLED" },
+					});
 				const authorization = await tx.outreachAuthorization.create({
 					data: {
 						authorizedById: actor.userId,
 						expiresAt: input.expiresAt ?? null,
+						followUpCohortId: cohort?.id ?? null,
 					},
 				});
+				if (cohort)
+					await tx.followUpExecutionCohort.update({
+						where: { id: cohort.id },
+						data: { state: "ACTIVE" },
+					});
 				await tx.domainAuditEvent.create({
 					data: {
 						actorUserId: actor.userId,
@@ -285,6 +578,8 @@ export class OutreachLifecycleService {
 						metadata: {
 							scope: authorization.scope,
 							expiresAt: authorization.expiresAt?.toISOString() ?? null,
+							followUpCohortId: cohort?.id ?? null,
+							followUpStepCount: cohort?.members.length ?? null,
 						},
 					},
 				});
@@ -307,6 +602,14 @@ export class OutreachLifecycleService {
 			this.db,
 			{ userId: actor.userId, kind: "user" },
 			async (tx) => {
+				const authorization = await tx.outreachAuthorization.findFirst({
+					where: {
+						id: input.id,
+						scope: "STANDARD_COLD_OUTREACH",
+						status: "ACTIVE",
+					},
+					select: { followUpCohortId: true },
+				});
 				const changed = await tx.outreachAuthorization.updateMany({
 					where: {
 						id: input.id,
@@ -324,6 +627,11 @@ export class OutreachLifecycleService {
 					throw new ConflictException(
 						"This authorization is not active or was not found.",
 					);
+				if (authorization?.followUpCohortId)
+					await tx.followUpExecutionCohort.updateMany({
+						where: { id: authorization.followUpCohortId, state: "ACTIVE" },
+						data: { state: "CANCELLED" },
+					});
 				await tx.domainAuditEvent.create({
 					data: {
 						actorUserId: actor.userId,
@@ -954,33 +1262,67 @@ export class OutreachLifecycleService {
 						where: { id: "app" },
 						select: { atlasLiveOutreachEnabled: true },
 					});
-					const authorization = await tx.outreachAuthorization.findFirst({
+					const activeCohort = await tx.followUpExecutionCohort.findFirst({
 						where: {
-							scope: "STANDARD_COLD_OUTREACH",
-							status: "ACTIVE",
-							OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+							state: { in: ["ACTIVE", "COMPLETED"] },
+							authorization: {
+								is: { status: "ACTIVE", scope: "STANDARD_COLD_OUTREACH" },
+							},
 						},
-						select: { id: true },
+						orderBy: { createdAt: "desc" },
+						select: {
+							id: true,
+							authorization: {
+								select: {
+									id: true,
+									followUpCohortId: true,
+									scope: true,
+									status: true,
+									expiresAt: true,
+								},
+							},
+						},
 					});
+					const now = new Date();
 					const gates = {
 						manuallyApproved: false,
 						coldDraft: true,
 						mailboxAllowed: true,
-						hasAuthorizationEvidence: Boolean(authorization),
-						authorizationValid: Boolean(authorization),
+						hasAuthorizationEvidence: Boolean(activeCohort?.authorization),
+						authorizationValid: Boolean(
+							activeCohort?.authorization?.scope === "STANDARD_COLD_OUTREACH" &&
+								activeCohort.authorization.status === "ACTIVE" &&
+								(activeCohort.authorization.expiresAt === null ||
+									activeCohort.authorization.expiresAt > now),
+						),
 						liveOutreachEnabled:
 							settings?.atlasLiveOutreachEnabled === true &&
 							atlasLiveOutreachEnvironmentEnabled(),
 						scheduledExecutionEnabled: atlasScheduledExecutionEnabled(),
 						providerReady:
 							provider?.status === "VERIFIED" || localProviderDoubleEnabled(),
+						cohortBound: Boolean(
+							activeCohort?.authorization?.followUpCohortId ===
+								activeCohort?.id,
+						),
 					};
+					if (activeCohort) {
+						if (!followUpClaimAllowed(gates)) return [];
+						return tx.$queryRawUnsafe<Claim[]>(
+							FOLLOW_UP_COHORT_CLAIM_SQL,
+							workerId,
+							activeCohort.id,
+							gates.liveOutreachEnabled && gates.scheduledExecutionEnabled,
+							localProviderDoubleEnabled(),
+						);
+					}
 					if (!followUpClaimAllowed(gates)) {
 						const manualRows = await tx.$queryRawUnsafe<Claim[]>(
 							FOLLOW_UP_CLAIM_SQL,
 							workerId,
 							localProviderDoubleEnabled(),
 							false,
+							null,
 						);
 						return manualRows;
 					}
@@ -988,16 +1330,17 @@ export class OutreachLifecycleService {
 						FOLLOW_UP_CLAIM_SQL,
 						workerId,
 						localProviderDoubleEnabled(),
-						gates.liveOutreachEnabled && gates.scheduledExecutionEnabled,
+						false,
+						null,
 					);
 				},
 			);
 			const step = rows[0];
 			if (!step) break;
 			try {
-				await this.queueStep(step, workerId);
+				await this.queueStep(step, workerId, step.cohortId ?? null);
 			} catch (error) {
-				await this.failStep(step, workerId, error);
+				await this.failStep(step, workerId, error, step.cohortId ?? null);
 			}
 			processed += 1;
 		}
@@ -1121,13 +1464,103 @@ export class OutreachLifecycleService {
 		});
 	}
 
-	private async queueStep(step: Claim, workerId: string) {
+	private async queueStep(
+		step: Claim,
+		workerId: string,
+		cohortId: string | null,
+	) {
 		if (!step.draftId) throw new Error("FOLLOW_UP_DRAFT_MISSING");
 		const draftId = step.draftId;
 		await withPrincipal(
 			this.db,
 			{ userId: null, kind: "worker" },
 			async (tx) => {
+				let cohortAuthorization: {
+					id: string;
+					followUpCohortId: string | null;
+					scope: string;
+					status: string;
+					expiresAt: Date | null;
+				} | null = null;
+				if (cohortId) {
+					const member = await tx.followUpExecutionCohortMember.findUnique({
+						where: {
+							cohortId_followUpStepId: {
+								cohortId,
+								followUpStepId: step.id,
+							},
+						},
+						include: {
+							cohort: {
+								include: { authorization: true },
+							},
+						},
+					});
+					const activeAt = new Date();
+					cohortAuthorization = member?.cohort.authorization ?? null;
+					if (
+						member?.status !== "PENDING" ||
+						member.cohort.state !== "ACTIVE" ||
+						!cohortAuthorization ||
+						cohortAuthorization.followUpCohortId !== cohortId ||
+						cohortAuthorization.scope !== "STANDARD_COLD_OUTREACH" ||
+						cohortAuthorization.status !== "ACTIVE" ||
+						(cohortAuthorization.expiresAt !== null &&
+							cohortAuthorization.expiresAt <= activeAt)
+					) {
+						await tx.followUpStep.updateMany({
+							where: { id: step.id, status: "LEASED", leaseOwner: workerId },
+							data: {
+								status: "PENDING",
+								attemptCount: { decrement: 1 },
+								leaseOwner: null,
+								leasedUntil: null,
+								retryAt: new Date(activeAt.getTime() + 60_000),
+								lastErrorCode: "FOLLOW_UP_COHORT_AUTHORIZATION_CHANGED",
+							},
+						});
+						await this.completeCohortIfSettled(tx, cohortId);
+						return;
+					}
+					const evaluation = await evaluateFollowUpCohortCandidate(
+						tx,
+						step.id,
+						activeAt,
+						{ type: "CLAIMED", workerId },
+					);
+					if (!evaluation.eligible) {
+						const reason =
+							evaluation.reason ?? "FOLLOW_UP_EXECUTION_PREFLIGHT_FAILED";
+						await tx.followUpStep.updateMany({
+							where: { id: step.id, status: "LEASED", leaseOwner: workerId },
+							data: {
+								status: "CANCELLED",
+								leaseOwner: null,
+								leasedUntil: null,
+								lastErrorCode: reason,
+							},
+						});
+						await tx.followUpExecutionCohortMember.updateMany({
+							where: { cohortId, followUpStepId: step.id, status: "PENDING" },
+							data: { status: "BLOCKED", blockReason: reason },
+						});
+						await tx.followUpPlan.updateMany({
+							where: { id: step.planId, status: "ACTIVE" },
+							data: { status: "CANCELLED", cancellationReason: reason },
+						});
+						await tx.domainAuditEvent.create({
+							data: {
+								action: "ATLAS_FOLLOW_UP_COHORT_MEMBER_BLOCKED",
+								entityType: "OUTREACH",
+								entityId: step.id,
+								outcome: "BLOCKED",
+								requestId: `atlas-follow-up-cohort:blocked:${cohortId}:${step.id}`,
+								metadata: { cohortId, reason },
+							},
+						});
+						return;
+					}
+				}
 				const plan = await tx.followUpPlan.findUnique({
 					where: { id: step.planId },
 				});
@@ -1194,10 +1627,11 @@ export class OutreachLifecycleService {
 						(draft.authorization.expiresAt === null ||
 							draft.authorization.expiresAt > new Date()),
 				);
-				const currentAuthorization =
-					draft?.coldOutreach &&
-					draft.status === "DRAFT" &&
-					!storedAuthorizationValid
+				const currentAuthorization = cohortId
+					? cohortAuthorization
+					: draft?.coldOutreach &&
+							draft.status === "DRAFT" &&
+							!storedAuthorizationValid
 						? await tx.outreachAuthorization.findFirst({
 								where: {
 									scope: "STANDARD_COLD_OUTREACH",
@@ -1255,19 +1689,30 @@ export class OutreachLifecycleService {
 					draft.recipientRoute?.contact?.lifecycleState !== "ACTIVE" ||
 					consent?.status === "DO_NOT_CONTACT"
 				) {
+					const cohortBlockReason = personProtected
+						? "PERSON_OWNER_PROTECTED"
+						: organizationProtection
+							? "FOLLOW_UP_CANCELLED_BY_ORGANIZATION_OWNER_PROTECTION"
+							: "FOLLOW_UP_CANCELLED_BY_POLICY";
 					await tx.followUpStep.updateMany({
 						where: { id: step.id, leaseOwner: workerId },
 						data: {
 							status: "CANCELLED",
 							leaseOwner: null,
 							leasedUntil: null,
-							lastErrorCode: personProtected
-								? "PERSON_OWNER_PROTECTED"
-								: organizationProtection
-									? "FOLLOW_UP_CANCELLED_BY_ORGANIZATION_OWNER_PROTECTION"
-									: "FOLLOW_UP_CANCELLED_BY_POLICY",
+							lastErrorCode: cohortBlockReason,
 						},
 					});
+					if (cohortId)
+						await tx.followUpExecutionCohortMember.updateMany({
+							where: {
+								cohortId,
+								followUpStepId: step.id,
+								status: "PENDING",
+							},
+							data: { status: "BLOCKED", blockReason: cohortBlockReason },
+						});
+					if (cohortId) await this.completeCohortIfSettled(tx, cohortId);
 					if (plan)
 						await tx.followUpPlan.update({
 							where: { id: plan.id },
@@ -1278,13 +1723,18 @@ export class OutreachLifecycleService {
 						});
 					return;
 				}
-				if (authorizationDisposition === "WAIT") {
+				if (
+					authorizationDisposition === "WAIT" ||
+					(cohortId !== null && !atlasScheduledExecutionEnabled())
+				) {
 					const holdReason =
-						!hasAuthorizationEvidence || !authorizationValid
-							? "OUTREACH_AUTHORIZATION_REQUIRED"
-							: !liveOutreachEnabled
-								? "ATLAS_LIVE_OUTREACH_DISABLED"
-								: "OUTREACH_MAILBOX_NOT_AUTHORIZED";
+						cohortId !== null && !atlasScheduledExecutionEnabled()
+							? "ATLAS_SCHEDULED_EXECUTION_DISABLED"
+							: !hasAuthorizationEvidence || !authorizationValid
+								? "OUTREACH_AUTHORIZATION_REQUIRED"
+								: !liveOutreachEnabled
+									? "ATLAS_LIVE_OUTREACH_DISABLED"
+									: "OUTREACH_MAILBOX_NOT_AUTHORIZED";
 					await tx.followUpStep.updateMany({
 						where: { id: step.id, leaseOwner: workerId },
 						data: {
@@ -1327,30 +1777,93 @@ export class OutreachLifecycleService {
 					where: { id: step.id, leaseOwner: workerId },
 					data: { status: "QUEUED", leaseOwner: null, leasedUntil: null },
 				});
+				if (cohortId) {
+					await tx.followUpExecutionCohortMember.updateMany({
+						where: {
+							cohortId,
+							followUpStepId: step.id,
+							status: "PENDING",
+						},
+						data: { status: "QUEUED", blockReason: null },
+					});
+					const remaining = await tx.followUpExecutionCohortMember.count({
+						where: { cohortId, status: "PENDING" },
+					});
+					if (remaining === 0)
+						await tx.followUpExecutionCohort.updateMany({
+							where: { id: cohortId, state: "ACTIVE" },
+							data: { state: "COMPLETED" },
+						});
+				}
 			},
 		);
 	}
 
-	private failStep(step: Claim, workerId: string, error: unknown) {
+	private async completeCohortIfSettled(
+		tx: Prisma.TransactionClient,
+		cohortId: string,
+	) {
+		const remaining = await tx.followUpExecutionCohortMember.count({
+			where: { cohortId, status: "PENDING" },
+		});
+		if (remaining === 0)
+			await tx.followUpExecutionCohort.updateMany({
+				where: { id: cohortId, state: "ACTIVE" },
+				data: { state: "COMPLETED" },
+			});
+	}
+
+	private failStep(
+		step: Claim,
+		workerId: string,
+		error: unknown,
+		cohortId: string | null,
+	) {
 		const dead = step.attemptCount >= 5;
-		return withPrincipal(this.db, { userId: null, kind: "worker" }, (tx) =>
-			tx.followUpStep.updateMany({
-				where: { id: step.id, leaseOwner: workerId },
-				data: {
-					status: dead ? "DEAD" : "PENDING",
-					leaseOwner: null,
-					leasedUntil: null,
-					retryAt: dead
-						? null
-						: new Date(
-								Date.now() + Math.min(3600000, 15000 * 2 ** step.attemptCount),
-							),
-					lastErrorCode:
-						error instanceof Error
-							? error.message.slice(0, 100)
-							: "FOLLOW_UP_FAILED",
-				},
-			}),
+		const reason =
+			error instanceof Error ? error.message.slice(0, 100) : "FOLLOW_UP_FAILED";
+		return withPrincipal(
+			this.db,
+			{ userId: null, kind: "worker" },
+			async (tx) => {
+				const updated = await tx.followUpStep.updateMany({
+					where: { id: step.id, leaseOwner: workerId },
+					data: {
+						status: dead ? "DEAD" : "PENDING",
+						leaseOwner: null,
+						leasedUntil: null,
+						retryAt: dead
+							? null
+							: new Date(
+									Date.now() +
+										Math.min(3600000, 15000 * 2 ** step.attemptCount),
+								),
+						lastErrorCode: reason,
+					},
+				});
+				if (cohortId && dead && updated.count) {
+					await tx.followUpExecutionCohortMember.updateMany({
+						where: {
+							cohortId,
+							followUpStepId: step.id,
+							status: "PENDING",
+						},
+						data: { status: "BLOCKED", blockReason: reason },
+					});
+					await tx.domainAuditEvent.create({
+						data: {
+							action: "ATLAS_FOLLOW_UP_COHORT_MEMBER_BLOCKED",
+							entityType: "OUTREACH",
+							entityId: step.id,
+							outcome: "BLOCKED",
+							requestId: `atlas-follow-up-cohort:dead:${cohortId}:${step.id}`,
+							metadata: { cohortId, reason },
+						},
+					});
+					await this.completeCohortIfSettled(tx, cohortId);
+				}
+				return updated;
+			},
 		);
 	}
 

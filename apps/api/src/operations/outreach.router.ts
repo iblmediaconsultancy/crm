@@ -16,6 +16,7 @@ import {
 	atlasAuthorizationIssueInput,
 	atlasAuthorizationRevokeInput,
 	followUpCancelInput,
+	followUpCohortPrepareInput,
 	followUpPlanCreateInput,
 	localReplyInput,
 	routeConsentInput,
@@ -28,6 +29,33 @@ export class OutreachLifecycleRouter {
 		private readonly outreach: OutreachLifecycleService,
 		private readonly agentTrigger: AgentTriggerService,
 	) {}
+	@Query({ meta: { permission: "outreach.approve" } })
+	previewFollowUpCohort(@Ctx() ctx: AuthedTrpcContext) {
+		return this.outreach.previewFollowUpCohort({
+			userId: ctx.user.id,
+			role: ctx.workspaceRole,
+		});
+	}
+	@Query({ meta: { permission: "outreach.approve" } })
+	listFollowUpExecutionCohorts(@Ctx() ctx: AuthedTrpcContext) {
+		return this.outreach.listFollowUpExecutionCohorts({
+			userId: ctx.user.id,
+			role: ctx.workspaceRole,
+		});
+	}
+	@Mutation({
+		input: followUpCohortPrepareInput,
+		meta: { permission: "outreach.approve" },
+	})
+	prepareFollowUpExecutionCohort(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof followUpCohortPrepareInput>,
+	) {
+		return this.outreach.prepareFollowUpExecutionCohort(
+			{ userId: ctx.user.id, role: ctx.workspaceRole },
+			input.stepIds,
+		);
+	}
 	@Query({ meta: { permission: "outreach.approve" } })
 	atlasSystemReadiness(@Ctx() ctx: AuthedTrpcContext) {
 		return this.outreach.atlasSystemReadiness({

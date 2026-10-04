@@ -10,6 +10,13 @@ import {
 	CardTitle,
 } from "@crm/ui/components/card";
 import { Input } from "@crm/ui/components/input";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@crm/ui/components/select";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { toast } from "sonner";
@@ -50,6 +57,11 @@ export function AtlasAuthorizationControls() {
 	const [expiresAt, setExpiresAt] = useState("");
 	const [reason, setReason] = useState("");
 	const [confirmed, setConfirmed] = useState(false);
+	const [followUpCohortId, setFollowUpCohortId] = useState("none");
+	const cohorts = useQuery({
+		...trpc.outreachLifecycle.listFollowUpExecutionCohorts.queryOptions(),
+		enabled: canManage,
+	});
 	const expiry = expiresAt ? new Date(expiresAt) : null;
 	const validExpiry = Boolean(
 		expiry &&
@@ -166,7 +178,11 @@ export function AtlasAuthorizationControls() {
 					onSubmit={(event) => {
 						event.preventDefault();
 						if (!expiry || !validExpiry || !confirmed) return;
-						issue.mutate({ expiresAt: expiry });
+						issue.mutate({
+							expiresAt: expiry,
+							followUpCohortId:
+								followUpCohortId === "none" ? null : followUpCohortId,
+						});
 					}}
 				>
 					<div className="grid gap-2">
@@ -186,6 +202,43 @@ export function AtlasAuthorizationControls() {
 						The selected local time is stored as an absolute expiry. A finite
 						expiry is required.
 					</p>
+					<div className="grid gap-2">
+						<label
+							htmlFor="atlas-follow-up-cohort"
+							className="text-sm font-medium"
+						>
+							Bind to prepared follow-up cohort
+						</label>
+						<Select
+							value={followUpCohortId}
+							onValueChange={setFollowUpCohortId}
+						>
+							<SelectTrigger
+								id="atlas-follow-up-cohort"
+								aria-labelledby="atlas-follow-up-cohort-label"
+							>
+								<SelectValue placeholder="Select a cohort" />
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="none">No cohort</SelectItem>
+								{cohorts.data
+									?.filter(
+										(cohort) =>
+											cohort.state === "READY" && cohort.members.length > 0,
+									)
+									.map((cohort) => (
+										<SelectItem key={cohort.id} value={cohort.id}>
+											{cohort.id} · {cohort.members.length} steps
+										</SelectItem>
+									))}
+							</SelectContent>
+						</Select>
+						<p className="text-xs text-muted-foreground">
+							A follow-up authorization is bound to this exact immutable cohort.
+							Without a cohort, autonomous follow-up claiming remains
+							unavailable.
+						</p>
+					</div>
 					<label
 						className="flex items-start gap-2 text-sm"
 						htmlFor={confirmationId}

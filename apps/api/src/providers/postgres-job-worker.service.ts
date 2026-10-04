@@ -12,6 +12,7 @@ import { InjectDatabase } from "../database/database.constants";
 import { snippetOf } from "../mailbox/message-text";
 import { resolveAtlasOutreachSender } from "./atlas-sender";
 import { standardColdFollowUpDueDates } from "./follow-up-cadence";
+import { evaluateFollowUpCohortCandidate } from "./follow-up-cohort-preflight";
 import {
 	localProviderDoubleEnabled,
 	localResendCredentialSource,
@@ -67,15 +68,20 @@ export const CLAIM_OUTBOUND = [
 	'    AND (d."coldOutreach" = false OR (',
 	"      $2::boolean",
 	'      AND d."atlasAuthorizedAt" IS NOT NULL',
-	'      AND EXISTS (SELECT 1 FROM "outreachAuthorization" a WHERE a."id" = d."authorizationId" AND a."scope" = \'STANDARD_COLD_OUTREACH\' AND a."status" = \'ACTIVE\' AND (a."expiresAt" IS NULL OR a."expiresAt" > (CURRENT_TIMESTAMP AT TIME ZONE \'UTC\')))',
+	'      AND EXISTS (SELECT 1 FROM "outreachAuthorization" a WHERE a."id" = d."authorizationId" AND a."scope" = \'STANDARD_COLD_OUTREACH\' AND a."status" = \'ACTIVE\' AND (a."expiresAt" IS NULL OR a."expiresAt" > (CURRENT_TIMESTAMP AT TIME ZONE \'UTC\')) AND (a."followUpCohortId" IS NULL OR (od."idempotencyKey" LIKE \'followup-delivery:%\' AND EXISTS (SELECT 1 FROM "followUpStep" fs JOIN "followUpExecutionCohortMember" fm ON fm."followUpStepId" = fs."id" JOIN "followUpExecutionCohort" fc ON fc."id" = fm."cohortId" WHERE fc."id" = a."followUpCohortId" AND fc."state" IN (\'ACTIVE\', \'COMPLETED\') AND fm."status" = \'QUEUED\' AND (\'followup-delivery:\' || fs."id") = od."idempotencyKey"))))',
 	'      AND EXISTS (SELECT 1 FROM "appSetting" s WHERE s."id" = \'app\' AND s."atlasLiveOutreachEnabled" = true)',
 	"      AND (od.\"idempotencyKey\" NOT LIKE 'followup-delivery:%' OR $3::boolean)",
 	"    ))",
 	'  ORDER BY od."createdAt", od."id" FOR UPDATE OF od SKIP LOCKED LIMIT 1',
-	') RETURNING "id", "draftId", "attemptCount"',
+	') RETURNING "id", "draftId", "idempotencyKey", "attemptCount"',
 ].join("\n");
 
-type ClaimedDelivery = { id: string; draftId: string; attemptCount: number };
+type ClaimedDelivery = {
+	id: string;
+	draftId: string;
+	idempotencyKey: string;
+	attemptCount: number;
+};
 type ClaimedSystemEmail = {
 	id: string;
 	kind: "INVITATION" | "PASSWORD_RESET";
@@ -262,7 +268,12 @@ export class PostgresJobWorkerService {
 								},
 							},
 							authorization: {
-								select: { scope: true, status: true, expiresAt: true },
+								select: {
+									scope: true,
+									status: true,
+									expiresAt: true,
+									followUpCohortId: true,
+								},
 							},
 							recipientRoute: {
 								select: {
@@ -387,6 +398,82 @@ export class PostgresJobWorkerService {
 					const senderValid =
 						!draft.coldOutreach ||
 						draft.mailbox?.address.toLowerCase() === "outreach@iblmedia.com";
+					if (draft.coldOutreach && draft.authorization?.followUpCohortId) {
+						const match = /^followup-delivery:(.+)$/.exec(
+							delivery.idempotencyKey,
+						);
+						const followUpStepId = match?.[1];
+						const evaluation = followUpStepId
+							? await evaluateFollowUpCohortCandidate(
+									tx,
+									followUpStepId,
+									new Date(),
+									{
+										type: "SENDING_DELIVERY",
+										deliveryId: delivery.id,
+									},
+								)
+							: {
+									eligible: false,
+									reason: "FOLLOW_UP_COHORT_DELIVERY_KEY_INVALID",
+								};
+						if (!evaluation.eligible) {
+							const reason =
+								evaluation.reason ?? "FOLLOW_UP_COHORT_SEND_PREFLIGHT_FAILED";
+							await tx.outboundDelivery.update({
+								where: { id: delivery.id },
+								data: {
+									status: "CANCELLED",
+									leaseOwner: null,
+									leasedUntil: null,
+									lastErrorCode: reason,
+								},
+							});
+							await tx.draft.update({
+								where: { id: draft.id },
+								data: { status: "CANCELLED" },
+							});
+							if (followUpStepId) {
+								await tx.followUpStep.updateMany({
+									where: { id: followUpStepId, status: "QUEUED" },
+									data: { status: "CANCELLED", lastErrorCode: reason },
+								});
+								await tx.followUpExecutionCohortMember.updateMany({
+									where: {
+										cohortId: draft.authorization.followUpCohortId,
+										followUpStepId,
+										status: "QUEUED",
+									},
+									data: { status: "BLOCKED", blockReason: reason },
+								});
+								await tx.followUpPlan.updateMany({
+									where: {
+										steps: { some: { id: followUpStepId } },
+										status: "ACTIVE",
+									},
+									data: {
+										status: "CANCELLED",
+										cancellationReason: reason,
+									},
+								});
+							}
+							await tx.domainAuditEvent.create({
+								data: {
+									action: "ATLAS_FOLLOW_UP_COHORT_SEND_BLOCKED",
+									entityType: "OUTREACH",
+									entityId: followUpStepId ?? delivery.id,
+									outcome: "BLOCKED",
+									requestId: `atlas-follow-up-cohort:send-blocked:${delivery.id}`,
+									metadata: {
+										cohortId: draft.authorization.followUpCohortId,
+										deliveryId: delivery.id,
+										reason,
+									},
+								},
+							});
+							return null;
+						}
+					}
 					if (
 						draft.status !== "QUEUED" ||
 						draft.recipientRoute?.type !== "EMAIL" ||
