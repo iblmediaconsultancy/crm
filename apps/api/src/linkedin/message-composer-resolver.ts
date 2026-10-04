@@ -19,6 +19,7 @@ export type LinkedInMessageComposerSurface = {
 	recipientIdentifier: string | null;
 	externalConversationKey: string | null;
 	externalMessageKey: string | null;
+	recipientIdentityAmbiguous?: boolean;
 	recipientCount: number;
 	visible: boolean;
 	connected: boolean;
@@ -43,6 +44,7 @@ export function summarizeLinkedInMessageComposerSnapshot(
 			recipientIdentifier: surface.recipientIdentifier,
 			externalConversationKey: surface.externalConversationKey,
 			externalMessageKey: surface.externalMessageKey,
+			recipientIdentityAmbiguous: surface.recipientIdentityAmbiguous ?? false,
 			recipientCount: surface.recipientCount,
 			visible: surface.visible,
 			connected: surface.connected,
@@ -124,6 +126,43 @@ export function linkedInMessageControlConversationKey(
 	}
 }
 
+export function resolveLinkedInThreadRecipientEvidence(input: {
+	composeRecipient?: string | null;
+	attributeIdentifiers: string[];
+	profileHrefs: string[];
+}): { recipientIdentifier: string | null; ambiguous: boolean } {
+	const identifiers = new Set<string>();
+	const addIdentifier = (value: string | null | undefined) => {
+		const normalized = value?.trim() ?? "";
+		const candidate = normalized.split(":").at(-1) ?? "";
+		if (/^ACo[A-Za-z0-9_-]+$/.test(candidate)) identifiers.add(candidate);
+	};
+	addIdentifier(input.composeRecipient);
+	for (const value of input.attributeIdentifiers) addIdentifier(value);
+	for (const href of input.profileHrefs) {
+		if (!href) continue;
+		try {
+			const url = new URL(href, "https://www.linkedin.com");
+			if (
+				url.protocol !== "https:" ||
+				!new Set(["linkedin.com", "www.linkedin.com"]).has(
+					url.hostname.toLocaleLowerCase(),
+				)
+			)
+				continue;
+			if (!/^\/(?:in|pub)\//i.test(url.pathname)) continue;
+			const segment = url.pathname.split("/").filter(Boolean).at(-1);
+			addIdentifier(segment);
+		} catch {}
+	}
+	return identifiers.size === 1
+		? {
+				recipientIdentifier: identifiers.values().next().value ?? null,
+				ambiguous: false,
+			}
+		: { recipientIdentifier: null, ambiguous: identifiers.size > 1 };
+}
+
 export function resolveLinkedInMessageComposer(
 	snapshot: LinkedInMessageComposerSnapshot,
 	input: {
@@ -160,6 +199,30 @@ export function resolveLinkedInMessageComposer(
 					surface.recipientIdentifier === expectedRecipient,
 			)
 		: [];
+	const matchingConversationSurfaces = expectedConversation
+		? snapshot.surfaces.filter(
+				(surface) =>
+					surface.visible &&
+					surface.connected &&
+					normalizeKey(surface.externalConversationKey) ===
+						expectedConversation &&
+					(Boolean(surface.recipientIdentifier) ||
+						surface.recipientIdentityAmbiguous === true ||
+						surface.editors.length > 0 ||
+						surface.sendControls.length > 0),
+			)
+		: [];
+	if (
+		expectedConversation &&
+		expectedRecipient &&
+		matchingConversationSurfaces.some(
+			(surface) =>
+				surface.recipientIdentityAmbiguous ||
+				(surface.recipientIdentifier !== null &&
+					surface.recipientIdentifier !== expectedRecipient),
+		)
+	)
+		return { status: "AMBIGUOUS" };
 	if (
 		expectedConversation &&
 		matchingRecipientSurfaces.some((surface) => {
@@ -177,6 +240,12 @@ export function resolveLinkedInMessageComposer(
 				(surface) => !normalizeKey(surface.externalConversationKey),
 			)
 		: [];
+	const missingRecipientSurfaces = expectedRecipient
+		? matchingConversationSurfaces.filter(
+				(surface) =>
+					!surface.recipientIdentifier && !surface.recipientIdentityAmbiguous,
+			)
+		: [];
 	const candidates = snapshot.surfaces.filter((surface) => {
 		if (!surface.visible || !surface.connected) return false;
 		if (!surface.recipientIdentifier && !expectedConversation) return false;
@@ -192,8 +261,12 @@ export function resolveLinkedInMessageComposer(
 		if (expectedConversation && !surfaceConversation) return false;
 		return true;
 	});
-	if (missingConversationKeySurfaces.length > 0) {
-		if (missingConversationKeySurfaces.length + candidates.length > 1)
+	const loadingTargetSurfaces = new Set([
+		...missingConversationKeySurfaces,
+		...missingRecipientSurfaces,
+	]);
+	if (loadingTargetSurfaces.size > 0) {
+		if (loadingTargetSurfaces.size + candidates.length > 1)
 			return { status: "AMBIGUOUS" };
 		return { status: "LOADING" };
 	}

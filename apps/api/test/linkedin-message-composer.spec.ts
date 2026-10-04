@@ -8,6 +8,7 @@ import {
 	linkedInMessageControlConversationKey,
 	linkedInMessageControlRecipientIdentifier,
 	resolveLinkedInMessageComposer,
+	resolveLinkedInThreadRecipientEvidence,
 	summarizeLinkedInMessageComposerSnapshot,
 	waitForStableLinkedInMessageComposer,
 } from "../src/linkedin/message-composer-resolver";
@@ -285,6 +286,98 @@ describe("LinkedIn message composer resolver", () => {
 				},
 			).status,
 		).toBe("AMBIGUOUS");
+	});
+
+	it("resolves a stored thread recipient from its stable profile link", () => {
+		const identity = resolveLinkedInThreadRecipientEvidence({
+			composeRecipient: null,
+			attributeIdentifiers: [],
+			profileHrefs: [
+				"https://www.linkedin.com/in/ACoAAGSMXQcBSQXGvmmvtgX8lo1uYTqpeeNngD0/",
+			],
+		});
+		expect(identity).toEqual({
+			recipientIdentifier: "ACoAAGSMXQcBSQXGvmmvtgX8lo1uYTqpeeNngD0",
+			ambiguous: false,
+		});
+		const result = resolveLinkedInMessageComposer(
+			snapshot({
+				kind: "THREAD",
+				recipientIdentifier: identity.recipientIdentifier,
+				externalConversationKey:
+					"2-NTkzYjE3MDgtODU4My00YzlkLTk2MWYtNWY5OGViYmViZjY3XzEwMA==",
+			}),
+			{
+				expectedRecipientIdentifier: identity.recipientIdentifier,
+				expectedExternalConversationKey:
+					"2-NTkzYjE3MDgtODU4My00YzlkLTk2MWYtNWY5OGViYmViZjY3XzEwMA==",
+			},
+		);
+		expect(result.status).toBe("FOUND");
+	});
+
+	it("fails closed when the stored thread header has conflicting profile identities", () => {
+		const identity = resolveLinkedInThreadRecipientEvidence({
+			composeRecipient: null,
+			attributeIdentifiers: [],
+			profileHrefs: [
+				"https://www.linkedin.com/in/ACoAAGijsVerified/",
+				"https://www.linkedin.com/in/ACoAOtherVerified/",
+			],
+		});
+		expect(identity).toEqual({ recipientIdentifier: null, ambiguous: true });
+		expect(
+			resolveLinkedInMessageComposer(
+				snapshot({
+					kind: "THREAD",
+					recipientIdentifier: null,
+					recipientIdentityAmbiguous: identity.ambiguous,
+					externalConversationKey: "thread-42",
+				}),
+				{
+					expectedRecipientIdentifier: recipient,
+					expectedExternalConversationKey: "thread-42",
+				},
+			).status,
+		).toBe("AMBIGUOUS");
+	});
+
+	it("fails closed when compose and thread header identities conflict", () => {
+		const identity = resolveLinkedInThreadRecipientEvidence({
+			composeRecipient: recipient,
+			attributeIdentifiers: [otherRecipient],
+			profileHrefs: [],
+		});
+		expect(identity).toEqual({ recipientIdentifier: null, ambiguous: true });
+	});
+
+	it("normalizes a LinkedIn member URN but ignores non-LinkedIn profile links", () => {
+		expect(
+			resolveLinkedInThreadRecipientEvidence({
+				composeRecipient: null,
+				attributeIdentifiers: ["urn:li:fsd_profile:ACoAAGijsVerified"],
+				profileHrefs: ["https://example.com/in/ACoAOtherVerified/"],
+			}),
+		).toEqual({
+			recipientIdentifier: "ACoAAGijsVerified",
+			ambiguous: false,
+		});
+	});
+
+	it("waits for stable identity evidence on the exact stored thread", () => {
+		expect(
+			resolveLinkedInMessageComposer(
+				snapshot({
+					kind: "THREAD",
+					recipientIdentifier: null,
+					externalConversationKey: "thread-42",
+				}),
+				{
+					expectedRecipientIdentifier: recipient,
+					expectedExternalConversationKey: "thread-42",
+				},
+			).status,
+		).toBe("LOADING");
 	});
 
 	it("matches percent-encoded thread keys to their canonical key", () => {
