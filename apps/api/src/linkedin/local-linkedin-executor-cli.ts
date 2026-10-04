@@ -138,6 +138,7 @@ async function startBrowser(): Promise<void> {
 		[
 			`--remote-debugging-port=${port}`,
 			`--user-data-dir=${profile}`,
+			"--start-maximized",
 			"--no-first-run",
 			"--no-default-browser-check",
 			"https://www.linkedin.com/feed/",

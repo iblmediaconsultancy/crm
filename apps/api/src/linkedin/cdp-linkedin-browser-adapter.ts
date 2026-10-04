@@ -15,11 +15,16 @@ import {
 	resolveLinkedInConnectionRequestModalControl,
 } from "./connection-request-modal-resolver";
 import {
+	linkedInNavigationError,
+	waitForLinkedInBrowserWindow,
+} from "./linkedin-browser-window";
+import {
 	type LinkedInMessageComposerResolution,
 	type LinkedInMessageComposerSnapshot,
 	type LinkedInMessageComposerSurface,
 	linkedInMessageComposerControlReady,
 	resolveLinkedInMessageComposer,
+	resolveLinkedInThreadRecipientEvidence,
 	summarizeLinkedInMessageComposerSnapshot,
 	waitForStableLinkedInMessageComposer,
 } from "./message-composer-resolver";
@@ -61,9 +66,20 @@ declare function getComputedStyle(element: PageElement): {
 };
 
 type CdpTarget = {
+	id?: string;
 	type?: string;
 	url?: string;
 	webSocketDebuggerUrl?: string;
+};
+
+type CdpBrowserVersion = { webSocketDebuggerUrl?: string };
+
+type CdpWindowBounds = {
+	left: number;
+	top: number;
+	width: number;
+	height: number;
+	windowState?: string;
 };
 
 type ConnectionRequestModalInspection = {
@@ -73,7 +89,12 @@ type ConnectionRequestModalInspection = {
 
 type CdpReply = {
 	id?: number;
-	result?: { result?: { value?: unknown } };
+	result?: {
+		result?: { value?: unknown };
+		errorText?: string;
+		windowId?: number;
+		bounds?: CdpWindowBounds;
+	};
 	error?: { message?: string };
 };
 
@@ -93,7 +114,15 @@ type PageObservation = LinkedInBrowserIdentityEvidence & {
 
 type MessageComposerInspection = LinkedInMessageComposerResolution;
 
-function collectLinkedInMessageComposerSnapshot(): LinkedInMessageComposerSnapshot {
+class CdpNavigationError extends Error {
+	constructor(readonly navigationErrorText: string) {
+		super("LINKEDIN_NAVIGATION_FAILED");
+	}
+}
+
+function collectLinkedInMessageComposerSnapshot(
+	resolveRecipientEvidence: typeof resolveLinkedInThreadRecipientEvidence,
+): LinkedInMessageComposerSnapshot {
 	const state = globalThis as unknown as {
 		atlasComposerNodes?: {
 			identities: WeakMap<PageElement, number>;
@@ -164,17 +193,23 @@ function collectLinkedInMessageComposerSnapshot(): LinkedInMessageComposerSnapsh
 			surface.querySelectorAll(
 				"[data-member-urn], [data-profile-urn], [data-recipient], [data-urn]",
 			),
+		).flatMap((element) =>
+			["data-member-urn", "data-profile-urn", "data-recipient", "data-urn"]
+				.map((name) => element.getAttribute(name))
+				.filter((value): value is string => Boolean(value)),
+		);
+		const profileHrefs = Array.from(
+			surface.querySelectorAll(".msg-title-bar a[href]"),
 		)
-			.map((element) =>
-				["data-member-urn", "data-profile-urn", "data-recipient", "data-urn"]
-					.map((name) => element.getAttribute(name))
-					.find((value): value is string => Boolean(value)),
-			)
+			.filter(isVisible)
+			.map((element) => element.getAttribute("href"))
 			.filter((value): value is string => Boolean(value));
-		const participantIdentifier =
-			composeRecipient ||
-			attributes.find((value) => /^ACo[A-Za-z0-9_-]+$/.test(value)) ||
-			null;
+		const recipientEvidence = resolveRecipientEvidence({
+			composeRecipient,
+			attributeIdentifiers: attributes,
+			profileHrefs,
+		});
+		const participantIdentifier = recipientEvidence.recipientIdentifier;
 		const recipientCount =
 			kind === "THREAD"
 				? 1
@@ -239,6 +274,7 @@ function collectLinkedInMessageComposerSnapshot(): LinkedInMessageComposerSnapsh
 			index,
 			kind,
 			recipientIdentifier: participantIdentifier,
+			recipientIdentityAmbiguous: recipientEvidence.ambiguous,
 			externalConversationKey: threadKey,
 			externalMessageKey,
 			recipientCount,
@@ -681,13 +717,21 @@ class CdpConnection {
 }
 
 class CdpPage {
-	private constructor(private readonly connection: CdpConnection) {}
+	private constructor(
+		private readonly connection: CdpConnection,
+		private readonly browserConnection: CdpConnection,
+		private readonly targetId: string,
+	) {}
 
-	static async connect(url: string): Promise<CdpPage> {
+	static async connect(
+		url: string,
+		targetId: string,
+		browserConnection: CdpConnection,
+	): Promise<CdpPage> {
 		const connection = await CdpConnection.connect(url);
 		await connection.send("Runtime.enable");
 		await connection.send("Page.enable");
-		return new CdpPage(connection);
+		return new CdpPage(connection, browserConnection, targetId);
 	}
 
 	async evaluate<T>(expression: string): Promise<T> {
@@ -700,11 +744,74 @@ class CdpPage {
 	}
 
 	async navigate(url: string): Promise<void> {
-		await this.connection.send("Page.navigate", { url });
+		const reply = await this.connection.send("Page.navigate", { url });
+		const errorText = reply.result?.errorText;
+		if (errorText && linkedInNavigationError({ errorText }))
+			throw new CdpNavigationError(errorText);
 	}
 
 	async close(): Promise<void> {
 		this.connection.close();
+		this.browserConnection.close();
+	}
+
+	async ensureInteractiveWindow(): Promise<void> {
+		await this.activateWindow();
+		await waitForLinkedInBrowserWindow(
+			async () => {
+				const { bounds } = await this.browserWindow();
+				const viewport = await this.evaluate<{
+					viewportWidth: number;
+					pageVisible: boolean;
+				}>(
+					`({ viewportWidth: window.innerWidth, pageVisible: document.visibilityState === "visible" })`,
+				);
+				return {
+					windowState: bounds.windowState ?? "unknown",
+					windowWidth: bounds.width,
+					...viewport,
+				};
+			},
+			() => this.activateWindow(),
+		);
+	}
+
+	private async browserWindow(): Promise<{
+		windowId: number;
+		bounds: CdpWindowBounds;
+	}> {
+		const reply = await this.browserConnection.send(
+			"Browser.getWindowForTarget",
+			{ targetId: this.targetId },
+		);
+		if (reply.result?.windowId === undefined || !reply.result.bounds)
+			throw new Error("LINKEDIN_BROWSER_WINDOW_UNAVAILABLE");
+		return {
+			windowId: reply.result.windowId,
+			bounds: reply.result.bounds,
+		};
+	}
+
+	private async activateWindow(): Promise<void> {
+		const { windowId, bounds } = await this.browserWindow();
+		if (bounds.windowState === "minimized") {
+			await this.browserConnection.send("Browser.setWindowBounds", {
+				windowId,
+				bounds: { windowState: "normal" },
+			});
+		}
+		const restored = await this.browserWindow();
+		const viewportWidth = await this.evaluate<number>("window.innerWidth");
+		if (restored.bounds.width < 1024 || viewportWidth < 1024) {
+			await this.browserConnection.send("Browser.setWindowBounds", {
+				windowId: restored.windowId,
+				bounds: { windowState: "maximized" },
+			});
+		}
+		await this.browserConnection.send("Target.activateTarget", {
+			targetId: this.targetId,
+		});
+		await this.connection.send("Page.bringToFront");
 	}
 
 	async observe(): Promise<PageObservation> {
@@ -891,11 +998,14 @@ class CdpPage {
 		expectedExternalConversationKey: string | null,
 	): Promise<MessageComposerInspection> {
 		const collect = collectLinkedInMessageComposerSnapshot.toString();
+		const resolveRecipientEvidence =
+			resolveLinkedInThreadRecipientEvidence.toString();
 		const resolve = resolveLinkedInMessageComposer.toString();
 		return this.evaluate<MessageComposerInspection>(`(() => {
+			const resolveRecipient = ${resolveRecipientEvidence};
 			const collectSnapshot = ${collect};
 			const resolveComposer = ${resolve};
-			return resolveComposer(collectSnapshot(), {
+			return resolveComposer(collectSnapshot(resolveRecipient), {
 				expectedRecipientIdentifier: ${JSON.stringify(expectedRecipientIdentifier)},
 				expectedExternalConversationKey: ${JSON.stringify(expectedExternalConversationKey)},
 			});
@@ -904,11 +1014,14 @@ class CdpPage {
 
 	async inspectMessageComposerDiagnostics() {
 		const collect = collectLinkedInMessageComposerSnapshot.toString();
+		const resolveRecipientEvidence =
+			resolveLinkedInThreadRecipientEvidence.toString();
 		const summarize = summarizeLinkedInMessageComposerSnapshot.toString();
 		return this.evaluate(`(() => {
+			const resolveRecipient = ${resolveRecipientEvidence};
 			const collectSnapshot = ${collect};
 			const summarizeSnapshot = ${summarize};
-			return summarizeSnapshot(collectSnapshot());
+			return summarizeSnapshot(collectSnapshot(resolveRecipient));
 		})()`);
 	}
 
@@ -919,8 +1032,11 @@ class CdpPage {
 	): Promise<boolean | "AMBIGUOUS"> {
 		if (expectedRecipientIdentifier || expectedExternalConversationKey) {
 			const collect = collectLinkedInMessageComposerSnapshot.toString();
+			const resolveRecipientEvidence =
+				resolveLinkedInThreadRecipientEvidence.toString();
 			const resolve = resolveLinkedInMessageComposer.toString();
 			const focusReady = await this.evaluate<boolean>(`(() => {
+				const resolveRecipient = ${resolveRecipientEvidence};
 				const collectSnapshot = ${collect};
 				const resolveComposer = ${resolve};
 				const isVisible = (element) => {
@@ -934,7 +1050,7 @@ class CdpPage {
 					if (classes.includes("msg-compose-container")) return true;
 					return !element.closest(".msg-compose-container");
 				});
-				const resolution = resolveComposer(collectSnapshot(), {
+				const resolution = resolveComposer(collectSnapshot(resolveRecipient), {
 					expectedRecipientIdentifier: ${JSON.stringify(expectedRecipientIdentifier)},
 					expectedExternalConversationKey: ${JSON.stringify(expectedExternalConversationKey)},
 				});
@@ -967,6 +1083,7 @@ class CdpPage {
 				if (resolution.status === "FOUND") {
 					const sent = await this.evaluate<boolean>(`(() => {
 						const value = ${JSON.stringify(body)};
+						const resolveRecipient = ${resolveRecipientEvidence};
 						const collectSnapshot = ${collect};
 						const resolveComposer = ${resolve};
 						const sendControlReady = ${linkedInMessageComposerControlReady.toString()};
@@ -981,7 +1098,7 @@ class CdpPage {
 							if (classes.includes("msg-compose-container")) return true;
 							return !element.closest(".msg-compose-container");
 						});
-						const resolution = resolveComposer(collectSnapshot(), {
+						const resolution = resolveComposer(collectSnapshot(resolveRecipient), {
 							expectedRecipientIdentifier: ${JSON.stringify(expectedRecipientIdentifier)},
 							expectedExternalConversationKey: ${JSON.stringify(expectedExternalConversationKey)},
 						});
@@ -991,7 +1108,7 @@ class CdpPage {
 						const sends = surface ? Array.from(surface.querySelectorAll("button, [role=button]")) : [];
 						const editor = editors[resolution.editorIndex];
 						const send = sends[resolution.sendControlIndex];
-						const snapshot = collectSnapshot().surfaces.find((candidate) => candidate.index === resolution.surfaceIndex);
+						const snapshot = collectSnapshot(resolveRecipient).surfaces.find((candidate) => candidate.index === resolution.surfaceIndex);
 						const sendSnapshot = snapshot?.sendControls.find((control) => control.index === resolution.sendControlIndex);
 						const text = editor instanceof HTMLTextAreaElement ? editor?.value : editor?.textContent || "";
 						const label = send && (((send.textContent || "").trim().toLocaleLowerCase() === "send") || ((send.getAttribute("aria-label") || "").trim().toLocaleLowerCase() === "send"));
@@ -1042,8 +1159,26 @@ async function pageForPort(port: number): Promise<CdpPage> {
 			item.webSocketDebuggerUrl &&
 			/linkedin\.com/i.test(item.url ?? ""),
 	);
-	if (!target?.webSocketDebuggerUrl) throw new Error("LINKEDIN_PAGE_NOT_FOUND");
-	return CdpPage.connect(target.webSocketDebuggerUrl);
+	if (!target?.id || !target.webSocketDebuggerUrl)
+		throw new Error("LINKEDIN_PAGE_NOT_FOUND");
+	const versionResponse = await fetch(`http://127.0.0.1:${port}/json/version`);
+	if (!versionResponse.ok) throw new Error("CDP_BROWSER_TARGET_UNAVAILABLE");
+	const version = (await versionResponse.json()) as CdpBrowserVersion;
+	if (!version.webSocketDebuggerUrl)
+		throw new Error("CDP_BROWSER_TARGET_UNAVAILABLE");
+	const browserConnection = await CdpConnection.connect(
+		version.webSocketDebuggerUrl,
+	);
+	try {
+		return await CdpPage.connect(
+			target.webSocketDebuggerUrl,
+			target.id,
+			browserConnection,
+		);
+	} catch (error) {
+		browserConnection.close();
+		throw error;
+	}
 }
 
 export function linkedinMessageExecutionUrl(
@@ -1138,6 +1273,7 @@ export class CdpLinkedInBrowserAdapter implements LinkedInBrowserAdapter {
 			const before = await page.observe();
 			if (before.challenge || !before.authenticated)
 				throw new Error(before.challenge ?? "LINKEDIN_LOGIN_REQUIRED");
+			await page.ensureInteractiveWindow();
 			await page.navigate(destination.href);
 			return await waitForMessageComposer(
 				page,
@@ -1193,6 +1329,7 @@ export class CdpLinkedInBrowserAdapter implements LinkedInBrowserAdapter {
 	): Promise<LinkedInBrowserOutcome> {
 		let page: CdpPage;
 		let writeStarted = false;
+		let diagnosticPhase: string | null = null;
 		try {
 			page = await pageForPort(this.port);
 		} catch (error) {
@@ -1204,6 +1341,11 @@ export class CdpLinkedInBrowserAdapter implements LinkedInBrowserAdapter {
 			};
 		}
 		try {
+			if (action.action === "MESSAGE") {
+				diagnosticPhase = "browser-window-readiness";
+				await page.ensureInteractiveWindow();
+			}
+			diagnosticPhase = "profile-navigation";
 			await page.navigate(action.target.profileUrl);
 			await new Promise((resolve) => setTimeout(resolve, 500));
 			const before = await page.observe();
@@ -1371,6 +1513,7 @@ export class CdpLinkedInBrowserAdapter implements LinkedInBrowserAdapter {
 						},
 						observedAt: new Date(),
 					};
+				diagnosticPhase = "existing-thread-navigation";
 				await page.navigate(threadUrl);
 				const threadState = await page.observe();
 				if (threadState.challenge)
@@ -1584,10 +1727,23 @@ export class CdpLinkedInBrowserAdapter implements LinkedInBrowserAdapter {
 				observedAt: new Date(),
 			};
 		} catch (error) {
+			const navigationErrorText =
+				error instanceof CdpNavigationError ? error.navigationErrorText : null;
+			const browserProof = diagnosticPhase
+				? {
+						phase: diagnosticPhase,
+						errorCode:
+							error instanceof Error
+								? error.message
+								: "BROWSER_EXECUTION_FAILED",
+						...(navigationErrorText ? { navigationErrorText } : {}),
+					}
+				: undefined;
 			return writeStarted
 				? {
 						status: "AMBIGUOUS",
 						errorCode: "SEND_STATE_UNCLEAR",
+						...(browserProof ? { browserProof } : {}),
 						observedAt: new Date(),
 					}
 				: {
@@ -1596,6 +1752,7 @@ export class CdpLinkedInBrowserAdapter implements LinkedInBrowserAdapter {
 							error instanceof Error
 								? error.message
 								: "BROWSER_EXECUTION_FAILED",
+						...(browserProof ? { browserProof } : {}),
 						observedAt: new Date(),
 					};
 		} finally {

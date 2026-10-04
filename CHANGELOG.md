@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.5](https://github.com/iblmediaconsultancy/crm/compare/v1.6.4...v1.6.5) (2026-10-04)
+
+
+### Fixes
+
+* **api:** resolve LinkedIn composer after stored-thread navigation ([#42](https://github.com/iblmediaconsultancy/crm/issues/42)) ([9de09c2](https://github.com/iblmediaconsultancy/crm/commit/9de09c2a745b1168f0a02a5e9ef05625d02e4867))
+
 ## [1.6.4](https://github.com/iblmediaconsultancy/crm/compare/v1.6.3...v1.6.4) (2026-10-04)
 
 
