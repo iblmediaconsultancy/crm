@@ -11,6 +11,18 @@ export function standardColdFollowUpDueDates(
 	) as [Date, Date];
 }
 
+export function canonicalFollowUpStepDueAt(
+	position: number,
+	coldEmailSentAt: Date,
+	previousFollowUpSentAt?: Date | null,
+	timeZone = "Europe/Amsterdam",
+): Date | null {
+	if (position === 0) return businessDaysAfter(coldEmailSentAt, 5, timeZone);
+	if (position === 1 && previousFollowUpSentAt)
+		return businessDaysAfter(previousFollowUpSentAt, 5, timeZone);
+	return null;
+}
+
 export function preserveLaterFollowUpDueAt(
 	currentDueAt: Date,
 	targetDueAt: Date,

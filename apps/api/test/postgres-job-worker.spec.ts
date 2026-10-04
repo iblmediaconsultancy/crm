@@ -822,7 +822,7 @@ describe("PostgreSQL durable system-email queue", () => {
 		}
 	});
 
-	test("claims an autonomous follow-up when all execution gates are valid", async () => {
+	test("does not claim autonomous follow-ups without an exact prepared cohort", async () => {
 		const mailbox = await db.mailbox.findFirst({
 			where: { normalizedAddress: "outreach@iblmedia.com" },
 			select: { id: true },
@@ -906,13 +906,13 @@ describe("PostgreSQL durable system-email queue", () => {
 		process.env.ATLAS_SCHEDULED_EXECUTION_ENABLED = "true";
 		try {
 			const service = new OutreachLifecycleService(db);
-			expect(await service.runDue("authorized-follow-up-worker")).toBe(1);
+			expect(await service.runDue("unbound-follow-up-worker")).toBe(0);
 			expect(
 				await db.followUpStep.findUnique({
 					where: { id: enabledFollowUpStepId },
 					select: { status: true, attemptCount: true, leaseOwner: true },
 				}),
-			).toEqual({ status: "QUEUED", attemptCount: 1, leaseOwner: null });
+			).toEqual({ status: "PENDING", attemptCount: 0, leaseOwner: null });
 			expect(
 				await db.outboundDelivery.findUnique({
 					where: {
@@ -920,7 +920,7 @@ describe("PostgreSQL durable system-email queue", () => {
 					},
 					select: { status: true, attemptCount: true, leaseOwner: true },
 				}),
-			).toEqual({ status: "PENDING", attemptCount: 0, leaseOwner: null });
+			).toBeNull();
 			process.env.ATLAS_SCHEDULED_EXECUTION_ENABLED = "false";
 			const worker = new PostgresJobWorkerService(db, credentials, transport);
 			const loadsBefore = credentialLoads.count;
@@ -931,21 +931,8 @@ describe("PostgreSQL durable system-email queue", () => {
 					where: {
 						idempotencyKey: `followup-delivery:${enabledFollowUpStepId}`,
 					},
-					select: {
-						status: true,
-						attemptCount: true,
-						leaseOwner: true,
-						leasedUntil: true,
-						retryAt: true,
-					},
 				}),
-			).toEqual({
-				status: "PENDING",
-				attemptCount: 0,
-				leaseOwner: null,
-				leasedUntil: null,
-				retryAt: null,
-			});
+			).toBeNull();
 			expect(sent.has(`followup-delivery:${enabledFollowUpStepId}`)).toBe(
 				false,
 			);
