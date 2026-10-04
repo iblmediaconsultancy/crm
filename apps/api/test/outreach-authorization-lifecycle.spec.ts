@@ -3,6 +3,35 @@ import type { Db } from "@crm/db";
 import { OutreachLifecycleService } from "../src/providers/outreach-lifecycle.service";
 
 describe("Atlas authorization lifecycle", () => {
+	test("does not materialize cold follow-up plans while execution gates are disabled", async () => {
+		const originalLive = process.env.ATLAS_LIVE_OUTREACH_ENABLED;
+		const originalScheduled = process.env.ATLAS_SCHEDULED_EXECUTION_ENABLED;
+		delete process.env.ATLAS_LIVE_OUTREACH_ENABLED;
+		delete process.env.ATLAS_SCHEDULED_EXECUTION_ENABLED;
+		try {
+			const db = {
+				$transaction: async () => {
+					throw new Error(
+						"Transaction must not start while execution is gated",
+					);
+				},
+			} as unknown as Db;
+			const service = new OutreachLifecycleService(db);
+
+			expect(await service.materializePendingPlans()).toEqual({
+				inspected: 0,
+				created: 0,
+			});
+		} finally {
+			if (originalLive === undefined)
+				delete process.env.ATLAS_LIVE_OUTREACH_ENABLED;
+			else process.env.ATLAS_LIVE_OUTREACH_ENABLED = originalLive;
+			if (originalScheduled === undefined)
+				delete process.env.ATLAS_SCHEDULED_EXECUTION_ENABLED;
+			else process.env.ATLAS_SCHEDULED_EXECUTION_ENABLED = originalScheduled;
+		}
+	});
+
 	test("issues a scoped authorization and persists its audit event", async () => {
 		const events: unknown[] = [];
 		const transactions: unknown[] = [];
