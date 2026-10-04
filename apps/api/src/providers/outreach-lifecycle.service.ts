@@ -663,6 +663,11 @@ export class OutreachLifecycleService {
 	}
 
 	async materializePendingPlans() {
+		if (
+			!atlasLiveOutreachEnvironmentEnabled() ||
+			!atlasScheduledExecutionEnabled()
+		)
+			return { inspected: 0, created: 0 };
 		return withPrincipal(
 			this.db,
 			{ userId: null, kind: "worker" },
