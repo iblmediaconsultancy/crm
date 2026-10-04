@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.0](https://github.com/iblmediaconsultancy/crm/compare/v1.6.5...v1.7.0) (2026-10-04)
+
+
+### Features
+
+* **api:** add exact follow-up execution cohorts ([#45](https://github.com/iblmediaconsultancy/crm/issues/45)) ([44e75f7](https://github.com/iblmediaconsultancy/crm/commit/44e75f707b2dc0c5ffc0f7caec74793c6b6d0191))
+
 ## [1.6.5](https://github.com/iblmediaconsultancy/crm/compare/v1.6.4...v1.6.5) (2026-10-04)
 
 
