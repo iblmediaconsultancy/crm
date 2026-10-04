@@ -46,6 +46,7 @@ describe("Atlas authorization lifecycle", () => {
 		const tx = {
 			$executeRaw: async () => 1,
 			outreachAuthorization: {
+				findMany: async () => [],
 				updateMany: async (input: unknown) => {
 					transactions.push(input);
 					return { count: 1 };
@@ -81,7 +82,11 @@ describe("Atlas authorization lifecycle", () => {
 			},
 		});
 		expect(transactions[1]).toEqual({
-			data: { authorizedById: "ihsan-human", expiresAt },
+			data: {
+				authorizedById: "ihsan-human",
+				expiresAt,
+				followUpCohortId: null,
+			},
 		});
 		expect(events).toEqual([
 			{
@@ -95,6 +100,8 @@ describe("Atlas authorization lifecycle", () => {
 					metadata: {
 						scope: "STANDARD_COLD_OUTREACH",
 						expiresAt: expiresAt.toISOString(),
+						followUpCohortId: null,
+						followUpStepCount: null,
 					},
 				},
 			},
@@ -123,6 +130,7 @@ describe("Atlas authorization lifecycle", () => {
 		const tx = {
 			$executeRaw: async () => 1,
 			outreachAuthorization: {
+				findFirst: async () => ({ followUpCohortId: null }),
 				updateMany: async (input: Record<string, unknown>) => {
 					calls.push(input);
 					return { count: 1 };

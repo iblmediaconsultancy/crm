@@ -22,6 +22,7 @@ export function followUpClaimAllowed(input: {
 	liveOutreachEnabled: boolean;
 	scheduledExecutionEnabled: boolean;
 	providerReady: boolean;
+	cohortBound: boolean;
 }) {
 	if (!input.providerReady) return false;
 	if (input.manuallyApproved) return true;
@@ -29,7 +30,9 @@ export function followUpClaimAllowed(input: {
 		return false;
 	if (
 		input.coldDraft &&
-		(!input.hasAuthorizationEvidence || !input.authorizationValid)
+		(!input.hasAuthorizationEvidence ||
+			!input.authorizationValid ||
+			!input.cohortBound)
 	)
 		return false;
 	return followUpAuthorizationDisposition(input) !== "WAIT";

@@ -30,7 +30,7 @@ import { meetingAvailabilityInput, meetingRequestInput, meetingIdInput } from ".
 import { invitationIdInput, acceptInvitationInput, pendingInvitationsInput, inviteMemberInput } from "../onboarding/onboarding.contracts";
 import { allocationTargetInput, allocationPolicyCreateInput, allocationPolicyActivateInput, allocationEnqueueInput, allocationOverrideInput } from "../operations/allocation.contracts";
 import { operationsListInput, leadIdInput, footballProfileInput, organizationProfileInput, representationCreateInput, representationTransitionInput, playerProtectionCreateInput, playerProtectionActiveInput, contactRouteCreateInput, contactRouteShareInput, leadCreateInput, leadTransitionInput, leadHandoffInput, taskCreateInput, taskTransitionInput, noteCreateInput, assignmentCreateInput, researchRequestCreateInput, templateCreateInput, draftCreateInput, draftUpdateInput, approvalRequestInput, approvalDecisionInput, draftApproveInput, proposalCreateInput, proofCreateInput } from "../operations/operations.contracts";
-import { atlasAuthorizationIssueInput, atlasAuthorizationRevokeInput, routeConsentInput, followUpPlanCreateInput, followUpCancelInput, localReplyInput } from "../operations/outreach.contracts";
+import { followUpCohortPrepareInput, atlasAuthorizationIssueInput, atlasAuthorizationRevokeInput, routeConsentInput, followUpPlanCreateInput, followUpCancelInput, localReplyInput } from "../operations/outreach.contracts";
 import { updateOwnProfileInput } from "../profile/profile.contracts";
 import { verifyMailboxInput } from "../provider-capabilities/provider-capabilities.contracts";
 import { setResearchKeyInput } from "../settings/settings.contracts";
@@ -593,6 +593,13 @@ const appRouter = t.router({
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OperationsRouter["createProof"]>>)
     }),
   outreachLifecycle: t.router({
+    previewFollowUpCohort: publicProcedure
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OutreachLifecycleRouter["previewFollowUpCohort"]>>),
+    listFollowUpExecutionCohorts: publicProcedure
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OutreachLifecycleRouter["listFollowUpExecutionCohorts"]>>),
+    prepareFollowUpExecutionCohort: publicProcedure
+      .input(followUpCohortPrepareInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OutreachLifecycleRouter["prepareFollowUpExecutionCohort"]>>),
     atlasSystemReadiness: publicProcedure
       .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<OutreachLifecycleRouter["atlasSystemReadiness"]>>),
     listAtlasAuthorizations: publicProcedure

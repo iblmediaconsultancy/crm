@@ -47,44 +47,45 @@ model User {
   conversationSubmissions AgentConversationSubmission[] @relation("ConversationSubmissionAuthor")
   conversationFeedback    AgentConversationFeedback[]   @relation("ConversationFeedbackAuthor")
 
-  ownedContactRoutes         ContactRoute[]                @relation("ContactRouteOwner")
-  approvedRoutePolicies      SharedRoutePolicy[]           @relation("SharedRoutePolicyApprover")
-  createdRepresentations     Representation[]              @relation("RepresentationCreator")
-  representationChanges      RepresentationHistory[]       @relation("RepresentationHistoryActor")
-  ownedLeads                 Lead[]                        @relation("LeadOwner")
-  createdLeads               Lead[]                        @relation("LeadCreator")
-  leadStageChanges           LeadStageHistory[]            @relation("LeadStageHistoryActor")
-  assignedOperationalTasks   OperationalTask[]             @relation("OperationalTaskAssignee")
-  createdOperationalTasks    OperationalTask[]             @relation("OperationalTaskCreator")
-  authoredNotes              Note[]                        @relation("NoteAuthor")
-  ownedTemplates             Template[]                    @relation("TemplateOwner")
-  ownedDrafts                Draft[]                       @relation("DraftOwner")
-  ownedProposals             Proposal[]                    @relation("ProposalOwner")
-  requestedApprovals         OutreachApproval[]            @relation("OutreachApprovalRequester")
-  decidedApprovals           OutreachApproval[]            @relation("OutreachApprovalApprover")
-  outreachAuthorizations     OutreachAuthorization[]       @relation("OutreachAuthorizationIssuer")
-  revokedAuthorizations      OutreachAuthorization[]       @relation("OutreachAuthorizationRevoker")
-  receivedAssignments        Assignment[]                  @relation("AssignmentAssignee")
-  createdAssignments         Assignment[]                  @relation("AssignmentCreator")
-  lifecycleEvents            LifecycleEvent[]              @relation("LifecycleEventActor")
-  evidenceSources            EvidenceSource[]              @relation("EvidenceSourceCreator")
-  duplicateReviews           DuplicateCandidate[]          @relation("DuplicateCandidateReviewer")
-  mergeDecisions             MergeDecision[]               @relation("MergeDecisionDecider")
-  researchRequests           ResearchRequest[]             @relation("ResearchRequestOwner")
-  domainAuditEvents          DomainAuditEvent[]            @relation("DomainAuditActor")
-  financialEvents            FinancialEvent[]              @relation("FinancialEventActor")
-  commissionRecipients       ClientCommission[]            @relation("CommissionRecipient")
-  createdExpenses            CompanyExpense[]              @relation("ExpenseCreator")
-  createdGoals               CompanyGoal[]                 @relation("GoalCreator")
-  weeklyTargets              WeeklyTarget[]                @relation("WeeklyTargetUser")
-  createdOrganizationProtections  OrganizationProtection[]  @relation("OrganizationProtectionCreator")
-  releasedOrganizationProtections OrganizationProtection[]  @relation("OrganizationProtectionReleaser")
-  createdPersonProtections   PersonProtection[]             @relation("PersonProtectionCreator")
-  releasedPersonProtections  PersonProtection[]             @relation("PersonProtectionReleaser")
-  permissionOverrides        WorkspacePermissionOverride[] @relation("PermissionOverrideUser")
-  createdPermissionOverrides WorkspacePermissionOverride[] @relation("PermissionOverrideCreator")
-  requestedMeetings          MeetingRequest[]              @relation("MeetingRequestRequester")
-  approvedMeetings           MeetingRequest[]              @relation("MeetingRequestApprover")
+  ownedContactRoutes              ContactRoute[]                @relation("ContactRouteOwner")
+  approvedRoutePolicies           SharedRoutePolicy[]           @relation("SharedRoutePolicyApprover")
+  createdRepresentations          Representation[]              @relation("RepresentationCreator")
+  representationChanges           RepresentationHistory[]       @relation("RepresentationHistoryActor")
+  ownedLeads                      Lead[]                        @relation("LeadOwner")
+  createdLeads                    Lead[]                        @relation("LeadCreator")
+  leadStageChanges                LeadStageHistory[]            @relation("LeadStageHistoryActor")
+  assignedOperationalTasks        OperationalTask[]             @relation("OperationalTaskAssignee")
+  createdOperationalTasks         OperationalTask[]             @relation("OperationalTaskCreator")
+  authoredNotes                   Note[]                        @relation("NoteAuthor")
+  ownedTemplates                  Template[]                    @relation("TemplateOwner")
+  ownedDrafts                     Draft[]                       @relation("DraftOwner")
+  ownedProposals                  Proposal[]                    @relation("ProposalOwner")
+  requestedApprovals              OutreachApproval[]            @relation("OutreachApprovalRequester")
+  decidedApprovals                OutreachApproval[]            @relation("OutreachApprovalApprover")
+  outreachAuthorizations          OutreachAuthorization[]       @relation("OutreachAuthorizationIssuer")
+  revokedAuthorizations           OutreachAuthorization[]       @relation("OutreachAuthorizationRevoker")
+  createdFollowUpExecutionCohorts FollowUpExecutionCohort[]     @relation("FollowUpExecutionCohortCreator")
+  receivedAssignments             Assignment[]                  @relation("AssignmentAssignee")
+  createdAssignments              Assignment[]                  @relation("AssignmentCreator")
+  lifecycleEvents                 LifecycleEvent[]              @relation("LifecycleEventActor")
+  evidenceSources                 EvidenceSource[]              @relation("EvidenceSourceCreator")
+  duplicateReviews                DuplicateCandidate[]          @relation("DuplicateCandidateReviewer")
+  mergeDecisions                  MergeDecision[]               @relation("MergeDecisionDecider")
+  researchRequests                ResearchRequest[]             @relation("ResearchRequestOwner")
+  domainAuditEvents               DomainAuditEvent[]            @relation("DomainAuditActor")
+  financialEvents                 FinancialEvent[]              @relation("FinancialEventActor")
+  commissionRecipients            ClientCommission[]            @relation("CommissionRecipient")
+  createdExpenses                 CompanyExpense[]              @relation("ExpenseCreator")
+  createdGoals                    CompanyGoal[]                 @relation("GoalCreator")
+  weeklyTargets                   WeeklyTarget[]                @relation("WeeklyTargetUser")
+  createdOrganizationProtections  OrganizationProtection[]      @relation("OrganizationProtectionCreator")
+  releasedOrganizationProtections OrganizationProtection[]      @relation("OrganizationProtectionReleaser")
+  createdPersonProtections        PersonProtection[]            @relation("PersonProtectionCreator")
+  releasedPersonProtections       PersonProtection[]            @relation("PersonProtectionReleaser")
+  permissionOverrides             WorkspacePermissionOverride[] @relation("PermissionOverrideUser")
+  createdPermissionOverrides      WorkspacePermissionOverride[] @relation("PermissionOverrideCreator")
+  requestedMeetings               MeetingRequest[]              @relation("MeetingRequestRequester")
+  approvedMeetings                MeetingRequest[]              @relation("MeetingRequestApprover")
 
   members     Member[]
   invitations Invitation[]
@@ -477,28 +478,28 @@ model Company {
 
   lastActivityAt DateTime?
 
-  contacts              Contact[]                @relation("CompanyContacts")
-  conversations         AgentConversation[]
-  deals                 Deal[]
-  activities            Activity[]
-  emailThreads          EmailThread[]
-  linkedinConversations LinkedInConversation[]
-  calendarEvents        CalendarEvent[]
-  fieldValues           FieldValue[]
-  agencyProfile         Agency?
-  clubProfile           Club?
-  contactRoutes         ContactRoute[]
-  sharedRoutePolicies   SharedRoutePolicy[]
-  outreachSuppressions  OutreachSuppression[]
+  contacts                Contact[]                @relation("CompanyContacts")
+  conversations           AgentConversation[]
+  deals                   Deal[]
+  activities              Activity[]
+  emailThreads            EmailThread[]
+  linkedinConversations   LinkedInConversation[]
+  calendarEvents          CalendarEvent[]
+  fieldValues             FieldValue[]
+  agencyProfile           Agency?
+  clubProfile             Club?
+  contactRoutes           ContactRoute[]
+  sharedRoutePolicies     SharedRoutePolicy[]
+  outreachSuppressions    OutreachSuppression[]
   organizationProtections OrganizationProtection[]
-  representations       Representation[]
-  leads                 Lead[]
-  operationalTasks      OperationalTask[]
-  notes                 Note[]
-  proofItems            ProofItem[]
-  financialProfiles     ClientFinancialProfile[]
-  createdAt             DateTime                 @default(now())
-  updatedAt             DateTime                 @updatedAt
+  representations         Representation[]
+  leads                   Lead[]
+  operationalTasks        OperationalTask[]
+  notes                   Note[]
+  proofItems              ProofItem[]
+  financialProfiles       ClientFinancialProfile[]
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
 
   @@index([ownerId])
   @@index([name])
@@ -1344,34 +1345,34 @@ model Activity {
 }
 
 model LinkedInConversation {
-  id                      String                     @id @default(cuid())
-  contactId               String
-  contact                 Contact                    @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  companyId               String?
-  company                 Company?                   @relation(fields: [companyId], references: [id], onDelete: SetNull)
-  leadId                  String?
-  lead                    Lead?                      @relation(fields: [leadId], references: [id], onDelete: SetNull)
-  identityKey             String                     @unique
-  profileUrl              String?
-  normalizedProfileUrl    String?
+  id                       String                     @id @default(cuid())
+  contactId                String
+  contact                  Contact                    @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  companyId                String?
+  company                  Company?                   @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  leadId                   String?
+  lead                     Lead?                      @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  identityKey              String                     @unique
+  profileUrl               String?
+  normalizedProfileUrl     String?
   linkedinMemberIdentifier String?
-  externalConversationKey String?                    @unique
-  status                  LinkedInConversationStatus @default(ACTIVE)
-  classification          LinkedInClassification     @default(AMBIGUOUS_OR_NEEDS_IHSAN)
-  consent                 LinkedInConsentStatus      @default(UNKNOWN)
-  connectionState         LinkedInConnectionState    @default(UNKNOWN)
-  lastInboundAt           DateTime?
-  lastOutboundAt          DateTime?
-  lastMessageAt           DateTime?
-  nextActionAt            DateTime?
-  nextActionTitle         String?
-  browserSessionKey       String?
-  version                 Int                        @default(1)
-  messages                LinkedInMessage[]
-  sendJobs                LinkedInSendJob[]
-  followUpPlans           FollowUpPlan[]
-  createdAt               DateTime                   @default(now())
-  updatedAt               DateTime                   @updatedAt
+  externalConversationKey  String?                    @unique
+  status                   LinkedInConversationStatus @default(ACTIVE)
+  classification           LinkedInClassification     @default(AMBIGUOUS_OR_NEEDS_IHSAN)
+  consent                  LinkedInConsentStatus      @default(UNKNOWN)
+  connectionState          LinkedInConnectionState    @default(UNKNOWN)
+  lastInboundAt            DateTime?
+  lastOutboundAt           DateTime?
+  lastMessageAt            DateTime?
+  nextActionAt             DateTime?
+  nextActionTitle          String?
+  browserSessionKey        String?
+  version                  Int                        @default(1)
+  messages                 LinkedInMessage[]
+  sendJobs                 LinkedInSendJob[]
+  followUpPlans            FollowUpPlan[]
+  createdAt                DateTime                   @default(now())
+  updatedAt                DateTime                   @updatedAt
 
   @@index([contactId, status])
   @@index([leadId, status])
@@ -1580,22 +1581,22 @@ model OutreachSuppression {
 }
 
 model OrganizationProtection {
-  id                String                        @id @default(cuid())
+  id                String                       @id @default(cuid())
   companyId         String
-  company           Company                       @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  company           Company                      @relation(fields: [companyId], references: [id], onDelete: Restrict)
   status            OrganizationProtectionStatus @default(ACTIVE)
   reason            String
   source            String
   protectedByUserId String
-  protectedBy       User                          @relation("OrganizationProtectionCreator", fields: [protectedByUserId], references: [id], onDelete: Restrict)
-  protectedAt       DateTime                      @default(now())
+  protectedBy       User                         @relation("OrganizationProtectionCreator", fields: [protectedByUserId], references: [id], onDelete: Restrict)
+  protectedAt       DateTime                     @default(now())
   releasedByUserId  String?
-  releasedBy        User?                         @relation("OrganizationProtectionReleaser", fields: [releasedByUserId], references: [id], onDelete: SetNull)
+  releasedBy        User?                        @relation("OrganizationProtectionReleaser", fields: [releasedByUserId], references: [id], onDelete: SetNull)
   releasedAt        DateTime?
   releaseReason     String?
-  idempotencyKey    String                        @unique
-  createdAt         DateTime                      @default(now())
-  updatedAt         DateTime                      @updatedAt
+  idempotencyKey    String                       @unique
+  createdAt         DateTime                     @default(now())
+  updatedAt         DateTime                     @updatedAt
 
   @@unique([companyId], where: { status: "ACTIVE" })
   @@index([companyId, status])
@@ -1842,14 +1843,14 @@ model EmailMessage {
   outlookMessageId String?
   outlookWebLink   String?
 
-  direction  EmailDirection
-  fromEmail  String
-  fromName   String?
-  recipients Json
-  subject    String?
-  snippet    String?
-  body       String?
-  sentAt     DateTime
+  direction              EmailDirection
+  fromEmail              String
+  fromName               String?
+  recipients             Json
+  subject                String?
+  snippet                String?
+  body                   String?
+  sentAt                 DateTime
   inboundIntent          InboundIntent?
   inboundIntentReason    String?
   inboundSecuritySignals Json?
@@ -2796,78 +2797,78 @@ model PipelineStage {
 }
 
 model Lead {
-  id                        String                       @id @default(cuid())
-  name                      String
-  status                    LeadStatus                   @default(NEW)
-  stage                     LeadStage                    @default(NEW)
-  stageChangedAt            DateTime                     @default(now())
-  version                   Int                          @default(1)
-  priority                  LeadPriority                 @default(NORMAL)
-  contactId                 String?
-  contact                   Contact?                     @relation(fields: [contactId], references: [id], onDelete: SetNull)
-  companyId                 String?
-  company                   Company?                     @relation(fields: [companyId], references: [id], onDelete: SetNull)
-  dealId                    String?
-  deal                      Deal?                        @relation(fields: [dealId], references: [id], onDelete: SetNull)
-  ownerUserId               String
-  owner                     User                         @relation("LeadOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
-  createdByUserId           String
-  createdBy                 User                         @relation("LeadCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
-  source                    RecordSource                 @default(MANUAL)
-  sourceKey                 String?                      @unique
-  originChannel             LeadOriginChannel            @default(MANUAL)
-  nextActionAt              DateTime?
-  nextActionTitle           String?
-  outcome                   LeadOutcome?
-  outcomeNote               String?
-  blocker                   String?
-  attentionState            LeadAttentionState           @default(NONE)
-  handoffReason             String?
-  handoffSummary            String?
-  handoffRecommendedAction  String?
-  handoffSuggestedResponses Json?
-  handoffAt                 DateTime?
-  handoffDeadlineAt         DateTime?
-  ihsanTakenOverAt          DateTime?
-  lastContactedAt           DateTime?
-  lastRepliedAt             DateTime?
-  parkedUntil               DateTime?
-  lastLanguage              String?
-  commercialQualityStatus   String?
-  commercialQualityReasons  Json?
-  commercialQualityScore    Int?
+  id                                String                       @id @default(cuid())
+  name                              String
+  status                            LeadStatus                   @default(NEW)
+  stage                             LeadStage                    @default(NEW)
+  stageChangedAt                    DateTime                     @default(now())
+  version                           Int                          @default(1)
+  priority                          LeadPriority                 @default(NORMAL)
+  contactId                         String?
+  contact                           Contact?                     @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  companyId                         String?
+  company                           Company?                     @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  dealId                            String?
+  deal                              Deal?                        @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  ownerUserId                       String
+  owner                             User                         @relation("LeadOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
+  createdByUserId                   String
+  createdBy                         User                         @relation("LeadCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  source                            RecordSource                 @default(MANUAL)
+  sourceKey                         String?                      @unique
+  originChannel                     LeadOriginChannel            @default(MANUAL)
+  nextActionAt                      DateTime?
+  nextActionTitle                   String?
+  outcome                           LeadOutcome?
+  outcomeNote                       String?
+  blocker                           String?
+  attentionState                    LeadAttentionState           @default(NONE)
+  handoffReason                     String?
+  handoffSummary                    String?
+  handoffRecommendedAction          String?
+  handoffSuggestedResponses         Json?
+  handoffAt                         DateTime?
+  handoffDeadlineAt                 DateTime?
+  ihsanTakenOverAt                  DateTime?
+  lastContactedAt                   DateTime?
+  lastRepliedAt                     DateTime?
+  parkedUntil                       DateTime?
+  lastLanguage                      String?
+  commercialQualityStatus           String?
+  commercialQualityReasons          Json?
+  commercialQualityScore            Int?
   commercialOpportunityCollisionKey String?
-  commercialQualityEvaluatedAt DateTime?
-  commercialLanguage         String?
-  commercialLanguageConfidence String?
-  commercialLanguageEvidence Json?
-  commercialQualityInput     Json?
-  commercialEnrichmentStatus String?
-  commercialEnrichmentReason String?
-  commercialEnrichmentAttempts Int @default(0)
-  commercialEnrichmentEvidence Json?
-  commercialEnrichmentConfidence String?
+  commercialQualityEvaluatedAt      DateTime?
+  commercialLanguage                String?
+  commercialLanguageConfidence      String?
+  commercialLanguageEvidence        Json?
+  commercialQualityInput            Json?
+  commercialEnrichmentStatus        String?
+  commercialEnrichmentReason        String?
+  commercialEnrichmentAttempts      Int                          @default(0)
+  commercialEnrichmentEvidence      Json?
+  commercialEnrichmentConfidence    String?
   commercialEnrichmentNextAttemptAt DateTime?
-  commercialEnrichmentEvaluatedAt DateTime?
-  commercialEnrichmentResult Json?
-  needsReview               Boolean                      @default(false)
-  convertedAt               DateTime?
-  disqualifiedAt            DateTime?
-  disqualifyReason          String?
-  tasks                     OperationalTask[]
-  notes                     Note[]
-  proofItems                ProofItem[]
-  proposals                 Proposal[]
-  activities                Activity[]
-  drafts                    Draft[]
-  emailThreads              EmailThread[]
-  linkedinConversations     LinkedInConversation[]
-  followUpPlans             FollowUpPlan[]
-  relationshipTouchClaims   RelationshipColdTouchClaim[]
-  stageHistory              LeadStageHistory[]
-  createdAt                 DateTime                     @default(now())
-  updatedAt                 DateTime                     @updatedAt
-  meetingRequests           MeetingRequest[]
+  commercialEnrichmentEvaluatedAt   DateTime?
+  commercialEnrichmentResult        Json?
+  needsReview                       Boolean                      @default(false)
+  convertedAt                       DateTime?
+  disqualifiedAt                    DateTime?
+  disqualifyReason                  String?
+  tasks                             OperationalTask[]
+  notes                             Note[]
+  proofItems                        ProofItem[]
+  proposals                         Proposal[]
+  activities                        Activity[]
+  drafts                            Draft[]
+  emailThreads                      EmailThread[]
+  linkedinConversations             LinkedInConversation[]
+  followUpPlans                     FollowUpPlan[]
+  relationshipTouchClaims           RelationshipColdTouchClaim[]
+  stageHistory                      LeadStageHistory[]
+  createdAt                         DateTime                     @default(now())
+  updatedAt                         DateTime                     @updatedAt
+  meetingRequests                   MeetingRequest[]
 
   @@index([ownerUserId, status])
   @@index([ownerUserId, stage, attentionState])
@@ -3041,6 +3042,7 @@ model Draft {
   outreachApproval   OutreachApproval?
   proposals          Proposal[]
   deliveries         OutboundDelivery[]
+  followUpSteps      FollowUpStep[]
   createdAt          DateTime               @default(now())
   updatedAt          DateTime               @updatedAt
 
@@ -3123,6 +3125,8 @@ model OutreachAuthorization {
   expiresAt        DateTime?
   revokedAt        DateTime?
   revocationReason String?
+  followUpCohortId String?                     @unique
+  followUpCohort   FollowUpExecutionCohort?    @relation(fields: [followUpCohortId], references: [id], onDelete: Restrict)
   drafts           Draft[]
   createdAt        DateTime                    @default(now())
   updatedAt        DateTime                    @updatedAt
@@ -3730,6 +3734,7 @@ model FollowUpPlan {
   cancellationReason     String?
   createdAt              DateTime              @default(now())
   updatedAt              DateTime              @updatedAt
+  steps                  FollowUpStep[]
 
   @@index([contactId, status])
   @@index([contactId, channel, status])
@@ -3740,26 +3745,77 @@ model FollowUpPlan {
 }
 
 model FollowUpStep {
-  id             String             @id @default(cuid())
-  planId         String
-  position       Int
-  dueAt          DateTime
-  status         FollowUpStepStatus @default(PENDING)
-  draftId        String?
-  idempotencyKey String             @unique
-  attemptCount   Int                @default(0)
-  maxAttempts    Int                @default(5)
-  leaseOwner     String?
-  leasedUntil    DateTime?
-  retryAt        DateTime?
-  lastErrorCode  String?
-  completedAt    DateTime?
-  createdAt      DateTime           @default(now())
-  updatedAt      DateTime           @updatedAt
+  id                     String                          @id @default(cuid())
+  planId                 String
+  plan                   FollowUpPlan                    @relation(fields: [planId], references: [id], onDelete: Restrict)
+  position               Int
+  dueAt                  DateTime
+  status                 FollowUpStepStatus              @default(PENDING)
+  draftId                String?
+  draft                  Draft?                          @relation(fields: [draftId], references: [id], onDelete: Restrict)
+  idempotencyKey         String                          @unique
+  attemptCount           Int                             @default(0)
+  maxAttempts            Int                             @default(5)
+  leaseOwner             String?
+  leasedUntil            DateTime?
+  retryAt                DateTime?
+  lastErrorCode          String?
+  completedAt            DateTime?
+  createdAt              DateTime                        @default(now())
+  updatedAt              DateTime                        @updatedAt
+  executionCohortMembers FollowUpExecutionCohortMember[]
 
   @@unique([planId, position])
   @@index([status, dueAt, retryAt, leasedUntil])
   @@map("followUpStep")
+}
+
+enum FollowUpExecutionCohortStatus {
+  BUILDING
+  READY
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum FollowUpExecutionCohortMemberStatus {
+  PENDING
+  QUEUED
+  BLOCKED
+}
+
+model FollowUpExecutionCohort {
+  id            String                          @id @default(cuid())
+  state         FollowUpExecutionCohortStatus   @default(BUILDING)
+  createdById   String
+  createdBy     User                            @relation("FollowUpExecutionCohortCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  sourceContext Json
+  members       FollowUpExecutionCohortMember[]
+  authorization OutreachAuthorization?
+  createdAt     DateTime                        @default(now())
+  updatedAt     DateTime                        @updatedAt
+
+  @@index([state, createdAt])
+  @@map("followUpExecutionCohort")
+}
+
+model FollowUpExecutionCohortMember {
+  id             String                              @id @default(cuid())
+  cohortId       String
+  cohort         FollowUpExecutionCohort             @relation(fields: [cohortId], references: [id], onDelete: Restrict)
+  followUpStepId String
+  followUpStep   FollowUpStep                        @relation(fields: [followUpStepId], references: [id], onDelete: Restrict)
+  canonicalDueAt DateTime
+  status         FollowUpExecutionCohortMemberStatus @default(PENDING)
+  blockReason    String?
+  evaluatedAt    DateTime                            @default(now())
+  createdAt      DateTime                            @default(now())
+  updatedAt      DateTime                            @updatedAt
+
+  @@unique([cohortId, followUpStepId])
+  @@index([followUpStepId, status])
+  @@index([cohortId, status, canonicalDueAt])
+  @@map("followUpExecutionCohortMember")
 }
 
 model OutreachEvent {
