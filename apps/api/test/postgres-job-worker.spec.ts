@@ -7,6 +7,7 @@ import { ActivityStampService } from "../src/crm/activity-stamp.service";
 import { EnrichmentLogService } from "../src/crm/enrichment-log.service";
 import { MailboxMatchService } from "../src/mailbox/mailbox-match.service";
 import { ThreadWriterService } from "../src/mailbox/thread-writer.service";
+import { OutreachLifecycleService } from "../src/providers/outreach-lifecycle.service";
 import { PostgresJobWorkerService } from "../src/providers/postgres-job-worker.service";
 import type { ResendCredentialSource } from "../src/providers/provider-credentials";
 import type {
@@ -37,9 +38,22 @@ const coldRouteId = `queue-cold-route-${suffix}`;
 const coldDraftId = `queue-cold-draft-${suffix}`;
 const coldDeliveryId = `queue-cold-delivery-${suffix}`;
 const coldMailboxId = `queue-cold-mailbox-${suffix}`;
+const followUpContactId = `queue-followup-contact-${suffix}`;
+const followUpRouteId = `queue-followup-route-${suffix}`;
+const followUpDraftId = `queue-followup-draft-${suffix}`;
+const followUpPlanId = `queue-followup-plan-${suffix}`;
+const followUpStepId = `queue-followup-step-${suffix}`;
+const followUpAuthorizationId = `queue-followup-authorization-${suffix}`;
+const enabledFollowUpContactId = `queue-enabled-followup-contact-${suffix}`;
+const enabledFollowUpRouteId = `queue-enabled-followup-route-${suffix}`;
+const enabledFollowUpDraftId = `queue-enabled-followup-draft-${suffix}`;
+const enabledFollowUpPlanId = `queue-enabled-followup-plan-${suffix}`;
+const enabledFollowUpStepId = `queue-enabled-followup-step-${suffix}`;
+const enabledFollowUpAuthorizationId = `queue-enabled-followup-authorization-${suffix}`;
 const coldQuotaDay = new Date("2099-01-01T00:00:00.000Z");
 const previousSender = process.env.RESEND_SYSTEM_FROM_EMAIL;
 const previousOutreachSender = process.env.RESEND_OUTREACH_FROM_EMAIL;
+const credentialLoads = { count: 0 };
 const adminConnectionString =
 	process.env.RLS_ADMIN_DATABASE_URL ?? process.env.DATABASE_URL;
 if (!adminConnectionString)
@@ -49,7 +63,10 @@ let admin: pg.Client;
 let coldMailboxCreated = false;
 
 const credentials: ResendCredentialSource = {
-	load: async () => ({ apiKey: "test-only" }),
+	load: async () => {
+		credentialLoads.count += 1;
+		return { apiKey: "test-only" };
+	},
 };
 const sent = new Map<string, number>();
 const sentMessages = new Map<string, ResendMessage>();
@@ -83,6 +100,14 @@ async function clean() {
 	]);
 	await admin.query('DELETE FROM "followUpStep" WHERE id=$1', [threadStepId]);
 	await admin.query('DELETE FROM "followUpPlan" WHERE id=$1', [threadPlanId]);
+	await admin.query('DELETE FROM "followUpStep" WHERE id=$1', [followUpStepId]);
+	await admin.query('DELETE FROM "followUpPlan" WHERE id=$1', [followUpPlanId]);
+	await admin.query('DELETE FROM "followUpStep" WHERE id=$1', [
+		enabledFollowUpStepId,
+	]);
+	await admin.query('DELETE FROM "followUpPlan" WHERE id=$1', [
+		enabledFollowUpPlanId,
+	]);
 	await admin.query(
 		'DELETE FROM "activity" WHERE "emailThreadId" IN (SELECT id FROM "emailThread" WHERE "mailboxId"=$1)',
 		[threadMailboxId],
@@ -93,6 +118,14 @@ async function clean() {
 	await admin.query('DELETE FROM "outboundDelivery" WHERE id=$1', [
 		threadDeliveryId,
 	]);
+	await admin.query(
+		'DELETE FROM "outboundDelivery" WHERE "idempotencyKey"=$1',
+		[`followup-delivery:${followUpStepId}`],
+	);
+	await admin.query(
+		'DELETE FROM "outboundDelivery" WHERE "idempotencyKey"=$1',
+		[`followup-delivery:${enabledFollowUpStepId}`],
+	);
 	await admin.query('DELETE FROM "draft" WHERE id=$1', [threadDraftId]);
 	await admin.query('DELETE FROM "leadStageHistory" WHERE "leadId"=$1', [
 		threadLeadId,
@@ -108,6 +141,26 @@ async function clean() {
 	await admin.query('DELETE FROM "draft" WHERE id=$1', [coldDraftId]);
 	await admin.query('DELETE FROM "contactRoute" WHERE id=$1', [coldRouteId]);
 	await admin.query('DELETE FROM "contact" WHERE id=$1', [coldContactId]);
+	await admin.query('DELETE FROM "draft" WHERE id=$1', [followUpDraftId]);
+	await admin.query('DELETE FROM "draft" WHERE id=$1', [
+		enabledFollowUpDraftId,
+	]);
+	await admin.query('DELETE FROM "outreachAuthorization" WHERE id=$1', [
+		followUpAuthorizationId,
+	]);
+	await admin.query('DELETE FROM "outreachAuthorization" WHERE id=$1', [
+		enabledFollowUpAuthorizationId,
+	]);
+	await admin.query('DELETE FROM "contactRoute" WHERE id=$1', [
+		followUpRouteId,
+	]);
+	await admin.query('DELETE FROM "contact" WHERE id=$1', [followUpContactId]);
+	await admin.query('DELETE FROM "contactRoute" WHERE id=$1', [
+		enabledFollowUpRouteId,
+	]);
+	await admin.query('DELETE FROM "contact" WHERE id=$1', [
+		enabledFollowUpContactId,
+	]);
 	if (coldMailboxCreated)
 		await admin.query('DELETE FROM "mailbox" WHERE id=$1', [coldMailboxId]);
 	await admin.query('DELETE FROM "draft" WHERE id=$1', [senderDraftId]);
@@ -124,7 +177,7 @@ beforeAll(async () => {
 	await admin.connect();
 	await clean();
 	await admin.query(
-		'INSERT INTO "user" (id,name,email,"emailVerified","createdAt","updatedAt") VALUES ($1,\'Queue Test\',$2,true,NOW(),NOW())',
+		'INSERT INTO "user" (id,name,email,"emailVerified",kind,"createdAt","updatedAt") VALUES ($1,\'Queue Test\',$2,true,\'SYSTEM_OPERATOR\',NOW(),NOW())',
 		[actorUserId, `${actorUserId}@example.test`],
 	);
 	await admin.query(
@@ -372,6 +425,112 @@ describe("PostgreSQL durable system-email queue", () => {
 		}
 	});
 
+	describe("PostgreSQL follow-up pre-claim gates", () => {
+		test("leaves a due follow-up unchanged while live and scheduled execution are disabled", async () => {
+			const mailbox = await db.mailbox.findFirst({
+				where: { normalizedAddress: "outreach@iblmedia.com" },
+				select: { id: true },
+			});
+			if (!mailbox) throw new Error("The Atlas mailbox is required.");
+			await db.contact.create({
+				data: {
+					id: followUpContactId,
+					firstName: "Due",
+					lastName: "Follow-up",
+					email: `due-follow-up-${suffix}@example.test`,
+				},
+			});
+			await db.contactRoute.create({
+				data: {
+					id: followUpRouteId,
+					contactId: followUpContactId,
+					ownerUserId: actorUserId,
+					type: "EMAIL",
+					value: `due-follow-up-${suffix}@example.test`,
+					normalizedValue: `due-follow-up-${suffix}@example.test`,
+				},
+			});
+			await db.draft.create({
+				data: {
+					id: followUpDraftId,
+					ownerUserId: actorUserId,
+					mailboxId: mailbox.id,
+					recipientRouteId: followUpRouteId,
+					subject: "Future follow-up test",
+					body: "Test only",
+					coldOutreach: true,
+					status: "DRAFT",
+					idempotencyKey: `${keyPrefix}follow-up-draft`,
+				},
+			});
+			await db.followUpPlan.create({
+				data: {
+					id: followUpPlanId,
+					contactId: followUpContactId,
+					routeId: followUpRouteId,
+					channel: "EMAIL",
+					ownerUserId: actorUserId,
+					status: "ACTIVE",
+				},
+			});
+			await db.followUpStep.create({
+				data: {
+					id: followUpStepId,
+					planId: followUpPlanId,
+					position: 1,
+					dueAt: new Date(Date.now() - 60_000),
+					draftId: followUpDraftId,
+					idempotencyKey: `${keyPrefix}follow-up-step`,
+				},
+			});
+
+			const previousLive = process.env.ATLAS_LIVE_OUTREACH_ENABLED;
+			const previousScheduled = process.env.ATLAS_SCHEDULED_EXECUTION_ENABLED;
+			process.env.ATLAS_LIVE_OUTREACH_ENABLED = "false";
+			process.env.ATLAS_SCHEDULED_EXECUTION_ENABLED = "false";
+			try {
+				const service = new OutreachLifecycleService(db);
+				expect(await service.runDue("blocked-follow-up-worker")).toBe(0);
+				expect(
+					await db.followUpStep.findUnique({
+						where: { id: followUpStepId },
+						select: {
+							status: true,
+							attemptCount: true,
+							leaseOwner: true,
+							leasedUntil: true,
+							retryAt: true,
+							lastErrorCode: true,
+						},
+					}),
+				).toEqual({
+					status: "PENDING",
+					attemptCount: 0,
+					leaseOwner: null,
+					leasedUntil: null,
+					retryAt: null,
+					lastErrorCode: null,
+				});
+				expect(
+					await db.outboundDelivery.findUnique({
+						where: { idempotencyKey: `followup-delivery:${followUpStepId}` },
+					}),
+				).toBeNull();
+				await db.followUpPlan.update({
+					where: { id: followUpPlanId },
+					data: { status: "CANCELLED" },
+				});
+			} finally {
+				if (previousLive === undefined)
+					delete process.env.ATLAS_LIVE_OUTREACH_ENABLED;
+				else process.env.ATLAS_LIVE_OUTREACH_ENABLED = previousLive;
+				if (previousScheduled === undefined)
+					delete process.env.ATLAS_SCHEDULED_EXECUTION_ENABLED;
+				else process.env.ATLAS_SCHEDULED_EXECUTION_ENABLED = previousScheduled;
+			}
+		});
+	});
+
 	test("persists outbound CRM mail and merges the inbound reply into one lead thread", async () => {
 		await db.mailbox.create({
 			data: {
@@ -556,7 +715,7 @@ describe("PostgreSQL durable system-email queue", () => {
 		});
 	});
 
-	test("cancels a queued cold draft without active Atlas authorization", async () => {
+	test("leaves a queued cold delivery untouched without active Atlas authorization", async () => {
 		const coldMailbox = await db.mailbox.findFirst({
 			where: { normalizedAddress: "outreach@iblmedia.com" },
 			select: { id: true },
@@ -626,27 +785,185 @@ describe("PostgreSQL durable system-email queue", () => {
 		process.env.ATLAS_LIVE_OUTREACH_ENABLED = "false";
 		try {
 			const worker = new PostgresJobWorkerService(db, credentials, transport);
-			expect(await worker.runDue("cold-policy-worker")).toBe(1);
+			const loadsBefore = credentialLoads.count;
+			expect(await worker.runDue("cold-policy-worker")).toBe(0);
 			expect(sent.has(`${keyPrefix}cold-delivery`)).toBe(false);
+			expect(credentialLoads.count).toBe(loadsBefore);
 			expect(
 				await db.outboundDelivery.findUnique({
 					where: { id: coldDeliveryId },
-					select: { status: true, lastErrorCode: true },
+					select: {
+						status: true,
+						lastErrorCode: true,
+						attemptCount: true,
+						leaseOwner: true,
+						leasedUntil: true,
+						retryAt: true,
+					},
 				}),
-			).toEqual({
-				status: "CANCELLED",
-				lastErrorCode: "OUTBOUND_ATLAS_AUTHORIZATION_REQUIRED",
+			).toMatchObject({
+				status: "PENDING",
+				lastErrorCode: null,
+				attemptCount: 0,
+				leaseOwner: null,
+				leasedUntil: null,
+				retryAt: null,
 			});
 			expect(
 				await db.outreachQuota.findUnique({
 					where: { day: coldQuotaDay },
 					select: { coldEmailReserved: true },
 				}),
-			).toEqual({ coldEmailReserved: 0 });
+			).toEqual({ coldEmailReserved: 1 });
 		} finally {
 			if (previous === undefined)
 				delete process.env.ATLAS_LIVE_OUTREACH_ENABLED;
 			else process.env.ATLAS_LIVE_OUTREACH_ENABLED = previous;
+		}
+	});
+
+	test("claims an autonomous follow-up when all execution gates are valid", async () => {
+		const mailbox = await db.mailbox.findFirst({
+			where: { normalizedAddress: "outreach@iblmedia.com" },
+			select: { id: true },
+		});
+		if (!mailbox) throw new Error("The Atlas mailbox is required.");
+		const settingsBefore = await db.appSetting.findUnique({
+			where: { id: "app" },
+			select: { atlasLiveOutreachEnabled: true },
+		});
+		await db.appSetting.upsert({
+			where: { id: "app" },
+			create: { id: "app", atlasLiveOutreachEnabled: true },
+			update: { atlasLiveOutreachEnabled: true },
+		});
+		await db.contact.create({
+			data: {
+				id: enabledFollowUpContactId,
+				firstName: "Due",
+				lastName: "Authorized",
+				email: `authorized-follow-up-${suffix}@example.test`,
+			},
+		});
+		await db.contactRoute.create({
+			data: {
+				id: enabledFollowUpRouteId,
+				contactId: enabledFollowUpContactId,
+				ownerUserId: actorUserId,
+				type: "EMAIL",
+				value: `authorized-follow-up-${suffix}@example.test`,
+				normalizedValue: `authorized-follow-up-${suffix}@example.test`,
+			},
+		});
+		await db.outreachAuthorization.create({
+			data: {
+				id: enabledFollowUpAuthorizationId,
+				authorizedById: actorUserId,
+				scope: "STANDARD_COLD_OUTREACH",
+				status: "ACTIVE",
+				expiresAt: new Date(Date.now() + 60_000),
+			},
+		});
+		await db.draft.create({
+			data: {
+				id: enabledFollowUpDraftId,
+				ownerUserId: actorUserId,
+				mailboxId: mailbox.id,
+				recipientRouteId: enabledFollowUpRouteId,
+				authorizationId: enabledFollowUpAuthorizationId,
+				atlasAuthorizedAt: new Date(),
+				subject: "Authorized follow-up test",
+				body: "Test only",
+				coldOutreach: true,
+				status: "DRAFT",
+				idempotencyKey: `${keyPrefix}enabled-follow-up-draft`,
+			},
+		});
+		await db.followUpPlan.create({
+			data: {
+				id: enabledFollowUpPlanId,
+				contactId: enabledFollowUpContactId,
+				routeId: enabledFollowUpRouteId,
+				channel: "EMAIL",
+				ownerUserId: actorUserId,
+				status: "ACTIVE",
+			},
+		});
+		await db.followUpStep.create({
+			data: {
+				id: enabledFollowUpStepId,
+				planId: enabledFollowUpPlanId,
+				position: 1,
+				dueAt: new Date(Date.now() - 60_000),
+				draftId: enabledFollowUpDraftId,
+				idempotencyKey: `${keyPrefix}enabled-follow-up-step`,
+			},
+		});
+
+		const previousLive = process.env.ATLAS_LIVE_OUTREACH_ENABLED;
+		const previousScheduled = process.env.ATLAS_SCHEDULED_EXECUTION_ENABLED;
+		process.env.ATLAS_LIVE_OUTREACH_ENABLED = "true";
+		process.env.ATLAS_SCHEDULED_EXECUTION_ENABLED = "true";
+		try {
+			const service = new OutreachLifecycleService(db);
+			expect(await service.runDue("authorized-follow-up-worker")).toBe(1);
+			expect(
+				await db.followUpStep.findUnique({
+					where: { id: enabledFollowUpStepId },
+					select: { status: true, attemptCount: true, leaseOwner: true },
+				}),
+			).toEqual({ status: "QUEUED", attemptCount: 1, leaseOwner: null });
+			expect(
+				await db.outboundDelivery.findUnique({
+					where: {
+						idempotencyKey: `followup-delivery:${enabledFollowUpStepId}`,
+					},
+					select: { status: true, attemptCount: true, leaseOwner: true },
+				}),
+			).toEqual({ status: "PENDING", attemptCount: 0, leaseOwner: null });
+			process.env.ATLAS_SCHEDULED_EXECUTION_ENABLED = "false";
+			const worker = new PostgresJobWorkerService(db, credentials, transport);
+			const loadsBefore = credentialLoads.count;
+			expect(await worker.runDue("scheduled-disabled-worker")).toBe(0);
+			expect(credentialLoads.count).toBe(loadsBefore);
+			expect(
+				await db.outboundDelivery.findUnique({
+					where: {
+						idempotencyKey: `followup-delivery:${enabledFollowUpStepId}`,
+					},
+					select: {
+						status: true,
+						attemptCount: true,
+						leaseOwner: true,
+						leasedUntil: true,
+						retryAt: true,
+					},
+				}),
+			).toEqual({
+				status: "PENDING",
+				attemptCount: 0,
+				leaseOwner: null,
+				leasedUntil: null,
+				retryAt: null,
+			});
+			expect(sent.has(`followup-delivery:${enabledFollowUpStepId}`)).toBe(
+				false,
+			);
+		} finally {
+			if (previousLive === undefined)
+				delete process.env.ATLAS_LIVE_OUTREACH_ENABLED;
+			else process.env.ATLAS_LIVE_OUTREACH_ENABLED = previousLive;
+			if (previousScheduled === undefined)
+				delete process.env.ATLAS_SCHEDULED_EXECUTION_ENABLED;
+			else process.env.ATLAS_SCHEDULED_EXECUTION_ENABLED = previousScheduled;
+			if (settingsBefore)
+				await db.appSetting.update({
+					where: { id: "app" },
+					data: {
+						atlasLiveOutreachEnabled: settingsBefore.atlasLiveOutreachEnabled,
+					},
+				});
+			else await db.appSetting.deleteMany({ where: { id: "app" } });
 		}
 	});
 });

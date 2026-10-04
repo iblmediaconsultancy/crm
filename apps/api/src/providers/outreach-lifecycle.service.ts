@@ -19,6 +19,11 @@ import { followUpAuthorizationDisposition } from "./follow-up-authorization";
 import { standardColdFollowUpDueDates } from "./follow-up-cadence";
 import { FOLLOW_UP_CLAIM_SQL } from "./follow-up-claim";
 import { localProviderDoubleEnabled } from "./local-provider-double";
+import {
+	atlasLiveOutreachEnvironmentEnabled,
+	atlasScheduledExecutionEnabled,
+	followUpClaimAllowed,
+} from "./outreach-execution-gates";
 
 export { businessDaysAfter } from "./working-hours";
 
@@ -931,8 +936,56 @@ export class OutreachLifecycleService {
 		for (let i = 0; i < 25; i += 1) {
 			const rows = await withPrincipal(
 				this.db,
-				{ userId: null, kind: "worker" },
-				(tx) => tx.$queryRawUnsafe<Claim[]>(FOLLOW_UP_CLAIM_SQL, workerId),
+				{
+					userId: null,
+					kind: "worker",
+				},
+				async (tx) => {
+					const provider = await tx.providerCapability.findUnique({
+						where: { key: "RESEND_OUTBOUND" },
+						select: { status: true },
+					});
+					const settings = await tx.appSetting.findUnique({
+						where: { id: "app" },
+						select: { atlasLiveOutreachEnabled: true },
+					});
+					const authorization = await tx.outreachAuthorization.findFirst({
+						where: {
+							scope: "STANDARD_COLD_OUTREACH",
+							status: "ACTIVE",
+							OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+						},
+						select: { id: true },
+					});
+					const gates = {
+						manuallyApproved: false,
+						coldDraft: true,
+						mailboxAllowed: true,
+						hasAuthorizationEvidence: Boolean(authorization),
+						authorizationValid: Boolean(authorization),
+						liveOutreachEnabled:
+							settings?.atlasLiveOutreachEnabled === true &&
+							atlasLiveOutreachEnvironmentEnabled(),
+						scheduledExecutionEnabled: atlasScheduledExecutionEnabled(),
+						providerReady:
+							provider?.status === "VERIFIED" || localProviderDoubleEnabled(),
+					};
+					if (!followUpClaimAllowed(gates)) {
+						const manualRows = await tx.$queryRawUnsafe<Claim[]>(
+							FOLLOW_UP_CLAIM_SQL,
+							workerId,
+							localProviderDoubleEnabled(),
+							false,
+						);
+						return manualRows;
+					}
+					return tx.$queryRawUnsafe<Claim[]>(
+						FOLLOW_UP_CLAIM_SQL,
+						workerId,
+						localProviderDoubleEnabled(),
+						gates.liveOutreachEnabled && gates.scheduledExecutionEnabled,
+					);
+				},
 			);
 			const step = rows[0];
 			if (!step) break;

@@ -1,3 +1,25 @@
 export const FOLLOW_UP_UTC_CLOCK = "(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')";
 
-export const FOLLOW_UP_CLAIM_SQL = `UPDATE "followUpStep" SET "status"='LEASED', "leaseOwner"=$1, "leasedUntil"=${FOLLOW_UP_UTC_CLOCK}+INTERVAL '60 seconds', "attemptCount"="attemptCount"+1, "updatedAt"=${FOLLOW_UP_UTC_CLOCK} WHERE "id"=(SELECT s."id" FROM "followUpStep" s JOIN "followUpPlan" p ON p."id"=s."planId" WHERE s."status" IN ('PENDING','LEASED') AND p."status"='ACTIVE' AND s."dueAt"<=${FOLLOW_UP_UTC_CLOCK} AND (s."retryAt" IS NULL OR s."retryAt"<=${FOLLOW_UP_UTC_CLOCK}) AND (s."leasedUntil" IS NULL OR s."leasedUntil"<=${FOLLOW_UP_UTC_CLOCK}) AND s."attemptCount"<s."maxAttempts" ORDER BY s."dueAt",s."id" FOR UPDATE OF s SKIP LOCKED LIMIT 1) RETURNING "id","planId","draftId","attemptCount"`;
+export const FOLLOW_UP_CLAIM_SQL = [
+	'UPDATE "followUpStep"',
+	`SET "status"='LEASED', "leaseOwner"=$1, "leasedUntil"=${FOLLOW_UP_UTC_CLOCK}+INTERVAL '60 seconds', "attemptCount"="attemptCount"+1, "updatedAt"=${FOLLOW_UP_UTC_CLOCK}`,
+	'WHERE "id"=(',
+	'  SELECT s."id" FROM "followUpStep" s',
+	'  JOIN "followUpPlan" p ON p."id"=s."planId"',
+	"  WHERE s.\"status\" IN ('PENDING','LEASED')",
+	"    AND p.\"status\"='ACTIVE'",
+	`    AND s."dueAt"<=${FOLLOW_UP_UTC_CLOCK}`,
+	`    AND (s."retryAt" IS NULL OR s."retryAt"<=${FOLLOW_UP_UTC_CLOCK})`,
+	`    AND (s."leasedUntil" IS NULL OR s."leasedUntil"<=${FOLLOW_UP_UTC_CLOCK})`,
+	'    AND s."attemptCount"<s."maxAttempts"',
+	"    AND (p.\"channel\"<>'EMAIL' OR (",
+	`      (EXISTS (SELECT 1 FROM "providerCapability" pc WHERE pc."key"='RESEND_OUTBOUND' AND pc."status"='VERIFIED') OR $2::boolean)`,
+	'      AND EXISTS (SELECT 1 FROM "draft" d WHERE d."id"=s."draftId" AND (',
+	`        (d."status"='APPROVED' AND EXISTS (SELECT 1 FROM "outreachApproval" oa WHERE oa."draftId"=d."id" AND oa."status"='APPROVED'))`,
+	`        OR (d."status"='DRAFT' AND d."coldOutreach"=true AND $3::boolean AND EXISTS (SELECT 1 FROM "mailbox" m WHERE m."id"=d."mailboxId" AND lower(m."address")='outreach@iblmedia.com') AND EXISTS (SELECT 1 FROM "appSetting" a WHERE a."id"='app' AND a."atlasLiveOutreachEnabled"=true) AND EXISTS (SELECT 1 FROM "outreachAuthorization" a WHERE a."id"=d."authorizationId" AND a."scope"='STANDARD_COLD_OUTREACH' AND a."status"='ACTIVE' AND (a."expiresAt" IS NULL OR a."expiresAt">${FOLLOW_UP_UTC_CLOCK})))`,
+	"      ))",
+	"    ))",
+	'  ORDER BY s."dueAt",s."id" FOR UPDATE OF s SKIP LOCKED LIMIT 1',
+	")",
+	'RETURNING "id","planId","draftId","attemptCount"',
+].join("\n");
