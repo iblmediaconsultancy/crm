@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.1](https://github.com/iblmediaconsultancy/crm/compare/v1.7.0...v1.7.1) (2026-10-05)
+
+
+### Fixes
+
+* **atlas:** avoid follow-up cohort preview timeouts ([#49](https://github.com/iblmediaconsultancy/crm/issues/49)) ([c99aab8](https://github.com/iblmediaconsultancy/crm/commit/c99aab8747e84721f1b984ea45b74b6807ffda24))
+
 ## [1.7.0](https://github.com/iblmediaconsultancy/crm/compare/v1.6.5...v1.7.0) (2026-10-04)
 
 

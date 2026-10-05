@@ -21,6 +21,10 @@ import {
 	FOLLOW_UP_CLAIM_SQL,
 	FOLLOW_UP_COHORT_CLAIM_SQL,
 } from "./follow-up-claim";
+import {
+	mapWithConcurrency,
+	selectPreparedFollowUpMembers,
+} from "./follow-up-cohort-batch";
 import { evaluateFollowUpCohortCandidate } from "./follow-up-cohort-preflight";
 import { localProviderDoubleEnabled } from "./local-provider-double";
 import {
@@ -261,11 +265,11 @@ export class OutreachLifecycleService {
 		if (actor.role === "contributor")
 			throw new ConflictException("Manager access is required.");
 		const now = new Date();
-		return withPrincipal(
+		const rows = await withPrincipal(
 			this.db,
 			{ userId: actor.userId, kind: "user" },
-			async (tx) => {
-				const rows = await tx.followUpStep.findMany({
+			(tx) =>
+				tx.followUpStep.findMany({
 					where: {
 						status: "PENDING",
 						dueAt: { lte: now },
@@ -292,42 +296,43 @@ export class OutreachLifecycleService {
 							},
 						},
 					},
-				});
-				const results = [];
-				for (const row of rows.slice(0, 500)) {
-					const evaluation = await evaluateFollowUpCohortCandidate(
-						tx,
-						row.id,
-						now,
-					);
-					results.push({
-						id: row.id,
-						position: row.position,
-						dueAt: row.dueAt,
-						canonicalDueAt: evaluation.canonicalDueAt,
-						eligible: evaluation.eligible,
-						reason: evaluation.reason,
-						contactId: row.plan.contactId,
-						contactName: [
-							row.draft?.recipientRoute?.contact?.firstName,
-							row.draft?.recipientRoute?.contact?.lastName,
-						]
-							.filter(Boolean)
-							.join(" "),
-						companyName:
-							row.draft?.recipientRoute?.contact?.company?.name ?? null,
-						route: row.draft?.recipientRoute?.value ?? null,
-					});
-				}
-				return {
-					asOf: now,
-					truncatedAt: rows.length > 500,
-					candidates: results,
-					eligibleCount: results.filter((result) => result.eligible).length,
-					excludedCount: results.filter((result) => !result.eligible).length,
-				};
-			},
+				}),
 		);
+		const candidates = rows.slice(0, 500);
+		const evaluations = await mapWithConcurrency(candidates, 8, (row) =>
+			withPrincipal(this.db, { userId: actor.userId, kind: "user" }, (tx) =>
+				evaluateFollowUpCohortCandidate(tx, row.id, now),
+			),
+		);
+		const results = candidates.map((row, index) => {
+			const evaluation = evaluations[index];
+			if (!evaluation)
+				throw new Error("Follow-up preview evaluation result is missing.");
+			return {
+				id: row.id,
+				position: row.position,
+				dueAt: row.dueAt,
+				canonicalDueAt: evaluation.canonicalDueAt,
+				eligible: evaluation.eligible,
+				reason: evaluation.reason,
+				contactId: row.plan.contactId,
+				contactName: [
+					row.draft?.recipientRoute?.contact?.firstName,
+					row.draft?.recipientRoute?.contact?.lastName,
+				]
+					.filter(Boolean)
+					.join(" "),
+				companyName: row.draft?.recipientRoute?.contact?.company?.name ?? null,
+				route: row.draft?.recipientRoute?.value ?? null,
+			};
+		});
+		return {
+			asOf: now,
+			truncatedAt: rows.length > 500,
+			candidates: results,
+			eligibleCount: results.filter((result) => result.eligible).length,
+			excludedCount: results.filter((result) => !result.eligible).length,
+		};
 	}
 
 	async listFollowUpExecutionCohorts(actor: {
@@ -397,49 +402,79 @@ export class OutreachLifecycleService {
 	) {
 		if (actor.role === "contributor")
 			throw new ConflictException("Manager access is required.");
+		if (stepIds.length > 500)
+			throw new ConflictException("A cohort may include at most 500 steps.");
 		if (new Set(stepIds).size !== stepIds.length)
 			throw new ConflictException(
 				"A follow-up step may only be selected once.",
 			);
+		if (stepIds.length === 0)
+			throw new ConflictException("Select at least one follow-up step.");
 		const now = new Date();
+		const evaluated = await mapWithConcurrency(stepIds, 8, async (id) => ({
+			id,
+			evaluation: await withPrincipal(
+				this.db,
+				{ userId: actor.userId, kind: "user" },
+				(tx) => evaluateFollowUpCohortCandidate(tx, id, now),
+			),
+		}));
 		return withPrincipal(
 			this.db,
 			{ userId: actor.userId, kind: "user" },
 			async (tx) => {
 				await tx.$queryRaw`SELECT pg_advisory_xact_lock(902104, 1)`;
-				const members: Array<{ followUpStepId: string; canonicalDueAt: Date }> =
-					[];
-				const excluded: Array<{ followUpStepId: string; reason: string }> = [];
-				for (const id of stepIds) {
-					const evaluation = await evaluateFollowUpCohortCandidate(tx, id, now);
-					if (!evaluation.eligible || !evaluation.canonicalDueAt) {
-						excluded.push({
-							followUpStepId: id,
-							reason: evaluation.reason ?? "FOLLOW_UP_PREFLIGHT_FAILED",
-						});
-						continue;
-					}
-					const alreadyAssigned =
-						await tx.followUpExecutionCohortMember.findFirst({
+				const eligibleCandidates = evaluated.filter(
+					(candidate) =>
+						candidate.evaluation.eligible &&
+						candidate.evaluation.canonicalDueAt,
+				);
+				if (eligibleCandidates.length)
+					await tx.$queryRaw<Array<{ id: string }>>`
+						SELECT "id" FROM "followUpStep"
+						WHERE "id" = ANY(${eligibleCandidates.map((candidate) => candidate.id)}::text[])
+						FOR UPDATE
+					`;
+				const currentSteps = eligibleCandidates.length
+					? await tx.followUpStep.findMany({
+							where: { id: { in: eligibleCandidates.map((row) => row.id) } },
+							select: {
+								id: true,
+								status: true,
+								dueAt: true,
+								retryAt: true,
+								leasedUntil: true,
+								attemptCount: true,
+								maxAttempts: true,
+								plan: { select: { status: true, channel: true } },
+							},
+						})
+					: [];
+				const activeAssignments = eligibleCandidates.length
+					? await tx.followUpExecutionCohortMember.findMany({
 							where: {
-								followUpStepId: id,
+								followUpStepId: {
+									in: eligibleCandidates.map((row) => row.id),
+								},
 								status: "PENDING",
 								cohort: { state: { in: ["READY", "ACTIVE"] } },
 							},
-							select: { id: true },
-						});
-					if (alreadyAssigned) {
-						excluded.push({
-							followUpStepId: id,
-							reason: "EXISTING_EXECUTABLE_COHORT",
-						});
-						continue;
-					}
-					members.push({
-						followUpStepId: id,
-						canonicalDueAt: evaluation.canonicalDueAt,
-					});
-				}
+							select: { followUpStepId: true },
+						})
+					: [];
+				const assignedIds = new Set(
+					activeAssignments.map((member) => member.followUpStepId),
+				);
+				const { members, excluded } = selectPreparedFollowUpMembers(
+					evaluated,
+					currentSteps,
+					assignedIds,
+					now,
+				);
+				if (!members.length)
+					throw new ConflictException(
+						"No selected follow-up steps still pass preflight. Refresh the cohort preview.",
+					);
 				const excludedReasons = excluded.reduce<Record<string, number>>(
 					(counts, row) => {
 						counts[row.reason] = (counts[row.reason] ?? 0) + 1;
