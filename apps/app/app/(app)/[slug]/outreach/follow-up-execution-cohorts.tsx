@@ -105,7 +105,7 @@ export function FollowUpExecutionCohorts() {
 							</h3>
 							<p className="text-xs text-muted-foreground">
 								{preview.data
-									? `As of ${formatAmsterdam(preview.data.asOf)} · ${eligible.length} eligible · ${excluded.length} excluded`
+									? `As of ${formatAmsterdam(preview.data.asOf)} · ${preview.data.candidateCount} candidates evaluated · ${eligible.length} eligible · ${excluded.length} excluded`
 									: "Review current persisted due steps before preparing a cohort."}
 							</p>
 						</div>
@@ -117,6 +117,35 @@ export function FollowUpExecutionCohorts() {
 							{preview.isFetching ? "Refreshing…" : "Refresh preflight"}
 						</Button>
 					</div>
+					{preview.isError ? (
+						<p className="text-sm text-destructive" role="alert">
+							Preflight failed. No cohort can be prepared until it succeeds.{" "}
+							{preview.error.message}
+						</p>
+					) : null}
+					{preview.data?.eligibleCount ? (
+						<p className="text-xs text-muted-foreground">
+							Eligible canonical due window:{" "}
+							{formatAmsterdam(preview.data.earliestEligibleDueAt)} to{" "}
+							{formatAmsterdam(preview.data.latestEligibleDueAt)}
+						</p>
+					) : null}
+					{preview.data && Object.keys(preview.data.excludedByReason).length ? (
+						<details className="grid gap-2 rounded-md border p-3">
+							<summary className="cursor-pointer font-medium text-sm">
+								Exclusion counts by reason
+							</summary>
+							<ul className="grid gap-1 pl-5 text-xs text-muted-foreground">
+								{Object.entries(preview.data.excludedByReason)
+									.sort(([left], [right]) => left.localeCompare(right))
+									.map(([reason, count]) => (
+										<li key={reason}>
+											{reason}: {count}
+										</li>
+									))}
+							</ul>
+						</details>
+					) : null}
 					{preview.data?.truncatedAt ? (
 						<p className="text-sm text-destructive" role="alert">
 							The preview reached the 500-step limit. Prepare smaller cohorts
@@ -162,7 +191,9 @@ export function FollowUpExecutionCohorts() {
 						</fieldset>
 					) : (
 						<p className="text-sm text-muted-foreground" role="status">
-							No currently due follow-up steps pass cohort preflight.
+							{preview.data?.candidateCount === 0
+								? "No follow-up steps are currently due for preflight."
+								: "No currently due follow-up steps pass cohort preflight."}
 						</p>
 					)}
 					{excluded.length ? (

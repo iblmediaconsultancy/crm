@@ -21,10 +21,11 @@ import {
 	FOLLOW_UP_CLAIM_SQL,
 	FOLLOW_UP_COHORT_CLAIM_SQL,
 } from "./follow-up-claim";
+import { selectPreparedFollowUpMembers } from "./follow-up-cohort-batch";
 import {
-	mapWithConcurrency,
-	selectPreparedFollowUpMembers,
-} from "./follow-up-cohort-batch";
+	evaluateFollowUpCohortBatch,
+	evaluateFollowUpCohortBatchWithPrincipal,
+} from "./follow-up-cohort-batch-preflight";
 import { evaluateFollowUpCohortCandidate } from "./follow-up-cohort-preflight";
 import { localProviderDoubleEnabled } from "./local-provider-double";
 import {
@@ -299,13 +300,17 @@ export class OutreachLifecycleService {
 				}),
 		);
 		const candidates = rows.slice(0, 500);
-		const evaluations = await mapWithConcurrency(candidates, 8, (row) =>
-			withPrincipal(this.db, { userId: actor.userId, kind: "user" }, (tx) =>
-				evaluateFollowUpCohortCandidate(tx, row.id, now),
-			),
+		const evaluations = await evaluateFollowUpCohortBatchWithPrincipal(
+			this.db,
+			{ userId: actor.userId, kind: "user" },
+			candidates.map((row) => row.id),
+			now,
 		);
-		const results = candidates.map((row, index) => {
-			const evaluation = evaluations[index];
+		const evaluationsById = new Map(
+			evaluations.map((evaluation) => [evaluation.id, evaluation]),
+		);
+		const results = candidates.map((row) => {
+			const evaluation = evaluationsById.get(row.id);
 			if (!evaluation)
 				throw new Error("Follow-up preview evaluation result is missing.");
 			return {
@@ -326,12 +331,34 @@ export class OutreachLifecycleService {
 				route: row.draft?.recipientRoute?.value ?? null,
 			};
 		});
+		const eligibleRows = results.filter((result) => result.eligible);
+		const excludedByReason = results.reduce<Record<string, number>>(
+			(counts, result) => {
+				if (!result.eligible) {
+					const reason = result.reason ?? "FOLLOW_UP_PREFLIGHT_FAILED";
+					counts[reason] = (counts[reason] ?? 0) + 1;
+				}
+				return counts;
+			},
+			{},
+		);
+		const eligibleDueTimes = eligibleRows.flatMap((result) =>
+			result.canonicalDueAt ? [result.canonicalDueAt.getTime()] : [],
+		);
 		return {
 			asOf: now,
 			truncatedAt: rows.length > 500,
+			candidateCount: results.length,
 			candidates: results,
-			eligibleCount: results.filter((result) => result.eligible).length,
-			excludedCount: results.filter((result) => !result.eligible).length,
+			eligibleCount: eligibleRows.length,
+			excludedCount: results.length - eligibleRows.length,
+			excludedByReason,
+			earliestEligibleDueAt: eligibleDueTimes.length
+				? new Date(Math.min(...eligibleDueTimes))
+				: null,
+			latestEligibleDueAt: eligibleDueTimes.length
+				? new Date(Math.max(...eligibleDueTimes))
+				: null,
 		};
 	}
 
@@ -411,33 +438,50 @@ export class OutreachLifecycleService {
 		if (stepIds.length === 0)
 			throw new ConflictException("Select at least one follow-up step.");
 		const now = new Date();
-		const evaluated = await mapWithConcurrency(stepIds, 8, async (id) => ({
-			id,
-			evaluation: await withPrincipal(
-				this.db,
-				{ userId: actor.userId, kind: "user" },
-				(tx) => evaluateFollowUpCohortCandidate(tx, id, now),
-			),
-		}));
+		const initialEvaluations = await evaluateFollowUpCohortBatchWithPrincipal(
+			this.db,
+			{ userId: actor.userId, kind: "user" },
+			stepIds,
+			now,
+		);
 		return withPrincipal(
 			this.db,
 			{ userId: actor.userId, kind: "user" },
 			async (tx) => {
 				await tx.$queryRaw`SELECT pg_advisory_xact_lock(902104, 1)`;
-				const eligibleCandidates = evaluated.filter(
-					(candidate) =>
-						candidate.evaluation.eligible &&
-						candidate.evaluation.canonicalDueAt,
-				);
+				const initiallyEligibleIds = initialEvaluations
+					.filter((candidate) => candidate.eligible && candidate.canonicalDueAt)
+					.map((candidate) => candidate.id);
+				const eligibleCandidates = initiallyEligibleIds.map((id) => ({ id }));
 				if (eligibleCandidates.length)
 					await tx.$queryRaw<Array<{ id: string }>>`
 						SELECT "id" FROM "followUpStep"
 						WHERE "id" = ANY(${eligibleCandidates.map((candidate) => candidate.id)}::text[])
 						FOR UPDATE
 					`;
+				const currentEvaluations = eligibleCandidates.length
+					? await evaluateFollowUpCohortBatch(
+							tx,
+							eligibleCandidates.map((candidate) => candidate.id),
+							now,
+						)
+					: [];
+				const currentEvaluationById = new Map(
+					currentEvaluations.map((evaluation) => [evaluation.id, evaluation]),
+				);
+				const evaluated = initialEvaluations.map((candidate) => {
+					const fresh = currentEvaluationById.get(candidate.id);
+					return {
+						id: candidate.id,
+						evaluation: fresh ?? candidate,
+					};
+				});
+				const stillEligible = currentEvaluations
+					.filter((candidate) => candidate.eligible && candidate.canonicalDueAt)
+					.map((candidate) => candidate.id);
 				const currentSteps = eligibleCandidates.length
 					? await tx.followUpStep.findMany({
-							where: { id: { in: eligibleCandidates.map((row) => row.id) } },
+							where: { id: { in: stillEligible } },
 							select: {
 								id: true,
 								status: true,
@@ -450,12 +494,10 @@ export class OutreachLifecycleService {
 							},
 						})
 					: [];
-				const activeAssignments = eligibleCandidates.length
+				const activeAssignments = stillEligible.length
 					? await tx.followUpExecutionCohortMember.findMany({
 							where: {
-								followUpStepId: {
-									in: eligibleCandidates.map((row) => row.id),
-								},
+								followUpStepId: { in: stillEligible },
 								status: "PENDING",
 								cohort: { state: { in: ["READY", "ACTIVE"] } },
 							},
@@ -486,7 +528,7 @@ export class OutreachLifecycleService {
 					data: {
 						createdById: actor.userId,
 						sourceContext: {
-							preflightVersion: "follow-up-cohort-v1",
+							preflightVersion: "follow-up-cohort-v2-batched",
 							timeZone: "Europe/Amsterdam",
 							createdAt: now.toISOString(),
 							requestedStepIds: stepIds,
