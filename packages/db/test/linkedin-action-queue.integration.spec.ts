@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 
 const testDatabaseUrl = process.env.LINKEDIN_ACTION_QUEUE_TEST_DATABASE_URL;
 
@@ -35,6 +35,14 @@ if (!testDatabaseUrl) {
 	const service = new LinkedInActionQueueService(db, channelService);
 
 	describe("LinkedIn action queue handoff", () => {
+		beforeAll(async () => {
+			await db.appSetting.upsert({
+				where: { id: "app" },
+				create: { id: "app", atlasLinkedInExecutionMode: "AUTONOMOUS" },
+				update: { atlasLinkedInExecutionMode: "AUTONOMOUS" },
+			});
+		});
+
 		it("inherits account quota, enforces limits, and accounts for release and send", async () => {
 			await db.user.create({
 				data: {
