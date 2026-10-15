@@ -25,6 +25,7 @@ import { dashboardSummaryInput } from "../dashboard/dashboard.contracts";
 import { dealListInput, dealIdInput, dealCreateInput, dealUpdateArgs, setStageInput, dealContactsInput, dealAttachContactInput, dealDetachContactInput, dealContactRoleInput, dealBulkOwnerInput, dealBulkStageInput } from "../deals/deals.contracts";
 import { fieldListInput, fieldByKeyInput, fieldIdInput, fieldCreateInput, fieldUpdateArgs, fieldReorderInput } from "../fields/fields.contracts";
 import { financeDashboardInput, financialProfileByRecordInput, financialProfilesByRecordInput, financialHistoryInput, companyHistoryInput, financialProfileUpsertInput, commissionUpsertInput, expenseListInput, expenseUpsertInput, goalInput, weeklyTargetInput, permissionOverrideInput } from "../finance/finance.contracts";
+import { linkedinManualBatchInput, linkedinManualRelationshipInput, linkedinManualPrepareInput, linkedinManualCompleteInput, linkedinManualCancelInput } from "../linkedin/linkedin-manual.contracts";
 import { mailboxIdInput, updateOwnedMailboxIdentityInput, mailboxThreadInput, mailboxEventInput } from "../mailbox/mailbox.contracts";
 import { meetingAvailabilityInput, meetingRequestInput, meetingIdInput } from "../meetings/meetings.contracts";
 import { invitationIdInput, acceptInvitationInput, pendingInvitationsInput, inviteMemberInput } from "../onboarding/onboarding.contracts";
@@ -47,6 +48,7 @@ import type { DashboardRouter } from "../dashboard/dashboard.router";
 import type { DealsRouter } from "../deals/deals.router";
 import type { FieldsRouter } from "../fields/fields.router";
 import type { FinanceRouter } from "../finance/finance.router";
+import type { LinkedInManualRouter } from "../linkedin/linkedin-manual.router";
 import type { MailboxRouter } from "../mailbox/mailbox.router";
 import type { MeetingsRouter } from "../meetings/meetings.router";
 import type { OnboardingRouter } from "../onboarding/onboarding.router";
@@ -417,6 +419,23 @@ const appRouter = t.router({
     setPermissionOverride: publicProcedure
       .input(permissionOverrideInput)
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<FinanceRouter["setPermissionOverride"]>>)
+    }),
+  linkedinManual: t.router({
+    list: publicProcedure
+      .input(linkedinManualBatchInput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<LinkedInManualRouter["list"]>>),
+    reconcileRelationship: publicProcedure
+      .input(linkedinManualRelationshipInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<LinkedInManualRouter["reconcileRelationship"]>>),
+    prepare: publicProcedure
+      .input(linkedinManualPrepareInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<LinkedInManualRouter["prepare"]>>),
+    complete: publicProcedure
+      .input(linkedinManualCompleteInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<LinkedInManualRouter["complete"]>>),
+    cancel: publicProcedure
+      .input(linkedinManualCancelInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<LinkedInManualRouter["cancel"]>>)
     }),
   mailbox: t.router({
     listAccessible: publicProcedure

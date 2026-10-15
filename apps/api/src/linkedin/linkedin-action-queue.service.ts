@@ -139,6 +139,8 @@ export class LinkedInActionQueueService {
 	async queueRoutineAction(
 		input: LinkedInRoutineActionInput,
 	): Promise<LinkedInRoutineActionResult> {
+		if (!(await this.channel.isAutonomousExecutionEnabled()))
+			return result(input, "BLOCKED", "LINKEDIN_MANUAL_MODE_ACTIVE");
 		const policy = classifyLinkedInAction({
 			action: input.action,
 			body: "body" in input ? input.body : null,
@@ -209,6 +211,26 @@ export class LinkedInActionQueueService {
 						connectionLimit: input.connectionLimit,
 					});
 		return result(input, "ROUTINE_AUTONOMOUS", null, job.id, approvedAt);
+	}
+
+	async inspectRoutineAction(
+		input: LinkedInRoutineActionInput,
+	): Promise<Pick<LinkedInRoutineActionResult, "classification" | "reason">> {
+		const policy = classifyLinkedInAction({
+			action: input.action,
+			body: "body" in input ? input.body : null,
+			context: input.context,
+		});
+		if (policy.classification !== "ROUTINE_AUTONOMOUS")
+			return {
+				classification: policy.classification,
+				reason: policy.reason,
+			};
+		const preflight = await this.preflight(input);
+		return {
+			classification: preflight.classification,
+			reason: preflight.reason,
+		};
 	}
 
 	private async preflight(

@@ -40,6 +40,7 @@ const CLAIM_NEXT_JOB = [
 	'  SELECT "id" FROM "linkedinSendJob"',
 	'  WHERE ("status" = \'PENDING\' OR ("status" = \'FAILED\' AND "retryAt" IS NOT NULL AND "retryAt" <= NOW()) OR ("status" = \'LEASED\' AND "leasedUntil" IS NOT NULL AND "leasedUntil" <= NOW()))',
 	'    AND "approvedAt" IS NOT NULL',
+	'    AND EXISTS (SELECT 1 FROM "appSetting" s WHERE s."id" = \'app\' AND s."atlasLinkedInExecutionMode" = \'AUTONOMOUS\')',
 	'    AND "attemptCount" < "maxAttempts"',
 	"    AND \"action\" = 'MESSAGE'",
 	"    AND NOT EXISTS (",
@@ -63,6 +64,7 @@ const CLAIM_NEXT_CONNECTION_REQUEST_JOB = [
 	'  SELECT "id" FROM "linkedinConnectionRequestJob"',
 	"  WHERE \"status\" IN ('PENDING', 'FAILED', 'LEASED')",
 	'    AND "approvedAt" IS NOT NULL',
+	'    AND EXISTS (SELECT 1 FROM "appSetting" s WHERE s."id" = \'app\' AND s."atlasLinkedInExecutionMode" = \'AUTONOMOUS\')',
 	'    AND ("retryAt" IS NULL OR "retryAt" <= NOW())',
 	'    AND ("leasedUntil" IS NULL OR "leasedUntil" <= NOW())',
 	'    AND "attemptCount" < "maxAttempts"',
@@ -200,6 +202,15 @@ type ConnectionRequestAttemptOutcome = {
 
 function lockKey(contactId: string): string {
 	return `${RELATIONSHIP_LOCK_PREFIX}${contactId}`;
+}
+
+async function requireAutonomousLinkedInMode(tx: Prisma.TransactionClient) {
+	const setting = await tx.appSetting.findUnique({
+		where: { id: "app" },
+		select: { atlasLinkedInExecutionMode: true },
+	});
+	if (setting?.atlasLinkedInExecutionMode !== "AUTONOMOUS")
+		throw new ConflictException("LINKEDIN_MANUAL_MODE_ACTIVE");
 }
 
 function utcDay(value: Date): Date {
@@ -443,6 +454,20 @@ async function releaseMessageReservation(
 export class LinkedInChannelService {
 	constructor(@InjectDatabase() private readonly db: Db) {}
 
+	async isAutonomousExecutionEnabled(): Promise<boolean> {
+		return withPrincipal(
+			this.db,
+			{ userId: null, kind: "worker" },
+			async (tx) => {
+				const setting = await tx.appSetting.findUnique({
+					where: { id: "app" },
+					select: { atlasLinkedInExecutionMode: true },
+				});
+				return setting?.atlasLinkedInExecutionMode === "AUTONOMOUS";
+			},
+		);
+	}
+
 	async ensureConversation(input: ConversationInput) {
 		return withPrincipal(
 			this.db,
@@ -524,6 +549,7 @@ export class LinkedInChannelService {
 			this.db,
 			{ userId: null, kind: "worker" },
 			async (tx) => {
+				await requireAutonomousLinkedInMode(tx);
 				if (input.action === "MESSAGE" && !input.body?.trim())
 					throw new ConflictException("A LinkedIn message body is required.");
 				const conversation = await tx.linkedInConversation.findUnique({
@@ -816,6 +842,7 @@ export class LinkedInChannelService {
 			this.db,
 			{ userId: null, kind: "worker" },
 			async (tx) => {
+				await requireAutonomousLinkedInMode(tx);
 				const existingJob = await tx.linkedInConnectionRequestJob.findUnique({
 					where: { idempotencyKey: input.idempotencyKey },
 					select: {
@@ -1145,6 +1172,7 @@ export class LinkedInChannelService {
 			this.db,
 			{ userId: null, kind: "worker" },
 			async (tx) => {
+				await requireAutonomousLinkedInMode(tx);
 				const job = await tx.linkedInConnectionRequestJob.findUnique({
 					where: { id: jobId },
 					select: {
@@ -1593,6 +1621,7 @@ export class LinkedInChannelService {
 			this.db,
 			{ userId: null, kind: "worker" },
 			async (tx) => {
+				await requireAutonomousLinkedInMode(tx);
 				const job = await tx.linkedInSendJob.findUnique({
 					where: { id: jobId },
 					select: {
