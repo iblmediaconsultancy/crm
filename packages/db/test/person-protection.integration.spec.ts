@@ -65,6 +65,11 @@ if (!testDatabaseUrl) {
 					},
 				],
 			});
+			await db.appSetting.upsert({
+				where: { id: "app" },
+				create: { id: "app", atlasLinkedInExecutionMode: "AUTONOMOUS" },
+				update: { atlasLinkedInExecutionMode: "AUTONOMOUS" },
+			});
 			await db.company.create({
 				data: { id: companyId, name: `Fabrizio Test Company ${suffix}` },
 			});

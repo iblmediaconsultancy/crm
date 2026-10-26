@@ -110,7 +110,7 @@ describe("PostgreSQL exact-ID follow-up cohort claims", () => {
 				[cohortId],
 			);
 			await admin.query(
-				'INSERT INTO "outreachAuthorization" (id,"authorizedById",scope,status,"expiresAt","followUpCohortId","issuedAt","createdAt","updatedAt") VALUES ($1,$2,\'STANDARD_COLD_OUTREACH\',\'ACTIVE\',NOW()+INTERVAL \'10 minutes\',$3,NOW(),NOW(),NOW())',
+				'INSERT INTO "outreachAuthorization" (id,"authorizedById",scope,status,"expiresAt","followUpCohortId","issuedAt","createdAt","updatedAt") VALUES ($1,$2,\'STANDARD_COLD_OUTREACH\',\'ACTIVE\',(CURRENT_TIMESTAMP AT TIME ZONE \'UTC\')+INTERVAL \'10 minutes\',$3,NOW(),NOW(),NOW())',
 				[authorizationId, actorId, cohortId],
 			);
 			await admin.query(
@@ -118,9 +118,15 @@ describe("PostgreSQL exact-ID follow-up cohort claims", () => {
 				[cohortId],
 			);
 			await admin.query(
-				'UPDATE "draft" SET "authorizationId"=$2,"atlasAuthorizedAt"=NOW(),"approvedAt"=NOW(),"updatedAt"=NOW() WHERE id=$1',
-				[draftId, authorizationId],
+				'UPDATE "draft" SET "authorizationId"=$2,"recipientRouteId"=$3,"atlasAuthorizedAt"=NOW(),"approvedAt"=NOW(),"updatedAt"=NOW() WHERE id=$1',
+				[draftId, authorizationId, routeIds[0]],
 			);
+			await admin.query("SAVEPOINT authorization_expiry_guard");
+			await admin.query(
+				"UPDATE \"draft\" SET status='APPROVED',\"approvedAt\"=(CURRENT_TIMESTAMP AT TIME ZONE 'UTC'),\"updatedAt\"=(CURRENT_TIMESTAMP AT TIME ZONE 'UTC') WHERE id=$1",
+				[draftId],
+			);
+			await admin.query("ROLLBACK TO SAVEPOINT authorization_expiry_guard");
 			await admin.query("SAVEPOINT membership_immutability");
 			let membershipInsertCode: string | null = null;
 			try {
@@ -187,7 +193,7 @@ describe("PostgreSQL exact-ID follow-up cohort claims", () => {
 				);
 			await resetSelectedSteps();
 			await admin.query(
-				'UPDATE "outreachAuthorization" SET "expiresAt"=NOW()-INTERVAL \'1 minute\' WHERE id=$1',
+				"UPDATE \"outreachAuthorization\" SET \"expiresAt\"=(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')-INTERVAL '1 minute' WHERE id=$1",
 				[authorizationId],
 			);
 			expect(
@@ -201,7 +207,7 @@ describe("PostgreSQL exact-ID follow-up cohort claims", () => {
 				).rowCount,
 			).toBe(0);
 			await admin.query(
-				"UPDATE \"outreachAuthorization\" SET status='REVOKED',\"expiresAt\"=NOW()+INTERVAL '10 minutes' WHERE id=$1",
+				"UPDATE \"outreachAuthorization\" SET status='REVOKED',\"expiresAt\"=(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')+INTERVAL '10 minutes' WHERE id=$1",
 				[authorizationId],
 			);
 			expect(
@@ -235,7 +241,7 @@ describe("PostgreSQL exact-ID follow-up cohort claims", () => {
 				'UPDATE "appSetting" SET "atlasLiveOutreachEnabled"=true,"updatedAt"=NOW() WHERE id=\'app\'',
 			);
 			await admin.query(
-				"UPDATE \"outreachAuthorization\" SET status='ACTIVE',\"expiresAt\"=NOW()+INTERVAL '10 minutes' WHERE id=$1",
+				"UPDATE \"outreachAuthorization\" SET status='ACTIVE',\"expiresAt\"=(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')+INTERVAL '10 minutes' WHERE id=$1",
 				[authorizationId],
 			);
 
