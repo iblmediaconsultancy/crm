@@ -111,6 +111,9 @@ export class LinkedInManualService {
 							id: true,
 							firstName: true,
 							lastName: true,
+							companyId: true,
+							outreachState: true,
+							lifecycleState: true,
 							company: { select: { name: true } },
 						},
 					},
@@ -125,8 +128,14 @@ export class LinkedInManualService {
 					conversation: {
 						select: {
 							id: true,
+							profileUrl: true,
+							normalizedProfileUrl: true,
+							linkedinMemberIdentifier: true,
+							externalConversationKey: true,
 							status: true,
 							classification: true,
+							consent: true,
+							connectionState: true,
 							messages: {
 								where: { status: { in: ["SENT", "RECEIVED", "HISTORICAL"] } },
 								orderBy: { occurredAt: "desc" },
@@ -142,6 +151,74 @@ export class LinkedInManualService {
 					},
 				},
 			});
+			const actionsWithSafety = await Promise.all(
+				actions.map(async (action) => {
+					const [personProtected, organizationProtection, suppressions, claim] =
+						await Promise.all([
+							isPersonProtected(tx, action.contactId),
+							action.contact.companyId
+								? tx.organizationProtection.findFirst({
+										where: {
+											companyId: action.contact.companyId,
+											status: "ACTIVE",
+										},
+										select: { id: true },
+									})
+								: Promise.resolve(null),
+							tx.outreachSuppression.findMany({
+								where: {
+									OR: [
+										{ scope: "CONTACT", contactId: action.contactId },
+										...(action.routeId
+											? [
+													{
+														scope: "ROUTE" as const,
+														contactId: action.contactId,
+														routeId: action.routeId,
+														channel: LINKEDIN_CHANNEL,
+													},
+												]
+											: []),
+										...(action.contact.companyId
+											? [
+													{
+														scope: "ORGANIZATION" as const,
+														companyId: action.contact.companyId,
+													},
+												]
+											: []),
+									],
+								},
+								select: { scope: true, channel: true },
+							}),
+							tx.relationshipColdTouchClaim.findUnique({
+								where: { contactId: action.contactId },
+								select: {
+									channel: true,
+									status: true,
+									claimedAt: true,
+									consumedAt: true,
+									releasedAt: true,
+								},
+							}),
+						]);
+					return {
+						...action,
+						safety: {
+							contactOutreachState: action.contact.outreachState,
+							contactLifecycleState: action.contact.lifecycleState,
+							personProtected,
+							organizationProtected: Boolean(organizationProtection),
+							suppressionPresent: suppressions.length > 0,
+							suppressionScopes: suppressions.map(({ scope, channel }) => ({
+								scope,
+								channel,
+							})),
+							contactOnceClaim: claim,
+						},
+					};
+				}),
+			);
 			const handoffs = await tx.linkedInConversation.findMany({
 				where: {
 					status: "NEEDS_IHSAN",
@@ -175,7 +252,11 @@ export class LinkedInManualService {
 					},
 				},
 			});
-			return { mode: "MANUAL" as const, actions, handoffs };
+			return {
+				mode: "MANUAL" as const,
+				actions: actionsWithSafety,
+				handoffs,
+			};
 		});
 	}
 

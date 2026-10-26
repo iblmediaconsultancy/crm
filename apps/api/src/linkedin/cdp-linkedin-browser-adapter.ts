@@ -4,6 +4,7 @@ import {
 	type LinkedInBrowserAdapter,
 	type LinkedInBrowserIdentityEvidence,
 	type LinkedInBrowserOutcome,
+	type LinkedInBrowserTarget,
 	type LinkedInRelationshipState,
 	linkedInConversationIdentityMatches,
 	resolveLinkedInComposeConversationEvidence,
@@ -19,6 +20,7 @@ import {
 	selectLinkedInBrowserPage,
 	waitForLinkedInBrowserWindow,
 } from "./linkedin-browser-window";
+import { runLinkedInNoSendDryRun } from "./linkedin-no-send-dry-run";
 import {
 	type LinkedInMessageComposerResolution,
 	type LinkedInMessageComposerSnapshot,
@@ -1298,6 +1300,98 @@ function proofFor(
 
 export class CdpLinkedInBrowserAdapter implements LinkedInBrowserAdapter {
 	constructor(private readonly port = 9222) {}
+
+	async inspectRecipientNoSend(
+		target: LinkedInBrowserTarget,
+		body?: string | null,
+	) {
+		let page: CdpPage;
+		try {
+			page = await pageForPort(this.port);
+		} catch (error) {
+			return {
+				status: "BLOCKED" as const,
+				stage: "PROFILE_NAVIGATION" as const,
+				reason: error instanceof Error ? error.message : "CDP_UNAVAILABLE",
+			};
+		}
+		let pageClosed = false;
+		const closePage = async () => {
+			if (pageClosed) return;
+			pageClosed = true;
+			await page.close();
+		};
+		try {
+			return await runLinkedInNoSendDryRun({
+				target,
+				body,
+				browser: {
+					async navigateToRecipient(profileUrl) {
+						const before = await page.observe();
+						if (before.challenge)
+							throw new Error("LINKEDIN_SECURITY_CHALLENGE");
+						if (!before.authenticated)
+							throw new Error("LINKEDIN_LOGIN_REQUIRED");
+						await page.ensureInteractiveWindow();
+						await page.navigate(profileUrl);
+						await new Promise((resolve) => setTimeout(resolve, 500));
+					},
+					async inspectRecipient() {
+						const observation = await page.observe();
+						return {
+							authenticated: observation.authenticated,
+							challenge: observation.challenge,
+							profileUrl: observation.profileUrl,
+							profileIdentifier: observation.profileIdentifier,
+							displayName: observation.displayName,
+							relationshipState: observation.relationshipState,
+							pendingInvitationState: observation.pendingInvitationState,
+							externalConversationKey: observation.externalConversationKey,
+							conversationParticipantIdentifier:
+								observation.conversationParticipantIdentifier,
+						};
+					},
+					async navigateToComposer(url) {
+						const destination = new URL(url);
+						if (
+							destination.origin !== "https://www.linkedin.com" ||
+							(!/^\/messaging\/compose\/?$/i.test(destination.pathname) &&
+								!/^\/messaging\/thread\//i.test(destination.pathname))
+						)
+							throw new Error("INVALID_NO_SEND_COMPOSER_URL");
+						await page.navigate(destination.href);
+						await new Promise((resolve) => setTimeout(resolve, 500));
+					},
+					async inspectComposer(
+						expectedRecipientIdentifier,
+						expectedExternalConversationKey,
+					) {
+						const observation = await page.observe();
+						if (observation.challenge || !observation.authenticated)
+							return {
+								authenticated: observation.authenticated,
+								challenge: observation.challenge,
+								resolution: { status: "NONE" as const },
+							};
+						return {
+							authenticated: true,
+							challenge: null,
+							resolution: await waitForMessageComposer(
+								page,
+								expectedRecipientIdentifier,
+								expectedExternalConversationKey,
+							),
+						};
+					},
+					async close() {
+						await closePage();
+					},
+				},
+			});
+		} finally {
+			await closePage();
+		}
+	}
 
 	async inspectComposerReadiness(
 		url: string,
