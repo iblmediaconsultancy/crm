@@ -223,7 +223,7 @@ async function insertJob(input: {
 	leased?: boolean;
 }) {
 	await admin.query(
-		'INSERT INTO "systemEmailJob" (id,kind,"actorUserId","recipientEmail",subject,"textBody","idempotencyKey",status,"leaseOwner","leasedUntil","createdAt","updatedAt") VALUES ($1,$2,$3,$4,$5,\'Synthetic test message\',$6,$7::"DurableJobStatus",$8,$9,NOW(),NOW())',
+		'INSERT INTO "systemEmailJob" (id,kind,"actorUserId","recipientEmail",subject,"textBody","idempotencyKey",status,"leaseOwner","leasedUntil","createdAt","updatedAt") VALUES ($1,$2,$3,$4,$5,\'Synthetic test message\',$6,$7::"DurableJobStatus",$8,CASE WHEN $7::"DurableJobStatus"=\'LEASED\' THEN (CURRENT_TIMESTAMP AT TIME ZONE \'UTC\')-INTERVAL \'60 seconds\' ELSE NULL END,NOW(),NOW())',
 		[
 			crypto.randomUUID(),
 			input.kind,
@@ -233,7 +233,6 @@ async function insertJob(input: {
 			input.idempotencyKey,
 			input.leased ? "LEASED" : "PENDING",
 			input.leased ? "crashed-worker" : null,
-			input.leased ? new Date(Date.now() - 60_000) : null,
 		],
 	);
 }
