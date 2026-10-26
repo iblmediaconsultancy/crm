@@ -10,6 +10,7 @@ const ready = {
 	windowWidth: 1400,
 	viewportWidth: 1376,
 	pageVisible: true,
+	pageFocused: true,
 };
 
 describe("LinkedIn browser window readiness", () => {
@@ -28,6 +29,9 @@ describe("LinkedIn browser window readiness", () => {
 			false,
 		);
 		expect(linkedInBrowserWindowReady({ ...ready, pageVisible: false })).toBe(
+			false,
+		);
+		expect(linkedInBrowserWindowReady({ ...ready, pageFocused: false })).toBe(
 			false,
 		);
 	});
@@ -72,7 +76,12 @@ describe("LinkedIn browser window readiness", () => {
 		let time = 0;
 		await expect(
 			waitForLinkedInBrowserWindow(
-				async () => ({ ...ready, viewportWidth: 604, pageVisible: false }),
+				async () => ({
+					...ready,
+					viewportWidth: 604,
+					pageVisible: false,
+					pageFocused: false,
+				}),
 				async () => undefined,
 				{
 					timeoutMs: 250,
@@ -84,6 +93,68 @@ describe("LinkedIn browser window readiness", () => {
 				},
 			),
 		).rejects.toThrow("LINKEDIN_BROWSER_NOT_INTERACTIVE");
+	});
+});
+
+describe("LinkedIn CDP page selection", () => {
+	it("selects the visible LinkedIn tab instead of a hidden background tab", async () => {
+		const { selectLinkedInBrowserPage } = await import(
+			"../src/linkedin/linkedin-browser-window"
+		);
+		expect(
+			selectLinkedInBrowserPage([
+				{
+					id: "background",
+					observation: { ...ready, pageVisible: false },
+				},
+				{ id: "active", observation: ready },
+			]),
+		).toEqual({ status: "SELECTED", id: "active" });
+	});
+
+	it("selects the unique visible page for activation when it is not yet focused", async () => {
+		const { selectLinkedInBrowserPage } = await import(
+			"../src/linkedin/linkedin-browser-window"
+		);
+		expect(
+			selectLinkedInBrowserPage([
+				{
+					id: "background",
+					observation: { ...ready, pageVisible: false, pageFocused: false },
+				},
+				{ id: "foreground", observation: { ...ready, pageFocused: false } },
+			]),
+		).toEqual({ status: "SELECTED", id: "foreground" });
+	});
+
+	it("fails closed when multiple LinkedIn tabs are interactive", async () => {
+		const { selectLinkedInBrowserPage } = await import(
+			"../src/linkedin/linkedin-browser-window"
+		);
+		expect(
+			selectLinkedInBrowserPage([
+				{ id: "first", observation: ready },
+				{ id: "second", observation: ready },
+			]),
+		).toEqual({ status: "AMBIGUOUS" });
+	});
+
+	it("uses the sole hidden LinkedIn tab only for a state-checked activation attempt", async () => {
+		const { selectLinkedInBrowserPage } = await import(
+			"../src/linkedin/linkedin-browser-window"
+		);
+		expect(
+			selectLinkedInBrowserPage([
+				{
+					id: "only-tab",
+					observation: {
+						...ready,
+						windowState: "minimized",
+						pageVisible: false,
+					},
+				},
+			]),
+		).toEqual({ status: "SELECTED", id: "only-tab" });
 	});
 });
 

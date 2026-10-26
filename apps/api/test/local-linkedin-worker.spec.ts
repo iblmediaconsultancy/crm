@@ -91,6 +91,34 @@ describe("local LinkedIn persistent worker", () => {
 		expect(result.status).toBe("STOPPED");
 	});
 
+	it("waits for an interactive browser before claiming work", async () => {
+		let runs = 0;
+		let stopChecks = 0;
+		const worker = new LocalLinkedInWorker(
+			{
+				runOnce: async () => {
+					runs += 1;
+					return { status: "IDLE" } as const;
+				},
+			},
+			async () => ({
+				...ready,
+				status: "UNAVAILABLE" as const,
+				detail: "LINKEDIN_BROWSER_NOT_INTERACTIVE",
+			}),
+			"worker-hidden-browser",
+			1,
+			() => undefined,
+			() => {
+				stopChecks += 1;
+				return stopChecks > 1;
+			},
+		);
+		const result = await worker.run();
+		expect(runs).toBe(0);
+		expect(result.status).toBe("STOPPED");
+	});
+
 	it("records one completed action and does not duplicate it", async () => {
 		let runs = 0;
 		let stopChecks = 0;
