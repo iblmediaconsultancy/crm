@@ -148,6 +148,26 @@ DATABASE_URL="…" bunx prisma migrate diff \
 strings, asserted by `packages/env/test/root.spec.ts`. **Generate your own secret**;
 never reuse one from an example, a tutorial, or another environment.
 
+## One-time transactional password-reset delivery
+
+Better Auth returns a generic success response whether or not an account exists.
+For a real account, its normal reset callback queues a `PASSWORD_RESET` system
+email. The general PostgreSQL worker also claims outreach and scheduled work, so
+do not start that worker solely to deliver a reset message.
+
+After the account owner submits the normal reset request, the scoped one-shot
+command can process at most one queued reset for that exact recipient. It checks
+the verified Resend capability, sender configuration and credential file before
+leasing the job. It does not process invitations, outreach deliveries, schedules
+or mailbox work.
+
+```sh
+bun run --filter=api password-reset:deliver -- --confirm-transactional-password-reset owner@example.com
+```
+
+The command reports only a bounded delivery result; it does not print the reset
+URL, token, recipient or provider credential.
+
 ## Tests
 
 ```sh
