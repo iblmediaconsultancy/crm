@@ -96,6 +96,32 @@ describe("LinkedIn first-touch claim lineage", () => {
 		).toBe(true);
 	});
 
+	it("preserves no-note semantics for a manually confirmed request without claiming browser proof", () => {
+		expect(
+			canReuseConsumedLinkedInConnectionClaim({
+				claimChannel: "LINKEDIN",
+				claimStatus: "CONSUMED",
+				claimIdempotencyKey: "claim-key",
+				connectionRequest: null,
+				messageJobExists: false,
+				historicalConnectionRequestActivities: [
+					{
+						subject: "LinkedIn connection request sent manually",
+						body: "Connection request sent without a note.",
+						meta: {
+							channel: "LINKEDIN",
+							action: "CONNECTION_REQUEST",
+							status: "MANUAL_CONFIRMED_PENDING",
+							noNote: true,
+							idempotencyKey: "claim-key",
+							browserProof: null,
+						},
+					},
+				],
+			}),
+		).toBe(true);
+	});
+
 	it("does not reuse unrelated or substantive historical activity", () => {
 		const base = {
 			claimChannel: "LINKEDIN",

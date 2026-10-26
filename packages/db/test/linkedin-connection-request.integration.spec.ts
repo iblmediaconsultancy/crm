@@ -59,6 +59,11 @@ if (!testDatabaseUrl) {
 
 	describe("LinkedIn connection request lifecycle", () => {
 		beforeAll(async () => {
+			await db.appSetting.upsert({
+				where: { id: "app" },
+				create: { id: "app", atlasLinkedInExecutionMode: "AUTONOMOUS" },
+				update: { atlasLinkedInExecutionMode: "AUTONOMOUS" },
+			});
 			await db.user.create({
 				data: {
 					id: actorId,

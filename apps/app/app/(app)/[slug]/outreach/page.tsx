@@ -12,6 +12,7 @@ import { AtlasOperationsSummary } from "../atlas-operations-summary";
 import { OperationsDirectory } from "../operations/directory-client";
 import { AtlasAuthorizationControls } from "./atlas-authorization-controls";
 import { FollowUpExecutionCohorts } from "./follow-up-execution-cohorts";
+import { LinkedInManualWorkspace } from "./linkedin-manual-workspace";
 import { OutreachLifecycleControls } from "./outreach-lifecycle-controls";
 import { OutreachWorkbench } from "./outreach-workbench";
 import { ProspectBacklogSummary } from "./prospect-backlog-summary";
@@ -39,6 +40,7 @@ export default async function Page() {
 						Manual approval workspace
 					</summary>
 					<div className="grid gap-6 border-t p-4 md:p-6">
+						<LinkedInManualWorkspace />
 						<FollowUpExecutionCohorts />
 						<AtlasAuthorizationControls />
 						<p className="text-muted-foreground text-sm">

@@ -49,7 +49,9 @@ export function canReuseConsumedLinkedInConnectionClaim(
 					return (
 						meta?.channel === "LINKEDIN" &&
 						meta.action === "CONNECTION_REQUEST" &&
-						meta.status === "BROWSER_CONFIRMED_PENDING" &&
+						(meta.status === "BROWSER_CONFIRMED_PENDING" ||
+							(meta.status === "MANUAL_CONFIRMED_PENDING" &&
+								meta.noNote === true)) &&
 						meta.idempotencyKey === evidence.claimIdempotencyKey
 					);
 				})(),
