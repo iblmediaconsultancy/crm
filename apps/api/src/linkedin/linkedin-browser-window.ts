@@ -3,7 +3,32 @@ export type LinkedInBrowserWindowObservation = {
 	windowWidth: number;
 	viewportWidth: number;
 	pageVisible: boolean;
+	pageFocused?: boolean;
 };
+
+export type LinkedInBrowserPageCandidate = {
+	id: string;
+	observation: LinkedInBrowserWindowObservation;
+};
+
+export type LinkedInBrowserPageSelection =
+	| { status: "SELECTED"; id: string }
+	| { status: "NONE" }
+	| { status: "AMBIGUOUS" };
+
+export function selectLinkedInBrowserPage(
+	candidates: LinkedInBrowserPageCandidate[],
+): LinkedInBrowserPageSelection {
+	const selectable = candidates.filter((candidate) =>
+		linkedInBrowserPageSelectable(candidate.observation),
+	);
+	if (selectable.length === 1 && selectable[0])
+		return { status: "SELECTED", id: selectable[0].id };
+	if (selectable.length > 1) return { status: "AMBIGUOUS" };
+	if (candidates.length === 1 && candidates[0])
+		return { status: "SELECTED", id: candidates[0].id };
+	return candidates.length ? { status: "AMBIGUOUS" } : { status: "NONE" };
+}
 
 export type LinkedInBrowserWindowOptions = {
 	timeoutMs?: number;
@@ -13,6 +38,15 @@ export type LinkedInBrowserWindowOptions = {
 };
 
 export function linkedInBrowserWindowReady(
+	observation: LinkedInBrowserWindowObservation,
+): boolean {
+	return (
+		linkedInBrowserPageSelectable(observation) &&
+		observation.pageFocused !== false
+	);
+}
+
+function linkedInBrowserPageSelectable(
 	observation: LinkedInBrowserWindowObservation,
 ): boolean {
 	return (

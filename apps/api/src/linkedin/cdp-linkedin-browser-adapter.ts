@@ -4,6 +4,7 @@ import {
 	type LinkedInBrowserAdapter,
 	type LinkedInBrowserIdentityEvidence,
 	type LinkedInBrowserOutcome,
+	type LinkedInBrowserTarget,
 	type LinkedInRelationshipState,
 	linkedInConversationIdentityMatches,
 	resolveLinkedInComposeConversationEvidence,
@@ -16,8 +17,10 @@ import {
 } from "./connection-request-modal-resolver";
 import {
 	linkedInNavigationError,
+	selectLinkedInBrowserPage,
 	waitForLinkedInBrowserWindow,
 } from "./linkedin-browser-window";
+import { runLinkedInNoSendDryRun } from "./linkedin-no-send-dry-run";
 import {
 	type LinkedInMessageComposerResolution,
 	type LinkedInMessageComposerSnapshot,
@@ -751,27 +754,40 @@ class CdpPage {
 	}
 
 	async close(): Promise<void> {
-		this.connection.close();
+		this.closePageConnection();
 		this.browserConnection.close();
+	}
+
+	closePageConnection(): void {
+		this.connection.close();
+	}
+
+	async windowObservation(): Promise<{
+		windowState: string;
+		windowWidth: number;
+		viewportWidth: number;
+		pageVisible: boolean;
+		pageFocused: boolean;
+	}> {
+		const { bounds } = await this.browserWindow();
+		const viewport = await this.evaluate<{
+			viewportWidth: number;
+			pageVisible: boolean;
+			pageFocused: boolean;
+		}>(
+			`({ viewportWidth: window.innerWidth, pageVisible: document.visibilityState === "visible", pageFocused: document.hasFocus() })`,
+		);
+		return {
+			windowState: bounds.windowState ?? "unknown",
+			windowWidth: bounds.width,
+			...viewport,
+		};
 	}
 
 	async ensureInteractiveWindow(): Promise<void> {
 		await this.activateWindow();
 		await waitForLinkedInBrowserWindow(
-			async () => {
-				const { bounds } = await this.browserWindow();
-				const viewport = await this.evaluate<{
-					viewportWidth: number;
-					pageVisible: boolean;
-				}>(
-					`({ viewportWidth: window.innerWidth, pageVisible: document.visibilityState === "visible" })`,
-				);
-				return {
-					windowState: bounds.windowState ?? "unknown",
-					windowWidth: bounds.width,
-					...viewport,
-				};
-			},
+			() => this.windowObservation(),
 			() => this.activateWindow(),
 		);
 	}
@@ -1153,14 +1169,14 @@ async function pageForPort(port: number): Promise<CdpPage> {
 	const response = await fetch(`http://127.0.0.1:${port}/json/list`);
 	if (!response.ok) throw new Error("CDP_TARGET_LIST_UNAVAILABLE");
 	const targets = (await response.json()) as CdpTarget[];
-	const target = targets.find(
+	const candidates = targets.filter(
 		(item) =>
 			item.type === "page" &&
+			item.id &&
 			item.webSocketDebuggerUrl &&
 			/linkedin\.com/i.test(item.url ?? ""),
 	);
-	if (!target?.id || !target.webSocketDebuggerUrl)
-		throw new Error("LINKEDIN_PAGE_NOT_FOUND");
+	if (!candidates.length) throw new Error("LINKEDIN_PAGE_NOT_FOUND");
 	const versionResponse = await fetch(`http://127.0.0.1:${port}/json/version`);
 	if (!versionResponse.ok) throw new Error("CDP_BROWSER_TARGET_UNAVAILABLE");
 	const version = (await versionResponse.json()) as CdpBrowserVersion;
@@ -1169,13 +1185,44 @@ async function pageForPort(port: number): Promise<CdpPage> {
 	const browserConnection = await CdpConnection.connect(
 		version.webSocketDebuggerUrl,
 	);
+	const pages: Array<{
+		id: string;
+		page: CdpPage;
+		observation: Awaited<ReturnType<CdpPage["windowObservation"]>>;
+	}> = [];
 	try {
-		return await CdpPage.connect(
-			target.webSocketDebuggerUrl,
-			target.id,
-			browserConnection,
+		for (const target of candidates) {
+			if (!target.id || !target.webSocketDebuggerUrl) continue;
+			const page = await CdpPage.connect(
+				target.webSocketDebuggerUrl,
+				target.id,
+				browserConnection,
+			);
+			try {
+				pages.push({
+					id: target.id,
+					page,
+					observation: await page.windowObservation(),
+				});
+			} catch (error) {
+				page.closePageConnection();
+				throw error;
+			}
+		}
+		const selection = selectLinkedInBrowserPage(
+			pages.map(({ id, observation }) => ({ id, observation })),
 		);
+		if (selection.status === "NONE") throw new Error("LINKEDIN_PAGE_NOT_FOUND");
+		if (selection.status === "AMBIGUOUS")
+			throw new Error("LINKEDIN_PAGE_AMBIGUOUS");
+		const selected = pages.find((candidate) => candidate.id === selection.id);
+		if (!selected) throw new Error("LINKEDIN_PAGE_NOT_FOUND");
+		for (const candidate of pages) {
+			if (candidate !== selected) candidate.page.closePageConnection();
+		}
+		return selected.page;
 	} catch (error) {
+		for (const candidate of pages) candidate.page.closePageConnection();
 		browserConnection.close();
 		throw error;
 	}
@@ -1254,6 +1301,98 @@ function proofFor(
 export class CdpLinkedInBrowserAdapter implements LinkedInBrowserAdapter {
 	constructor(private readonly port = 9222) {}
 
+	async inspectRecipientNoSend(
+		target: LinkedInBrowserTarget,
+		body?: string | null,
+	) {
+		let page: CdpPage;
+		try {
+			page = await pageForPort(this.port);
+		} catch (error) {
+			return {
+				status: "BLOCKED" as const,
+				stage: "PROFILE_NAVIGATION" as const,
+				reason: error instanceof Error ? error.message : "CDP_UNAVAILABLE",
+			};
+		}
+		let pageClosed = false;
+		const closePage = async () => {
+			if (pageClosed) return;
+			pageClosed = true;
+			await page.close();
+		};
+		try {
+			return await runLinkedInNoSendDryRun({
+				target,
+				body,
+				browser: {
+					async navigateToRecipient(profileUrl) {
+						const before = await page.observe();
+						if (before.challenge)
+							throw new Error("LINKEDIN_SECURITY_CHALLENGE");
+						if (!before.authenticated)
+							throw new Error("LINKEDIN_LOGIN_REQUIRED");
+						await page.ensureInteractiveWindow();
+						await page.navigate(profileUrl);
+						await new Promise((resolve) => setTimeout(resolve, 500));
+					},
+					async inspectRecipient() {
+						const observation = await page.observe();
+						return {
+							authenticated: observation.authenticated,
+							challenge: observation.challenge,
+							profileUrl: observation.profileUrl,
+							profileIdentifier: observation.profileIdentifier,
+							displayName: observation.displayName,
+							relationshipState: observation.relationshipState,
+							pendingInvitationState: observation.pendingInvitationState,
+							externalConversationKey: observation.externalConversationKey,
+							conversationParticipantIdentifier:
+								observation.conversationParticipantIdentifier,
+						};
+					},
+					async navigateToComposer(url) {
+						const destination = new URL(url);
+						if (
+							destination.origin !== "https://www.linkedin.com" ||
+							(!/^\/messaging\/compose\/?$/i.test(destination.pathname) &&
+								!/^\/messaging\/thread\//i.test(destination.pathname))
+						)
+							throw new Error("INVALID_NO_SEND_COMPOSER_URL");
+						await page.navigate(destination.href);
+						await new Promise((resolve) => setTimeout(resolve, 500));
+					},
+					async inspectComposer(
+						expectedRecipientIdentifier,
+						expectedExternalConversationKey,
+					) {
+						const observation = await page.observe();
+						if (observation.challenge || !observation.authenticated)
+							return {
+								authenticated: observation.authenticated,
+								challenge: observation.challenge,
+								resolution: { status: "NONE" as const },
+							};
+						return {
+							authenticated: true,
+							challenge: null,
+							resolution: await waitForMessageComposer(
+								page,
+								expectedRecipientIdentifier,
+								expectedExternalConversationKey,
+							),
+						};
+					},
+					async close() {
+						await closePage();
+					},
+				},
+			});
+		} finally {
+			await closePage();
+		}
+	}
+
 	async inspectComposerReadiness(
 		url: string,
 		expectedRecipientIdentifier: string,
@@ -1298,7 +1437,35 @@ export class CdpLinkedInBrowserAdapter implements LinkedInBrowserAdapter {
 			};
 		}
 		try {
-			const observation = await page.observe();
+			let observation = await page.observe();
+			if (observation.challenge)
+				return {
+					status: "CHALLENGE",
+					detail: observation.challenge,
+					url: observation.href,
+					title: observation.title,
+				};
+			if (!observation.authenticated)
+				return {
+					status: "UNAUTHENTICATED",
+					detail: "LINKEDIN_LOGIN_REQUIRED",
+					url: observation.href,
+					title: observation.title,
+				};
+			try {
+				await page.ensureInteractiveWindow();
+			} catch (error) {
+				return {
+					status: "UNAVAILABLE",
+					detail:
+						error instanceof Error
+							? error.message
+							: "LINKEDIN_BROWSER_NOT_INTERACTIVE",
+					url: observation.href,
+					title: observation.title,
+				};
+			}
+			observation = await page.observe();
 			if (observation.challenge)
 				return {
 					status: "CHALLENGE",
@@ -1341,10 +1508,8 @@ export class CdpLinkedInBrowserAdapter implements LinkedInBrowserAdapter {
 			};
 		}
 		try {
-			if (action.action === "MESSAGE") {
-				diagnosticPhase = "browser-window-readiness";
-				await page.ensureInteractiveWindow();
-			}
+			diagnosticPhase = "browser-window-readiness";
+			await page.ensureInteractiveWindow();
 			diagnosticPhase = "profile-navigation";
 			await page.navigate(action.target.profileUrl);
 			await new Promise((resolve) => setTimeout(resolve, 500));
