@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.8.0](https://github.com/iblmediaconsultancy/crm/compare/v1.7.1...v1.8.0) (2026-10-26)
+
+
+### Features
+
+* **linkedin:** add manual operator workflow ([a804c65](https://github.com/iblmediaconsultancy/crm/commit/a804c65e17b250b5c4e762873ad474877f9aea96))
+
+
+### Fixes
+
+* **atlas:** harden authorization expiry validation ([da8e9b6](https://github.com/iblmediaconsultancy/crm/commit/da8e9b6ee77bccddb047fddae9d4ff89724fe064))
+
 ## [1.7.1](https://github.com/iblmediaconsultancy/crm/compare/v1.7.0...v1.7.1) (2026-10-05)
 
 
