@@ -336,6 +336,11 @@ describe("PostgreSQL durable system-email queue", () => {
 				select: { email: true },
 			}),
 		).toEqual({ email: resetRecipient });
+		const priorResetRateLimitRows = await admin.query(
+			'SELECT "key" FROM "rateLimit" WHERE "key" LIKE $1',
+			[`${resetRateLimitIp}|%`],
+		);
+		expect(priorResetRateLimitRows.rows).toHaveLength(0);
 		const { auth } = await import("@crm/auth");
 		const response = await auth.handler(
 			new Request("http://localhost:3001/api/auth/request-password-reset", {
