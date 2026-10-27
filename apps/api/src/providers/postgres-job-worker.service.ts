@@ -52,6 +52,31 @@ const CLAIM_SYSTEM_EMAIL = [
 	'  "subject", "textBody", "idempotencyKey", "attemptCount"',
 ].join("\n");
 
+const CLAIM_PASSWORD_RESET = [
+	'UPDATE "systemEmailJob"',
+	'SET "status" = \'LEASED\', "leaseOwner" = $1,',
+	"  \"leasedUntil\" = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') + INTERVAL '60 seconds',",
+	'  "attemptCount" = "attemptCount" + 1, "updatedAt" = NOW()',
+	'WHERE "id" = (',
+	'  SELECT candidate."id" FROM "systemEmailJob" candidate',
+	"  WHERE candidate.\"kind\" = 'PASSWORD_RESET'",
+	'    AND LOWER(BTRIM(candidate."recipientEmail")) = $2',
+	"    AND candidate.\"status\" IN ('PENDING', 'FAILED', 'LEASED')",
+	'    AND (candidate."retryAt" IS NULL OR candidate."retryAt" <= (CURRENT_TIMESTAMP AT TIME ZONE \'UTC\'))',
+	'    AND (candidate."leasedUntil" IS NULL OR candidate."leasedUntil" <= (CURRENT_TIMESTAMP AT TIME ZONE \'UTC\'))',
+	'    AND candidate."attemptCount" < candidate."maxAttempts"',
+	"    AND NOT EXISTS (",
+	'      SELECT 1 FROM "systemEmailJob" newer',
+	"      WHERE newer.\"kind\" = 'PASSWORD_RESET'",
+	'        AND LOWER(BTRIM(newer."recipientEmail")) = $2',
+	'        AND (newer."createdAt", newer."id") > (candidate."createdAt", candidate."id")',
+	"    )",
+	'  ORDER BY candidate."createdAt" DESC, candidate."id" FOR UPDATE SKIP LOCKED LIMIT 1',
+	")",
+	'RETURNING "id", "kind", "actorUserId", "recipientEmail",',
+	'  "subject", "textBody", "idempotencyKey", "attemptCount"',
+].join("\n");
+
 export const CLAIM_OUTBOUND = [
 	'UPDATE "outboundDelivery"',
 	'SET "status" = \'SENDING\', "leaseOwner" = $1,',
@@ -93,6 +118,8 @@ type ClaimedSystemEmail = {
 	attemptCount: number;
 };
 
+type SystemEmailProcessResult = "NONE" | "SUCCEEDED" | "FAILED";
+
 @Injectable()
 export class PostgresJobWorkerService {
 	private readonly logger = new Logger(PostgresJobWorkerService.name);
@@ -110,7 +137,7 @@ export class PostgresJobWorkerService {
 		let processed = 0;
 		let outboundProcessed = false;
 		for (let index = 0; index < 25; index += 1) {
-			if (await this.processSystemEmail(workerId)) {
+			if ((await this.processSystemEmail(workerId)) !== "NONE") {
 				processed += 1;
 				continue;
 			}
@@ -128,19 +155,75 @@ export class PostgresJobWorkerService {
 		return processed;
 	}
 
+	async runPasswordResetOnce(
+		workerId: string,
+		recipientEmail: string,
+	): Promise<
+		| "BLOCKED_CAPABILITY"
+		| "BLOCKED_CREDENTIAL"
+		| "BLOCKED_SENDER"
+		| "INVALID_RECIPIENT"
+		| "NO_JOB"
+		| "DELIVERED"
+		| "DELIVERY_FAILED"
+	> {
+		const recipient = normalizeRecipientEmail(recipientEmail);
+		if (!recipient) return "INVALID_RECIPIENT";
+		if (!normalizeRecipientEmail(process.env.RESEND_SYSTEM_FROM_EMAIL ?? ""))
+			return "BLOCKED_SENDER";
+		if (/[\r\n]/.test(process.env.RESEND_SYSTEM_FROM_NAME ?? ""))
+			return "BLOCKED_SENDER";
+		const capability = await withPrincipal(
+			this.db,
+			{ userId: null, kind: "worker" },
+			(tx) =>
+				tx.providerCapability.findUnique({
+					where: { key: "RESEND_OUTBOUND" },
+					select: { status: true },
+				}),
+		);
+		if (capability?.status !== "VERIFIED") return "BLOCKED_CAPABILITY";
+		let apiKey: string;
+		try {
+			apiKey = (await this.credentials.load()).apiKey;
+		} catch {
+			return "BLOCKED_CREDENTIAL";
+		}
+		if (!apiKey.trim()) return "BLOCKED_CREDENTIAL";
+		const result = await this.processSystemEmail(workerId, {
+			recipientEmail: recipient,
+			apiKey,
+		});
+		if (result === "NONE") return "NO_JOB";
+		return result === "SUCCEEDED" ? "DELIVERED" : "DELIVERY_FAILED";
+	}
+
 	private async processSentSync(workerId: string): Promise<boolean> {
 		return this.sentSync ? this.sentSync.runNext(workerId) : false;
 	}
 
-	private async processSystemEmail(workerId: string): Promise<boolean> {
+	private async processSystemEmail(
+		workerId: string,
+		scope?: { recipientEmail: string; apiKey: string },
+	): Promise<SystemEmailProcessResult> {
 		const rows = await withPrincipal(
 			this.db,
 			{ userId: null, kind: "worker" },
-			(tx) =>
-				tx.$queryRawUnsafe<ClaimedSystemEmail[]>(CLAIM_SYSTEM_EMAIL, workerId),
+			(tx) => {
+				if (scope)
+					return tx.$queryRawUnsafe<ClaimedSystemEmail[]>(
+						CLAIM_PASSWORD_RESET,
+						workerId,
+						scope.recipientEmail,
+					);
+				return tx.$queryRawUnsafe<ClaimedSystemEmail[]>(
+					CLAIM_SYSTEM_EMAIL,
+					workerId,
+				);
+			},
 		);
 		const job = rows[0];
-		if (!job) return false;
+		if (!job) return "NONE";
 		try {
 			await sendSystemEmail(
 				{
@@ -166,7 +249,8 @@ export class PostgresJobWorkerService {
 							},
 						);
 					},
-					credential: async () => (await this.credentials.load()).apiKey,
+					credential: async () =>
+						scope?.apiKey ?? (await this.credentials.load()).apiKey,
 					transport: (apiKey, message) =>
 						this.transport.send(apiKey, {
 							from: parseSender(message.from),
@@ -206,10 +290,11 @@ export class PostgresJobWorkerService {
 					},
 				}),
 			);
+			return "SUCCEEDED";
 		} catch (error) {
 			await this.failSystemEmail(job, providerErrorCode(error));
+			return "FAILED";
 		}
-		return true;
 	}
 
 	private async processOutbound(workerId: string): Promise<string | null> {
@@ -918,6 +1003,14 @@ function parseSender(value: string): { address: string; displayName: string } {
 		address: match[2] ?? value,
 		displayName: (match[1] ?? "IBL Command Center").trim(),
 	};
+}
+
+function normalizeRecipientEmail(value: string): string | null {
+	const recipient = value.trim().toLowerCase();
+	if (recipient.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) {
+		return null;
+	}
+	return recipient;
 }
 
 function dayKey(date: Date, timeZone: string): Date {
