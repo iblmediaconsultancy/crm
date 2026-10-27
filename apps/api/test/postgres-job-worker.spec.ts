@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { randomBytes } from "node:crypto";
 import { db } from "@crm/db";
 import pg from "pg";
 import type { AgentTriggerService } from "../src/agent/agent-trigger.service";
@@ -20,6 +21,9 @@ const actorUserId = `queue-user-${suffix}`;
 const approverUserId = `queue-approver-${suffix}`;
 const resetUserId = `queue-reset-user-${suffix}`;
 const resetRecipient = `reset-${suffix}@example.test`;
+const [resetRateLimitOctetA, resetRateLimitOctetB, resetRateLimitOctetC] =
+	randomBytes(3);
+const resetRateLimitIp = `10.${resetRateLimitOctetA}.${resetRateLimitOctetB}.${resetRateLimitOctetC}`;
 const keyPrefix = `queue-recovery:${suffix}:`;
 const resetDraftId = `queue-reset-draft-${suffix}`;
 const resetDeliveryId = `queue-reset-delivery-${suffix}`;
@@ -92,7 +96,9 @@ const agent = {
 } as unknown as AgentTriggerService;
 
 async function clean() {
-	await admin.query('DELETE FROM "rateLimit"');
+	await admin.query('DELETE FROM "rateLimit" WHERE "key" LIKE $1', [
+		`${resetRateLimitIp}|%`,
+	]);
 	await admin.query('DELETE FROM "securityAuditEvent" WHERE "actorUserId"=$1', [
 		actorUserId,
 	]);
@@ -333,6 +339,7 @@ describe("PostgreSQL durable system-email queue", () => {
 				headers: {
 					"content-type": "application/json",
 					origin: "http://localhost:3000",
+					"x-forwarded-for": resetRateLimitIp,
 				},
 				body: JSON.stringify({ email: resetRecipient }),
 			}),
@@ -340,6 +347,11 @@ describe("PostgreSQL durable system-email queue", () => {
 		expect(response.status).toBe(200);
 		const responseBody = (await response.json()) as { status?: unknown };
 		expect(responseBody.status).toBe(true);
+		const resetRateLimitRows = await admin.query(
+			'SELECT COUNT(*)::int AS count FROM "rateLimit" WHERE "key" LIKE $1',
+			[`${resetRateLimitIp}|%`],
+		);
+		expect(resetRateLimitRows.rows[0]?.count).toBeGreaterThan(0);
 		let queued = await resetJobOf(resetRecipient);
 		for (let attempt = 0; !queued && attempt < 20; attempt += 1) {
 			await new Promise((resolve) => setTimeout(resolve, 25));
