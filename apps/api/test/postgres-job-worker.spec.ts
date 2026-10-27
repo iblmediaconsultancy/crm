@@ -78,6 +78,7 @@ const credentials: ResendCredentialSource = {
 };
 const sent = new Map<string, number>();
 const sentMessages = new Map<string, ResendMessage>();
+let resetRateLimitKeys: string[] = [];
 const transport: ResendTransport = {
 	send: async (_apiKey, message) => {
 		sent.set(
@@ -96,9 +97,12 @@ const agent = {
 } as unknown as AgentTriggerService;
 
 async function clean() {
-	await admin.query('DELETE FROM "rateLimit" WHERE "key" LIKE $1', [
-		`${resetRateLimitIp}|%`,
-	]);
+	if (resetRateLimitKeys.length > 0) {
+		await admin.query('DELETE FROM "rateLimit" WHERE "key" = ANY($1::text[])', [
+			resetRateLimitKeys,
+		]);
+		resetRateLimitKeys = [];
+	}
 	await admin.query('DELETE FROM "securityAuditEvent" WHERE "actorUserId"=$1', [
 		actorUserId,
 	]);
@@ -348,10 +352,13 @@ describe("PostgreSQL durable system-email queue", () => {
 		const responseBody = (await response.json()) as { status?: unknown };
 		expect(responseBody.status).toBe(true);
 		const resetRateLimitRows = await admin.query(
-			'SELECT COUNT(*)::int AS count FROM "rateLimit" WHERE "key" LIKE $1',
+			'SELECT "key" FROM "rateLimit" WHERE "key" LIKE $1',
 			[`${resetRateLimitIp}|%`],
 		);
-		expect(resetRateLimitRows.rows[0]?.count).toBeGreaterThan(0);
+		expect(resetRateLimitRows.rows.length).toBeGreaterThan(0);
+		resetRateLimitKeys = resetRateLimitRows.rows.map(
+			(row: { key: string }) => row.key,
+		);
 		let queued = await resetJobOf(resetRecipient);
 		for (let attempt = 0; !queued && attempt < 20; attempt += 1) {
 			await new Promise((resolve) => setTimeout(resolve, 25));
