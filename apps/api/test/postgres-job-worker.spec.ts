@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { randomBytes } from "node:crypto";
 import { db } from "@crm/db";
 import pg from "pg";
 import type { AgentTriggerService } from "../src/agent/agent-trigger.service";
@@ -18,7 +19,14 @@ import type {
 const suffix = process.env.TEST_RUN_ID ?? "postgres-queue";
 const actorUserId = `queue-user-${suffix}`;
 const approverUserId = `queue-approver-${suffix}`;
+const resetUserId = `queue-reset-user-${suffix}`;
+const resetRecipient = `reset-${suffix}@example.test`;
+const [resetRateLimitOctetA, resetRateLimitOctetB, resetRateLimitOctetC] =
+	randomBytes(3);
+const resetRateLimitIp = `10.${resetRateLimitOctetA}.${resetRateLimitOctetB}.${resetRateLimitOctetC}`;
 const keyPrefix = `queue-recovery:${suffix}:`;
+const resetDraftId = `queue-reset-draft-${suffix}`;
+const resetDeliveryId = `queue-reset-delivery-${suffix}`;
 const senderMailboxId = `queue-sender-mailbox-${suffix}`;
 const senderContactId = `queue-sender-contact-${suffix}`;
 const senderRouteId = `queue-sender-route-${suffix}`;
@@ -70,6 +78,7 @@ const credentials: ResendCredentialSource = {
 };
 const sent = new Map<string, number>();
 const sentMessages = new Map<string, ResendMessage>();
+let resetRateLimitKeys: string[] = [];
 const transport: ResendTransport = {
 	send: async (_apiKey, message) => {
 		sent.set(
@@ -88,13 +97,33 @@ const agent = {
 } as unknown as AgentTriggerService;
 
 async function clean() {
+	if (resetRateLimitKeys.length > 0) {
+		await admin.query('DELETE FROM "rateLimit" WHERE "key" = ANY($1::text[])', [
+			resetRateLimitKeys,
+		]);
+		resetRateLimitKeys = [];
+	}
 	await admin.query('DELETE FROM "securityAuditEvent" WHERE "actorUserId"=$1', [
 		actorUserId,
+	]);
+	await admin.query('DELETE FROM "securityAuditEvent" WHERE "actorUserId"=$1', [
+		resetUserId,
 	]);
 	await admin.query(
 		'DELETE FROM "systemEmailJob" WHERE "idempotencyKey" LIKE $1',
 		[`${keyPrefix}%`],
 	);
+	await admin.query('DELETE FROM "systemEmailJob" WHERE "recipientEmail"=$1', [
+		resetRecipient,
+	]);
+	await admin.query(
+		'DELETE FROM "verification" WHERE "value"=$1 AND "identifier" LIKE \'reset-password:%\'',
+		[resetUserId],
+	);
+	await admin.query('DELETE FROM "outboundDelivery" WHERE id=$1', [
+		resetDeliveryId,
+	]);
+	await admin.query('DELETE FROM "draft" WHERE id=$1', [resetDraftId]);
 	await admin.query('DELETE FROM "outboundDelivery" WHERE id=$1', [
 		senderDeliveryId,
 	]);
@@ -168,6 +197,7 @@ async function clean() {
 	await admin.query('DELETE FROM "contact" WHERE id=$1', [senderContactId]);
 	await admin.query('DELETE FROM "mailbox" WHERE id=$1', [senderMailboxId]);
 	await admin.query('DELETE FROM "user" WHERE id=$1', [approverUserId]);
+	await admin.query('DELETE FROM "user" WHERE id=$1', [resetUserId]);
 	await admin.query('DELETE FROM "user" WHERE id=$1', [actorUserId]);
 }
 
@@ -179,6 +209,10 @@ beforeAll(async () => {
 	await admin.query(
 		'INSERT INTO "user" (id,name,email,"emailVerified",kind,"createdAt","updatedAt") VALUES ($1,\'Queue Test\',$2,true,\'SYSTEM_OPERATOR\',NOW(),NOW())',
 		[actorUserId, `${actorUserId}@example.test`],
+	);
+	await admin.query(
+		'INSERT INTO "user" (id,name,email,"emailVerified",kind,"createdAt","updatedAt") VALUES ($1,\'Synthetic Reset User\',$2,true,\'HUMAN\',NOW(),NOW())',
+		[resetUserId, resetRecipient],
 	);
 	await admin.query(
 		'INSERT INTO "user" (id,name,email,"emailVerified","createdAt","updatedAt") VALUES ($1,\'Queue Approver\',$2,true,NOW(),NOW())',
@@ -245,6 +279,22 @@ async function statusOf(idempotencyKey: string) {
 	return result.rows[0] as { status: string; leaseOwner: string | null };
 }
 
+async function resetJobOf(recipient: string) {
+	const result = await admin.query(
+		'SELECT "idempotencyKey",status,"attemptCount",subject,"createdAt" FROM "systemEmailJob" WHERE kind=\'PASSWORD_RESET\' AND "recipientEmail"=$1 AND subject=\'Reset your IBL Command Center password\' ORDER BY "createdAt" DESC,id DESC LIMIT 1',
+		[recipient],
+	);
+	return result.rows[0] as
+		| {
+				idempotencyKey: string;
+				status: string;
+				attemptCount: number;
+				subject: string;
+				createdAt: Date;
+		  }
+		| undefined;
+}
+
 describe("PostgreSQL durable system-email queue", () => {
 	test("reclaims an expired lease after a worker crash", async () => {
 		const idempotencyKey = `${keyPrefix}expired`;
@@ -276,6 +326,220 @@ describe("PostgreSQL durable system-email queue", () => {
 			const idempotencyKey = `${keyPrefix}${name}`;
 			expect((await statusOf(idempotencyKey)).status).toBe("SUCCEEDED");
 			expect(sent.get(idempotencyKey)).toBe(1);
+		}
+	});
+
+	test("delivers one queued reset only through the transactional-only path", async () => {
+		expect(
+			await db.user.findUnique({
+				where: { id: resetUserId },
+				select: { email: true },
+			}),
+		).toEqual({ email: resetRecipient });
+		const priorResetRateLimitRows = await admin.query(
+			'SELECT "key" FROM "rateLimit" WHERE "key" LIKE $1',
+			[`${resetRateLimitIp}|%`],
+		);
+		expect(priorResetRateLimitRows.rows).toHaveLength(0);
+		const { auth } = await import("@crm/auth");
+		const response = await auth.handler(
+			new Request("http://localhost:3001/api/auth/request-password-reset", {
+				method: "POST",
+				headers: {
+					"content-type": "application/json",
+					origin: "http://localhost:3000",
+					"x-forwarded-for": resetRateLimitIp,
+				},
+				body: JSON.stringify({ email: resetRecipient }),
+			}),
+		);
+		expect(response.status).toBe(200);
+		const responseBody = (await response.json()) as { status?: unknown };
+		expect(responseBody.status).toBe(true);
+		const resetRateLimitRows = await admin.query(
+			'SELECT "key" FROM "rateLimit" WHERE "key" LIKE $1',
+			[`${resetRateLimitIp}|%`],
+		);
+		expect(resetRateLimitRows.rows.length).toBeGreaterThan(0);
+		resetRateLimitKeys = resetRateLimitRows.rows.map(
+			(row: { key: string }) => row.key,
+		);
+		let queued = await resetJobOf(resetRecipient);
+		for (let attempt = 0; !queued && attempt < 20; attempt += 1) {
+			await new Promise((resolve) => setTimeout(resolve, 25));
+			queued = await resetJobOf(resetRecipient);
+		}
+		expect(queued).toBeDefined();
+		const verificationCount = await admin.query(
+			'SELECT COUNT(*)::int AS count FROM "verification" WHERE "value"=$1 AND "identifier" LIKE \'reset-password:%\'',
+			[resetUserId],
+		);
+		expect(verificationCount.rows[0]?.count).toBe(1);
+		const olderResetKey = `${keyPrefix}older-reset`;
+		await insertJob({
+			idempotencyKey: olderResetKey,
+			kind: "PASSWORD_RESET",
+			recipient: resetRecipient,
+		});
+		await admin.query(
+			'UPDATE "systemEmailJob" SET "createdAt"=$2 WHERE "idempotencyKey"=$1',
+			[
+				olderResetKey,
+				new Date((queued?.createdAt.getTime() ?? Date.now()) - 60_000),
+			],
+		);
+		expect(queued?.status).toBe("PENDING");
+		expect(queued?.attemptCount).toBe(0);
+		expect(queued?.subject).toBe("Reset your IBL Command Center password");
+		const invitationKey = `${keyPrefix}unrelated-invitation`;
+		const unrelatedResetKey = `${keyPrefix}unrelated-reset`;
+		await insertJob({
+			idempotencyKey: invitationKey,
+			kind: "INVITATION",
+			recipient: `invitation-${suffix}@example.test`,
+		});
+		await insertJob({
+			idempotencyKey: unrelatedResetKey,
+			kind: "PASSWORD_RESET",
+			recipient: `other-reset-${suffix}@example.test`,
+		});
+		await db.draft.create({
+			data: {
+				id: resetDraftId,
+				ownerUserId: actorUserId,
+				body: "Synthetic outreach fixture",
+				idempotencyKey: `${keyPrefix}reset-isolation-draft`,
+			},
+		});
+		await db.outboundDelivery.create({
+			data: {
+				id: resetDeliveryId,
+				draftId: resetDraftId,
+				idempotencyKey: `${keyPrefix}reset-isolation-delivery`,
+			},
+		});
+		try {
+			const worker = new PostgresJobWorkerService(db, credentials, transport);
+			const concurrentResults = await Promise.all([
+				worker.runPasswordResetOnce(
+					"password-reset-once-a",
+					resetRecipient.toUpperCase(),
+				),
+				worker.runPasswordResetOnce("password-reset-once-b", resetRecipient),
+			]);
+			expect(concurrentResults.sort()).toEqual(["DELIVERED", "NO_JOB"]);
+			const completed = await resetJobOf(resetRecipient);
+			expect(completed?.status).toBe("SUCCEEDED");
+			expect(completed?.attemptCount).toBe(1);
+			const resetSendCount = sent.get(completed?.idempotencyKey ?? "") ?? 0;
+			expect(resetSendCount).toBe(1);
+			const sentReset = sentMessages.get(completed?.idempotencyKey ?? "");
+			expect(sentReset?.to).toBe(resetRecipient);
+			expect(sentReset?.subject).toBe(queued?.subject);
+			expect(typeof sentReset?.text).toBe("string");
+			expect(
+				sentReset?.text.includes(
+					"http://localhost:3000/api/auth/reset-password/",
+				),
+			).toBe(true);
+			expect((await statusOf(invitationKey)).status).toBe("PENDING");
+			expect((await statusOf(unrelatedResetKey)).status).toBe("PENDING");
+			expect((await statusOf(olderResetKey)).status).toBe("PENDING");
+			expect(
+				await db.outboundDelivery.findUnique({
+					where: { id: resetDeliveryId },
+					select: { status: true, attemptCount: true, leaseOwner: true },
+				}),
+			).toEqual({ status: "PENDING", attemptCount: 0, leaseOwner: null });
+			expect(
+				await worker.runPasswordResetOnce(
+					"password-reset-repeat",
+					resetRecipient,
+				),
+			).toBe("NO_JOB");
+			expect(sent.get(completed?.idempotencyKey ?? "")).toBe(1);
+			sent.delete(completed?.idempotencyKey ?? "");
+			sentMessages.delete(completed?.idempotencyKey ?? "");
+		} finally {
+			await admin.query('DELETE FROM "outboundDelivery" WHERE id=$1', [
+				resetDeliveryId,
+			]);
+			await admin.query('DELETE FROM "draft" WHERE id=$1', [resetDraftId]);
+			await admin.query(
+				'DELETE FROM "systemEmailJob" WHERE "idempotencyKey"=$1',
+				[invitationKey],
+			);
+			await admin.query(
+				'DELETE FROM "systemEmailJob" WHERE "idempotencyKey"=$1',
+				[unrelatedResetKey],
+			);
+			await admin.query(
+				'DELETE FROM "systemEmailJob" WHERE "idempotencyKey"=$1',
+				[olderResetKey],
+			);
+		}
+	});
+
+	test("does not claim reset jobs before provider and credential preflight", async () => {
+		const idempotencyKey = `${keyPrefix}preflight-reset`;
+		await insertJob({
+			idempotencyKey,
+			kind: "PASSWORD_RESET",
+			recipient: resetRecipient,
+		});
+		await admin.query(
+			"UPDATE \"providerCapability\" SET status='UNVERIFIED' WHERE key='RESEND_OUTBOUND'",
+		);
+		const worker = new PostgresJobWorkerService(db, credentials, transport);
+		const loadsBefore = credentialLoads.count;
+		try {
+			expect(
+				await worker.runPasswordResetOnce("invalid-recipient", "not-an-email"),
+			).toBe("INVALID_RECIPIENT");
+			const previousSender = process.env.RESEND_SYSTEM_FROM_EMAIL;
+			delete process.env.RESEND_SYSTEM_FROM_EMAIL;
+			try {
+				expect(
+					await worker.runPasswordResetOnce("blocked-sender", resetRecipient),
+				).toBe("BLOCKED_SENDER");
+			} finally {
+				if (previousSender === undefined)
+					delete process.env.RESEND_SYSTEM_FROM_EMAIL;
+				else process.env.RESEND_SYSTEM_FROM_EMAIL = previousSender;
+			}
+			expect(
+				await worker.runPasswordResetOnce("blocked-capability", resetRecipient),
+			).toBe("BLOCKED_CAPABILITY");
+			expect(credentialLoads.count).toBe(loadsBefore);
+			expect((await statusOf(idempotencyKey)).status).toBe("PENDING");
+			const noCredentialWorker = new PostgresJobWorkerService(
+				db,
+				{
+					load: async () => {
+						throw new Error("not available");
+					},
+				},
+				transport,
+			);
+			await admin.query(
+				"UPDATE \"providerCapability\" SET status='VERIFIED' WHERE key='RESEND_OUTBOUND'",
+			);
+			expect(
+				await noCredentialWorker.runPasswordResetOnce(
+					"blocked-credential",
+					resetRecipient,
+				),
+			).toBe("BLOCKED_CREDENTIAL");
+			expect((await statusOf(idempotencyKey)).status).toBe("PENDING");
+			expect((await statusOf(idempotencyKey)).leaseOwner).toBeNull();
+		} finally {
+			await admin.query(
+				"UPDATE \"providerCapability\" SET status='VERIFIED' WHERE key='RESEND_OUTBOUND'",
+			);
+			await admin.query(
+				'DELETE FROM "systemEmailJob" WHERE "idempotencyKey"=$1',
+				[idempotencyKey],
+			);
 		}
 	});
 

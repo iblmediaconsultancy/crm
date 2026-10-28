@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.1](https://github.com/iblmediaconsultancy/crm/compare/v1.8.0...v1.8.1) (2026-10-28)
+
+
+### Fixes
+
+* **auth:** isolate password reset delivery ([6a235fe](https://github.com/iblmediaconsultancy/crm/commit/6a235fe93df5933d432d29d5aec7b5ca990d094c))
+
 ## [1.8.0](https://github.com/iblmediaconsultancy/crm/compare/v1.7.1...v1.8.0) (2026-10-26)
 
 

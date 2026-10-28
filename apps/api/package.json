@@ -17,6 +17,7 @@
 		"start": "bun src/main.ts",
 		"start:worker": "bun src/worker.ts",
 		"start:inbound-worker": "bun src/inbound-worker.ts",
+		"password-reset:deliver": "bun src/password-reset-delivery.ts",
 		"linkedin:executor": "bun src/linkedin/local-linkedin-executor-cli.ts",
 		"start:prod": "bun dist/main.js",
 		"test": "CRM_TELEMETRY_DISABLED=1 bun test --preload ./test/setup.ts",
