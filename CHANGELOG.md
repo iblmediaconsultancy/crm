@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.8.1](https://github.com/iblmediaconsultancy/crm/compare/v1.8.0...v1.8.1) (2026-10-27)
+## [1.8.1](https://github.com/iblmediaconsultancy/crm/compare/v1.8.0...v1.8.1) (2026-10-28)
 
 
 ### Fixes
